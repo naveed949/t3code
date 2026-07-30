@@ -2280,20 +2280,7 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       });
 
-      yield* Effect.promise(() =>
-        waitFor(async () => {
-          const thread = (await harness.readModel()).threads.find(
-            (entry) => entry.id === ThreadId.make("thread-1"),
-          );
-          return (
-            thread?.activities.some(
-              (activity) =>
-                activity.kind === "user-input.resolved" &&
-                activity.summary === "Wayfinder decision recovered",
-            ) ?? false
-          );
-        }),
-      );
+      yield* Effect.promise(() => harness.drain());
 
       const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
         (entry) => entry.id === ThreadId.make("thread-1"),
