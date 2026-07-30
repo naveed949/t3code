@@ -7,6 +7,7 @@ import {
   type ProjectId,
   type ServerProvider,
   type ThreadId,
+  type WayfinderSynchronizationState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -22,6 +23,17 @@ function sameWayfinderMapContent(
   return JSON.stringify(leftContent) === JSON.stringify(rightContent);
 }
 
+function matchesCanonicalReference(invocation: SkillInvocation, reference: string): boolean {
+  const canonical = invocation.wayfinderMap?.canonicalReference;
+  if (!canonical) return false;
+  const trimmed = reference.trim();
+  return (
+    trimmed === String(canonical.number) ||
+    trimmed === `#${canonical.number}` ||
+    trimmed.replace(/\/$/u, "") === canonical.url.replace(/\/$/u, "")
+  );
+}
+
 interface GateDependencies {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly getThread: (
@@ -34,6 +46,11 @@ interface GateDependencies {
     ReadonlyArray<SkillInvocation>,
     OrchestrationDispatchCommandError
   >;
+  readonly markWayfinderUnavailable: (input: {
+    readonly threadId: ThreadId;
+    readonly skillRunId: SkillInvocation["skillRunId"];
+    readonly synchronization: WayfinderSynchronizationState;
+  }) => Effect.Effect<void, OrchestrationDispatchCommandError>;
   readonly check: NativeWayfinderPreflightService["Service"]["check"];
 }
 
@@ -53,6 +70,7 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
   ) {
     return command;
   }
+  const skillInvocation = command.skillInvocation;
 
   const bootstrapProjectId = command.bootstrap?.createThread?.projectId;
   const thread = bootstrapProjectId
@@ -84,13 +102,51 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
     command.bootstrap?.createThread?.worktreePath ??
     Option.getOrUndefined(thread)?.worktreePath ??
     projectShell.workspaceRoot;
+  const continuationReference =
+    skillInvocation.action?.id === "continue-map" ? skillInvocation.action.reference : null;
+  const continuationRuns =
+    continuationReference !== null
+      ? (yield* dependencies.getSkillRuns())
+          .filter(
+            (run) =>
+              run.projectId === projectId &&
+              run.skill.name === "wayfinder" &&
+              matchesCanonicalReference(run, continuationReference),
+          )
+          .sort(
+            (left, right) =>
+              right.createdAt.localeCompare(left.createdAt) ||
+              right.skillRunId.localeCompare(left.skillRunId),
+          )
+      : [];
   const result = yield* dependencies.check({
     workspaceRoot,
     provider: provider.driver,
-    skillDigest: command.skillInvocation.skill.contentDigest,
-    ...(command.skillInvocation.action ? { action: command.skillInvocation.action } : {}),
+    skillDigest: skillInvocation.skill.contentDigest,
+    ...(skillInvocation.action ? { action: skillInvocation.action } : {}),
   });
   if (result.kind === "blocked") {
+    const cachedRun = continuationRuns[0];
+    const cachedMap = continuationRuns.find((run) => run.wayfinderMap)?.wayfinderMap;
+    if (cachedRun && cachedMap) {
+      const lastSuccessfulAt =
+        cachedRun.wayfinderSynchronization?.lastSuccessfulAt ??
+        cachedRun.wayfinderSynchronizedAt ??
+        cachedMap.lastSynchronizedAt;
+      yield* dependencies.markWayfinderUnavailable({
+        threadId: cachedRun.threadId,
+        skillRunId: cachedRun.skillRunId,
+        synchronization: {
+          status: "unavailable",
+          reason: "resume",
+          lastAttemptedAt: command.createdAt,
+          lastSuccessfulAt,
+          canMutate: false,
+          message:
+            "The cached Wayfinder map is read-only because resume could not reconcile GitHub.",
+        },
+      });
+    }
     return yield* new OrchestrationDispatchCommandError({
       message: `Native Wayfinder preflight is blocked: ${result.blockers
         .map((blocker) => `${blocker.check}: ${blocker.remediation}`)
@@ -99,11 +155,9 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
     });
   }
   if (command.type === "thread.turn.start" && command.skillInvocation && result.wayfinderMap) {
-    const matchingRuns = (yield* dependencies.getSkillRuns())
+    const matchingRuns = continuationRuns
       .filter(
         (run) =>
-          run.projectId === projectId &&
-          run.skill.name === "wayfinder" &&
           run.wayfinderMap?.canonicalReference.url === result.wayfinderMap?.canonicalReference.url,
       )
       .sort(

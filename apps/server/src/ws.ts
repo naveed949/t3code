@@ -1094,6 +1094,17 @@ const makeWsRpcLayer = (
                         toDispatchCommandError(cause, "Failed to load Wayfinder Workstreams"),
                       ),
                     ),
+                  markWayfinderUnavailable: ({ threadId, skillRunId, synchronization }) =>
+                    dispatchNormalizedCommand({
+                      type: "thread.wayfinder.reconciliation.update",
+                      commandId: CommandId.make(
+                        `wayfinder-resume-unavailable:${normalizedCommand.commandId}`,
+                      ),
+                      threadId,
+                      skillRunId,
+                      synchronization,
+                      createdAt: synchronization.lastAttemptedAt,
+                    }).pipe(Effect.asVoid),
                   check: nativeWayfinderPreflight.check,
                 },
                 dispatch: dispatchNormalizedCommand,

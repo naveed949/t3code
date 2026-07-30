@@ -341,10 +341,10 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     if (transition.reason) reconcileRef.current(transition.reason);
   }, []);
   useEffect(() => {
-    advanceLifecycle({ type: "visibility", visible: true });
-    if (document.visibilityState !== "visible") {
-      advanceLifecycle({ type: "visibility", visible: false });
-    }
+    advanceLifecycle({
+      type: "visibility",
+      visible: document.visibilityState === "visible",
+    });
     const onVisibilityChange = () => {
       advanceLifecycle({
         type: "visibility",

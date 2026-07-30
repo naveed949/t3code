@@ -219,6 +219,7 @@ function WayfinderWorkbenchContent(props: {
 }) {
   const [showGraph, setShowGraph] = useState(false);
   const mutateWayfinder = useAtomCommand(threadEnvironment.mutateWayfinder, "update Wayfinder");
+  const [appState, setAppState] = useState(AppState.currentState);
   const reconcileWayfinderMapCommand = useAtomCommand(
     threadEnvironment.reconcileWayfinderMap,
     "reconcile Wayfinder map",
@@ -304,8 +305,12 @@ function WayfinderWorkbenchContent(props: {
   useFocusEffect(
     useCallback(() => {
       if (!invocationSkillRunId) return;
-      advanceLifecycle({ type: "visibility", visible: true });
+      advanceLifecycle({
+        type: "visibility",
+        visible: AppState.currentState === "active",
+      });
       const subscription = AppState.addEventListener("change", (state) => {
+        setAppState(state);
         advanceLifecycle({ type: "visibility", visible: state === "active" });
       });
       return () => {
@@ -318,13 +323,13 @@ function WayfinderWorkbenchContent(props: {
     advanceLifecycle({ type: "connection", connected });
   }, [advanceLifecycle, connected]);
   useEffect(() => {
-    if (!connected || !invocationSkillRunId || !isFocused) return;
+    if (!connected || !invocationSkillRunId || !isFocused || appState !== "active") return;
     const interval = setInterval(
       () => advanceLifecycle({ type: "poll" }),
       WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
     );
     return () => clearInterval(interval);
-  }, [advanceLifecycle, connected, invocationSkillRunId, isFocused]);
+  }, [advanceLifecycle, appState, connected, invocationSkillRunId, isFocused]);
   if (!map) {
     return (
       <View className="flex-1 items-center justify-center bg-background p-6">

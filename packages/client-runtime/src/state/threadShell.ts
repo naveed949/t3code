@@ -65,7 +65,9 @@ export function createEnvironmentThreadShellAtoms(input: {
     );
     return Atom.make((get) => {
       const runs = get(environmentSkillRunsAtom(projectRef.environmentId));
-      const threads = get(environmentThreadsAtom(projectRef.environmentId));
+      const threads = get(environmentThreadsAtom(projectRef.environmentId)).filter(
+        (thread) => thread.projectId === projectRef.projectId,
+      );
       if (arrayElementsEqual(previousRuns, runs) && arrayElementsEqual(previousThreads, threads)) {
         return previousWorkstreams;
       }
