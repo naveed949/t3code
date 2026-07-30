@@ -10,7 +10,6 @@ import { ProviderCommandReactor } from "../Services/ProviderCommandReactor.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ThreadDeletionReactor } from "../Services/ThreadDeletionReactor.ts";
 import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
-import { WayfinderPublicationReactor } from "../Services/WayfinderPublicationReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
@@ -66,15 +65,6 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
-          Layer.succeed(WayfinderPublicationReactor, {
-            start: () => {
-              started.push("wayfinder-publication-reactor");
-              return Effect.void;
-            },
-            drain: Effect.void,
-          }),
-        ),
-        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -95,7 +85,6 @@ describe("OrchestrationReactor", () => {
       "provider-command-reactor",
       "checkpoint-reactor",
       "thread-deletion-reactor",
-      "wayfinder-publication-reactor",
       "agent-awareness-relay",
     ]);
 

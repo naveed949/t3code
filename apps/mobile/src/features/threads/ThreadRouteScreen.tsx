@@ -6,24 +6,8 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useAtomValue } from "@effect/atom-react";
-import {
-  findThreadWayfinderWorkstream,
-  type ProjectSkillWorkstream,
-} from "@t3tools/client-runtime/state/skill-runs";
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
-import { Atom } from "effect/unstable/reactivity";
-import {
-  EnvironmentId,
-  ThreadId,
-  type ProjectScript,
-  type SkillInvocation,
-} from "@t3tools/contracts";
-import {
-  deriveWayfinderDraft,
-  findLatestWayfinderDraftInvocation,
-} from "@t3tools/client-runtime/state/wayfinder-draft";
+import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -51,7 +35,6 @@ import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
-import { shouldOpenSynchronizedWayfinderMap } from "./wayfinderPublicationNavigation";
 import {
   buildTerminalMenuSessions,
   nextOpenTerminalId,
@@ -75,7 +58,7 @@ import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-s
 import { useSelectedThreadRequests } from "../../state/use-selected-thread-requests";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
-import { environmentThreadShells, threadEnvironment } from "../../state/threads";
+import { threadEnvironment } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
 import {
   useAdaptiveWorkspaceLayout,
@@ -95,9 +78,6 @@ interface ThreadInspectorSelection {
 }
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
-const EMPTY_PROJECT_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
-const EMPTY_SKILL_RUNS: ReadonlyArray<SkillInvocation> = [];
-const EMPTY_SKILL_RUNS_ATOM = Atom.make(EMPTY_SKILL_RUNS);
 
 function InspectorPaneRoleActivation() {
   useAdaptiveWorkspacePaneRole("inspector");
@@ -216,34 +196,11 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
-  const publishWayfinderDraftCommand = useAtomCommand(
-    threadEnvironment.publishWayfinderDraft,
-    "publish Wayfinder draft",
-  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
-  const environmentSkillRuns = useAtomValue(
-    environmentId
-      ? environmentThreadShells.environmentSkillRunsAtom(environmentId)
-      : EMPTY_SKILL_RUNS_ATOM,
-  );
   const threadId = firstRouteParam(params.threadId);
-  const projectWorkstreams = useAtomValue(
-    selectedThread
-      ? environmentThreadShells.projectWorkstreamsAtom(
-          scopeProjectRef(selectedThread.environmentId, selectedThread.projectId),
-        )
-      : EMPTY_PROJECT_WORKSTREAMS_ATOM,
-  );
-  const wayfinderWorkstream = selectedThread
-    ? findThreadWayfinderWorkstream(selectedThread.id, projectWorkstreams)
-    : null;
-  const wayfinderMap =
-    wayfinderWorkstream?.wayfinderMap ??
-    selectedThreadDetail?.latestTurn?.skillInvocation?.wayfinderMap ??
-    null;
   const routeThreadIdentity =
     environmentIdRaw !== null && threadId !== null ? `${environmentIdRaw}:${threadId}` : null;
   const [inspectorSelection, setInspectorSelection] = useState<ThreadInspectorSelection | null>(
@@ -662,36 +619,6 @@ function ThreadRouteContent(
   };
   const threadCenterHeaderItems = useThreadGitCenterHeaderItems(threadGitControlProps);
   const compactRightHeaderItems = useThreadGitRightHeaderItems(threadGitControlProps);
-  const openWayfinderWorkbench = useCallback(() => {
-    if (!selectedThread || !wayfinderMap) return;
-    navigation.navigate("WayfinderWorkbench", {
-      environmentId: String(selectedThread.environmentId),
-      threadId: String(selectedThread.id),
-    });
-  }, [navigation, selectedThread, wayfinderMap]);
-  const wayfinderHeaderItems = useMemo<NativeHeaderItems>(
-    () =>
-      wayfinderMap
-        ? [
-            withNativeGlassHeaderItem({
-              accessibilityLabel: "Open Wayfinder Workbench",
-              icon: { name: "map", type: "sfSymbol" as const },
-              identifier: "thread-right-wayfinder",
-              onPress: openWayfinderWorkbench,
-              type: "button" as const,
-            }),
-          ]
-        : [],
-    [openWayfinderWorkbench, wayfinderMap],
-  );
-  const splitRightHeaderItems = useMemo(
-    () => [...threadCenterHeaderItems, ...wayfinderHeaderItems],
-    [threadCenterHeaderItems, wayfinderHeaderItems],
-  );
-  const compactThreadRightHeaderItems = useMemo(
-    () => [...compactRightHeaderItems, ...wayfinderHeaderItems],
-    [compactRightHeaderItems, wayfinderHeaderItems],
-  );
   const splitLeftHeaderItems = useMemo<NativeHeaderItems>(
     () => [
       {
@@ -763,13 +690,6 @@ function ThreadRouteContent(
       icon: "point.topleft.down.curvedto.point.bottomright.up",
       onPress: handleOpenGitInspector,
     });
-    if (wayfinderMap) {
-      actions.push({
-        accessibilityLabel: "Open Wayfinder Workbench",
-        icon: "map",
-        onPress: openWayfinderWorkbench,
-      });
-    }
     if (fileInspector.supported && selectedThreadCwd !== null) {
       actions.push({
         accessibilityLabel: "Toggle inspector",
@@ -784,11 +704,9 @@ function ThreadRouteContent(
     handleOpenTerminal,
     handleOpenGitInspector,
     handleToggleInspector,
-    openWayfinderWorkbench,
     props.onReturnToThread,
     selectedThreadCwd,
     selectedThreadProject?.workspaceRoot,
-    wayfinderMap,
   ]);
 
   // Deep links / cold starts land with Thread as the ONLY route, where the
@@ -807,62 +725,6 @@ function ThreadRouteContent(
     ],
     [navigation],
   );
-  const latestWayfinderInvocation = useMemo(
-    () =>
-      findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id) ??
-      selectedThreadDetail?.latestTurn?.skillInvocation,
-    [environmentSkillRuns, selectedThread?.id, selectedThreadDetail?.latestTurn?.skillInvocation],
-  );
-  const wayfinderDraft = useMemo(
-    () =>
-      deriveWayfinderDraft(
-        latestWayfinderInvocation ?? selectedThreadDetail?.latestTurn?.skillInvocation,
-        selectedThreadDetail?.activities ?? [],
-      ),
-    [
-      latestWayfinderInvocation,
-      selectedThreadDetail?.activities,
-      selectedThreadDetail?.latestTurn?.skillInvocation,
-    ],
-  );
-  const wayfinderPublication = latestWayfinderInvocation?.wayfinderPublication ?? null;
-  const previousWayfinderPublicationStatus = useRef(wayfinderPublication?.status);
-  useEffect(() => {
-    const previous = previousWayfinderPublicationStatus.current;
-    previousWayfinderPublicationStatus.current = wayfinderPublication?.status;
-    if (
-      !shouldOpenSynchronizedWayfinderMap({
-        previousStatus: previous,
-        status: wayfinderPublication?.status,
-        hasThread: selectedThread !== null,
-        hasMap: wayfinderMap !== null,
-      }) ||
-      !selectedThread
-    ) {
-      return;
-    }
-    navigation.navigate("WayfinderWorkbench", {
-      environmentId: String(selectedThread.environmentId),
-      threadId: String(selectedThread.id),
-    });
-  }, [navigation, selectedThread, wayfinderMap, wayfinderPublication?.status]);
-  const publishWayfinderDraft = useCallback(() => {
-    if (!selectedThread || !wayfinderDraft || !latestWayfinderInvocation) return;
-    void publishWayfinderDraftCommand({
-      environmentId: selectedThread.environmentId,
-      input: {
-        threadId: selectedThread.id,
-        skillRunId: latestWayfinderInvocation.skillRunId,
-        confirmed: wayfinderPublication?.status === "awaiting-approval",
-      },
-    });
-  }, [
-    latestWayfinderInvocation,
-    publishWayfinderDraftCommand,
-    selectedThread,
-    wayfinderDraft,
-    wayfinderPublication?.status,
-  ]);
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -900,8 +762,6 @@ function ThreadRouteContent(
           activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
-          wayfinderDraft={wayfinderDraft}
-          wayfinderPublication={wayfinderPublication}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}
@@ -929,7 +789,6 @@ function ThreadRouteContent(
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
           onSubmitUserInput={requests.onSubmitUserInput}
-          onPublishWayfinderDraft={publishWayfinderDraft}
         />
       </View>
     </>
@@ -968,7 +827,7 @@ function ThreadRouteContent(
           // reserved for future breadcrumbs/status).
           unstable_headerRightItems:
             Platform.OS === "ios"
-              ? () => (layout.usesSplitView ? splitRightHeaderItems : compactThreadRightHeaderItems)
+              ? () => (layout.usesSplitView ? threadCenterHeaderItems : compactRightHeaderItems)
               : undefined,
           unstable_headerSubtitle: usesNativeHeaderGlass ? headerSubtitle : undefined,
         }}

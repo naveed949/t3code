@@ -15,7 +15,6 @@ interface PendingUserInputPanelProps {
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  isWayfinderDecision?: boolean;
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -25,7 +24,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
-  isWayfinderDecision = false,
 }: PendingUserInputPanelProps) {
   if (pendingUserInputs.length === 0) return null;
   const activePrompt = pendingUserInputs[0];
@@ -40,7 +38,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
-      isWayfinderDecision={isWayfinderDecision}
     />
   );
 });
@@ -52,7 +49,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex,
   onToggleOption,
   onAdvance,
-  isWayfinderDecision,
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
@@ -60,7 +56,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
-  isWayfinderDecision: boolean;
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
@@ -161,7 +156,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     <div className="px-4 py-3 sm:px-5">
       <div className="mb-2 flex items-center gap-3">
         <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/55 uppercase">
-          {isWayfinderDecision ? "Decision Card" : activeQuestion.header}
+          {activeQuestion.header}
         </span>
         {prompt.questions.length > 1 ? (
           <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
@@ -170,11 +165,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         ) : null}
       </div>
       <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
-      {isWayfinderDecision ? (
-        <p className="mt-1 text-xs text-muted-foreground/65">
-          Agent proposal · your response confirms the draft decision.
-        </p>
-      ) : null}
       {activeQuestion.multiSelect ? (
         <p className="mt-1 text-xs text-muted-foreground/65">Select one or more options.</p>
       ) : null}

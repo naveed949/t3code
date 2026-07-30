@@ -112,7 +112,7 @@ import { useDesktopUpdateState } from "../state/desktopUpdate";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
-import { environmentThreadShells, threadEnvironment, useEnvironmentThread } from "../state/threads";
+import { threadEnvironment, useEnvironmentThread } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironment, useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
 import {
@@ -188,8 +188,6 @@ import {
 import { sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { ProjectWorkstreamsShelf } from "./ProjectWorkstreamsShelf";
-import type { EnvironmentProjectSkillWorkstream } from "@t3tools/client-runtime/state/skill-runs";
 import { useIsMobile } from "~/hooks/useMediaQuery";
 import { CommandDialogTrigger } from "./ui/command";
 import { useClientSettings, useUpdateClientSettings } from "~/hooks/useSettings";
@@ -2761,9 +2759,6 @@ interface SidebarProjectsContentProps {
   suppressProjectClickForContextMenuRef: React.RefObject<boolean>;
   attachProjectListAutoAnimateRef: (node: HTMLElement | null) => void;
   projectsLength: number;
-  projectWorkstreams: ReadonlyArray<EnvironmentProjectSkillWorkstream>;
-  projectTitleByKey: ReadonlyMap<string, string>;
-  navigateToThread: (threadRef: ScopedThreadRef) => void;
 }
 
 const SidebarProjectsContent = memo(function SidebarProjectsContent(
@@ -2804,9 +2799,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     suppressProjectClickForContextMenuRef,
     attachProjectListAutoAnimateRef,
     projectsLength,
-    projectWorkstreams,
-    projectTitleByKey,
-    navigateToThread,
   } = props;
 
   const handleProjectSortOrderChange = useCallback(
@@ -2880,11 +2872,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         </SidebarGroup>
       ) : null}
       <LocalSecondaryStatus />
-      <ProjectWorkstreamsShelf
-        workstreams={projectWorkstreams}
-        projectTitleByKey={projectTitleByKey}
-        onOpenThread={navigateToThread}
-      />
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
@@ -3002,7 +2989,6 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
 export default function Sidebar() {
   const projects = useProjects();
   const sidebarThreads = useThreadShells();
-  const projectWorkstreams = useAtomValue(environmentThreadShells.workstreamsAtom);
   const projectExpandedById = useUiStateStore((store) => store.projectExpandedById);
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
@@ -3060,27 +3046,6 @@ export default function Sidebar() {
       ),
     [environments],
   );
-  const projectTitleByKey = useMemo(
-    () =>
-      new Map(
-        projects.map(
-          (project) =>
-            [
-              scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
-              project.title,
-            ] as const,
-        ),
-      ),
-    [projects],
-  );
-  const visibleProjectWorkstreams = useMemo(() => {
-    const projectKeys = new Set(projectTitleByKey.keys());
-    return projectWorkstreams.filter((workstream) =>
-      projectKeys.has(
-        scopedProjectKey(scopeProjectRef(workstream.environmentId, workstream.projectId)),
-      ),
-    );
-  }, [projectTitleByKey, projectWorkstreams]);
   const desktopLocalEnvironmentIds = useMemo(
     () =>
       new Set(
@@ -3668,9 +3633,6 @@ export default function Sidebar() {
             suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
             attachProjectListAutoAnimateRef={attachProjectListAutoAnimateRef}
             projectsLength={projects.length}
-            projectWorkstreams={visibleProjectWorkstreams}
-            projectTitleByKey={projectTitleByKey}
-            navigateToThread={navigateToThread}
           />
 
           <SidebarSeparator />

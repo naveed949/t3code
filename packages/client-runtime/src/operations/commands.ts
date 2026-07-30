@@ -46,7 +46,6 @@ export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
-export type PublishWayfinderDraftInput = CommandInput<"thread.wayfinder.publish">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -272,17 +271,6 @@ export const respondToThreadUserInput: (input: RespondToThreadUserInputInput) =>
     return yield* dispatch({
       ...input,
       type: "thread.user-input.respond",
-      commandId: metadata.commandId,
-      createdAt: metadata.createdAt,
-    });
-  });
-
-export const publishWayfinderDraft: (input: PublishWayfinderDraftInput) => CommandEffect =
-  Effect.fn("EnvironmentCommands.publishWayfinderDraft")(function* (input) {
-    const metadata = yield* timestampedCommandMetadata(input);
-    return yield* dispatch({
-      ...input,
-      type: "thread.wayfinder.publish",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

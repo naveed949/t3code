@@ -3,7 +3,6 @@ import type {
   OrchestrationShellSnapshot,
   OrchestrationThreadShell,
   ProjectId,
-  SkillInvocation,
   ScopedProjectRef,
   ScopedThreadRef,
   ThreadId,
@@ -16,17 +15,13 @@ import type { EnvironmentCatalogState } from "./connections.ts";
 import {
   arrayElementsEqual,
   parseProjectRefCollectionKey,
-  parseProjectKey,
-  projectKey,
   parseThreadKey,
   projectRefCollectionKey,
   threadKey,
   threadRefsEqual,
 } from "./entities.ts";
-import { deriveEnvironmentWorkstreams, deriveProjectWorkstreams } from "./skillRuns.ts";
 
 const EMPTY_THREADS: ReadonlyArray<OrchestrationThreadShell> = Object.freeze([]);
-const EMPTY_SKILL_RUNS: ReadonlyArray<SkillInvocation> = Object.freeze([]);
 const EMPTY_SCOPED_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 const EMPTY_THREAD_INDEX: ReadonlyMap<ThreadId, OrchestrationThreadShell> = new Map();
 const EMPTY_THREAD_REFS_BY_PROJECT: ReadonlyMap<
@@ -46,26 +41,6 @@ export function createEnvironmentThreadShellAtoms(input: {
         get(input.snapshotAtom(environmentId))?.threads ?? EMPTY_THREADS,
     ).pipe(Atom.withLabel(`environment-threads:${environmentId}`)),
   );
-
-  const environmentSkillRunsAtom = Atom.family((environmentId: EnvironmentId) =>
-    Atom.make(
-      (get): ReadonlyArray<SkillInvocation> =>
-        get(input.snapshotAtom(environmentId))?.skillRuns ?? EMPTY_SKILL_RUNS,
-    ).pipe(Atom.withLabel(`environment-skill-runs:${environmentId}`)),
-  );
-
-  const projectWorkstreamsAtomFamily = Atom.family((key: string) => {
-    const projectRef = parseProjectKey(key);
-    let previousRuns: ReadonlyArray<SkillInvocation> = EMPTY_SKILL_RUNS;
-    let previousWorkstreams = deriveProjectWorkstreams(projectRef.projectId, previousRuns);
-    return Atom.make((get) => {
-      const runs = get(environmentSkillRunsAtom(projectRef.environmentId));
-      if (arrayElementsEqual(previousRuns, runs)) return previousWorkstreams;
-      previousRuns = runs;
-      previousWorkstreams = deriveProjectWorkstreams(projectRef.projectId, runs);
-      return previousWorkstreams;
-    }).pipe(Atom.withLabel(`project-workstreams:${key}`));
-  });
 
   const environmentThreadIndexAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get): ReadonlyMap<ThreadId, OrchestrationThreadShell> => {
@@ -184,36 +159,6 @@ export function createEnvironmentThreadShellAtoms(input: {
     return refs;
   }).pipe(Atom.withLabel("environment-thread-refs"));
 
-  let previousWorkstreamEnvironmentIds: ReadonlyArray<EnvironmentId> = [];
-  let previousRunsByEnvironment = new Map<EnvironmentId, ReadonlyArray<SkillInvocation>>();
-  let previousWorkstreams: ReturnType<typeof deriveEnvironmentWorkstreams> = [];
-  const workstreamsAtom = Atom.make((get) => {
-    const environmentIds = [...get(input.catalogValueAtom).entries.keys()];
-    const runsByEnvironment = new Map(
-      environmentIds.map(
-        (environmentId) => [environmentId, get(environmentSkillRunsAtom(environmentId))] as const,
-      ),
-    );
-    const unchanged =
-      arrayElementsEqual(previousWorkstreamEnvironmentIds, environmentIds) &&
-      environmentIds.every((environmentId) =>
-        arrayElementsEqual(
-          previousRunsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
-          runsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
-        ),
-      );
-    if (unchanged) return previousWorkstreams;
-    previousWorkstreamEnvironmentIds = environmentIds;
-    previousRunsByEnvironment = runsByEnvironment;
-    previousWorkstreams = environmentIds.flatMap((environmentId) =>
-      deriveEnvironmentWorkstreams(
-        environmentId,
-        runsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
-      ),
-    );
-    return previousWorkstreams;
-  }).pipe(Atom.withLabel("environment-project-workstreams"));
-
   let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const threadShellsAtom = Atom.make((get) => {
     const next = get(threadRefsAtom).flatMap((ref) => {
@@ -229,17 +174,13 @@ export function createEnvironmentThreadShellAtoms(input: {
 
   return {
     environmentThreadsAtom,
-    environmentSkillRunsAtom,
     environmentThreadIndexAtom,
     environmentThreadRefsAtom,
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
-    workstreamsAtom,
     threadShellsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),
-    projectWorkstreamsAtom: (ref: ScopedProjectRef) =>
-      projectWorkstreamsAtomFamily(projectKey(ref)),
     threadShellAtom: (ref: ScopedThreadRef) => threadShellAtomFamily(threadKey(ref)),
   };
 }

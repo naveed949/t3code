@@ -108,16 +108,6 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refB)).toBeNull();
   });
 
-  it("opens the Wayfinder Workbench as a durable singleton surface", () => {
-    useRightPanelStore.getState().open(refA, "wayfinder");
-    useRightPanelStore.getState().open(refA, "wayfinder");
-    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      isOpen: true,
-      activeSurfaceId: "wayfinder",
-      surfaces: [{ id: "wayfinder", kind: "wayfinder" }],
-    });
-  });
-
   it("opening a different kind keeps both surfaces and activates the new one", () => {
     useRightPanelStore.getState().open(refA, "plan");
     useRightPanelStore.getState().open(refA, "preview");

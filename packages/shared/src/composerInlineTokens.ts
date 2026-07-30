@@ -1,5 +1,3 @@
-import type { ServerProviderSkill, SkillInvocationRequest } from "@t3tools/contracts";
-
 export type ComposerInlineToken =
   | {
       readonly type: "mention";
@@ -21,7 +19,6 @@ export interface CollectComposerInlineTokensOptions {
 }
 
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g;
-const LEADING_SKILL_TOKEN_REGEX = /^\$([a-zA-Z][a-zA-Z0-9:_-]*)(?:\s+([\s\S]*))?$/;
 const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g;
 const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s)/g;
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/;
@@ -121,31 +118,4 @@ export function collectComposerInlineTokens(
   }
 
   return [...matches].sort((left, right) => left.start - right.start);
-}
-
-export function resolveLeadingSkillInvocationRequest(
-  text: string,
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "path" | "enabled">>,
-): SkillInvocationRequest | null {
-  const match = text.trim().match(LEADING_SKILL_TOKEN_REGEX);
-  const skillName = match?.[1];
-  if (!skillName) return null;
-
-  const skill = skills.find((candidate) => candidate.enabled && candidate.name === skillName);
-  if (!skill) return null;
-
-  const argumentsText = match?.[2]?.trim();
-  return createSkillInvocationRequest(skill, argumentsText);
-}
-
-export function createSkillInvocationRequest(
-  skill: Pick<ServerProviderSkill, "name" | "path">,
-  argumentsText?: string,
-): SkillInvocationRequest {
-  const argumentsValue = argumentsText?.trim();
-  return {
-    skillName: skill.name,
-    skillPath: skill.path,
-    ...(argumentsValue ? { arguments: argumentsValue } : {}),
-  };
 }

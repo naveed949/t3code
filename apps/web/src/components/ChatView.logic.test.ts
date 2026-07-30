@@ -22,100 +22,19 @@ import {
   getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
-  nativeSkillChooserMessage,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveThreadMetadataUpdateForNextTurn,
-  resolveChatSkillInvocationRequest,
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
 
-describe("nativeSkillChooserMessage", () => {
-  it("distinguishes a missing launch choice from a missing continuation issue", () => {
-    expect(nativeSkillChooserMessage("launch-selection-required")).toBe(
-      "Choose New, Continue, or Generic before sending.",
-    );
-    expect(nativeSkillChooserMessage("continuation-reference-required")).toContain("issue number");
-  });
-});
-
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");
 const threadId = ThreadId.make("thread-1");
 const now = "2026-03-29T00:00:00.000Z";
-
-describe("resolveChatSkillInvocationRequest", () => {
-  const skills = [
-    {
-      name: "wayfinder",
-      path: "/skills/wayfinder/SKILL.md",
-      enabled: true,
-    },
-  ];
-  const providers = [
-    {
-      instanceId: ProviderInstanceId.make("codex"),
-      skills,
-    },
-  ];
-
-  it("preserves an explicit generic Wayfinder fallback", () => {
-    expect(
-      resolveChatSkillInvocationRequest({
-        text: "$wayfinder generic chart a release",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        providers,
-      }),
-    ).toEqual({
-      skillName: "wayfinder",
-      skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "generic chart a release",
-      executionPreference: "generic",
-    });
-  });
-
-  it("leaves ordinary prose as an ordinary turn", () => {
-    expect(
-      resolveChatSkillInvocationRequest({
-        text: "Tell me whether Wayfinder would help here",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        providers,
-      }),
-    ).toBeNull();
-  });
-
-  it("returns client-visible chooser state for an incomplete continuation", () => {
-    expect(
-      resolveChatSkillInvocationRequest({
-        text: "$wayfinder continue-map 42 and 43",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        providers,
-      }),
-    ).toEqual({ kind: "chooser", reason: "continuation-reference-required" });
-  });
-
-  it("dispatches a user-reachable native action through the same typed request", () => {
-    expect(
-      resolveChatSkillInvocationRequest({
-        text: "$wayfinder new-map",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        providers,
-        explicitRequest: {
-          skillName: "wayfinder",
-          skillPath: "/skills/wayfinder/SKILL.md",
-        },
-      }),
-    ).toEqual({
-      skillName: "wayfinder",
-      skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "new-map",
-      action: { id: "new-map" },
-    });
-  });
-});
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {

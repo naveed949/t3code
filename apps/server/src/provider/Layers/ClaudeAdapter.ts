@@ -70,7 +70,6 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
-import { renderNativeWayfinderArguments } from "../../nativeSkills/WayfinderCompatibility.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -888,7 +887,7 @@ const CLAUDE_SETTING_SOURCES = [
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
-export function buildPromptText(
+function buildPromptText(
   input: ProviderSendTurnInput,
   boundInstanceId: ProviderInstanceId,
 ): string {
@@ -901,17 +900,7 @@ export function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  const nativeSkillArguments =
-    input.skillInvocation?.execution.mode === "native"
-      ? renderNativeWayfinderArguments(input.skillInvocation)
-      : undefined;
-  const prompt =
-    input.skillInvocation?.execution.mode === "native"
-      ? `/${input.skillInvocation.skill.name}${
-          nativeSkillArguments ? ` ${nativeSkillArguments}` : ""
-        }`
-      : (input.input?.trim() ?? "");
-  return applyClaudePromptEffortPrefix(prompt, promptEffort);
+  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
 }
 
 function buildUserMessage(input: {
