@@ -54,6 +54,32 @@ export class IssueTracker extends Context.Service<
       readonly issueNumber: number;
       readonly synchronizedAt: string;
     }) => Effect.Effect<WayfinderMapLoadResult>;
+    readonly ensureLabel: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly name: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly createIssue: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly key: string;
+      readonly idempotencyKey: string;
+      readonly title: string;
+      readonly body: string;
+      readonly labels: ReadonlyArray<string>;
+    }) => Effect.Effect<IssueTrackerIssue, GitHubCli.GitHubCliError>;
+    readonly addChild: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly parentNumber: number;
+      readonly childNumber: number;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly addBlockedBy: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly blockedNumber: number;
+      readonly blockerNumber: number;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
   }
 >()("t3/nativeSkills/IssueTracker") {}
 
@@ -129,6 +155,40 @@ const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
 const decodeWayfinderMapProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(WayfinderMapProbe),
 );
+const IssueNodeProbe = Schema.Struct({ id: Schema.String });
+const decodeIssueNodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueNodeProbe));
+const IssueListProbe = Schema.Array(
+  Schema.Struct({
+    number: Schema.Number,
+    url: Schema.String,
+    body: Schema.String,
+  }),
+);
+const decodeIssueListProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueListProbe));
+const ChildNumbersProbe = Schema.Struct({
+  data: Schema.Struct({
+    node: Schema.Struct({
+      subIssues: Schema.Struct({
+        nodes: Schema.Array(Schema.Struct({ number: Schema.Number })),
+      }),
+    }),
+  }),
+});
+const BlockerNumbersProbe = Schema.Struct({
+  data: Schema.Struct({
+    node: Schema.Struct({
+      blockedBy: Schema.Struct({
+        nodes: Schema.Array(Schema.Struct({ number: Schema.Number })),
+      }),
+    }),
+  }),
+});
+const decodeChildNumbersProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ChildNumbersProbe),
+);
+const decodeBlockerNumbersProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(BlockerNumbersProbe),
+);
 
 const noCapabilities: IssueTrackerCapabilities = {
   supportsIssues: false,
@@ -165,11 +225,57 @@ function resolveGitHubIssueReference(
   }
 }
 
+function issueFromCreateOutput(
+  repository: IssueTrackerRepository,
+  output: string,
+): IssueTrackerIssue | null {
+  const line = output.trim().split(/\r?\n/u).at(-1);
+  if (!line) return null;
+  try {
+    const url = new URL(line);
+    const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
+    const [, owner, name, number] = match ?? [];
+    return url.hostname === "github.com" &&
+      owner?.toLowerCase() === repository.owner.toLowerCase() &&
+      name?.toLowerCase() === repository.name.toLowerCase() &&
+      number
+      ? { number: Number(number), url: url.toString() }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export const GitHubIssueTrackerLive = Layer.effect(
   IssueTracker,
   Effect.gen(function* () {
     const github = yield* GitHubCli.GitHubCli;
     const repositories = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
+    const loadIssueNodeId = Effect.fn("IssueTracker.loadIssueNodeId")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+    }) {
+      const output = yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "view",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--json",
+          "id",
+        ],
+      });
+      const decoded = decodeIssueNodeProbe(output.stdout);
+      if (Option.isSome(decoded)) return decoded.value.id;
+      return yield* new GitHubCli.GitHubCliCommandError({
+        command: "gh",
+        cwd: input.cwd,
+        cause: new Error(`GitHub returned no node id for issue #${input.issueNumber}.`),
+      });
+    });
 
     return IssueTracker.of({
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
@@ -308,6 +414,182 @@ export const GitHubIssueTrackerLive = Layer.effect(
         return issue?.labels.nodes.some((label) => label.name === "wayfinder:map")
           ? { kind: "loaded", map: projectWayfinderMap(issue, input.synchronizedAt) }
           : { kind: "not-wayfinder-map" };
+      }),
+      ensureLabel: Effect.fn("IssueTracker.ensureLabel")(function* (input) {
+        const existingOutput = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "label",
+            "list",
+            "--repo",
+            repositoryReference(input.repository),
+            "--search",
+            input.name,
+            "--json",
+            "name",
+            "--limit",
+            "100",
+          ],
+        });
+        const existing = decodeLabelsProbe(existingOutput.stdout);
+        if (Option.isSome(existing) && existing.value.some((label) => label.name === input.name)) {
+          return;
+        }
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "label",
+            "create",
+            input.name,
+            "--repo",
+            repositoryReference(input.repository),
+            "--color",
+            "5319E7",
+            "--description",
+            "Managed by the Wayfinder Workbench",
+          ],
+        });
+      }),
+      createIssue: Effect.fn("IssueTracker.createIssue")(function* (input) {
+        const encodedIdempotencyKey = encodeURIComponent(input.idempotencyKey);
+        const marker = `<!-- t3-wayfinder-publication:${encodedIdempotencyKey} -->`;
+        const existingOutput = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "list",
+            "--repo",
+            repositoryReference(input.repository),
+            "--state",
+            "all",
+            "--search",
+            `"t3-wayfinder-publication:${encodedIdempotencyKey}" in:body`,
+            "--json",
+            "number,url,body",
+            "--limit",
+            "10",
+          ],
+        });
+        const existing = decodeIssueListProbe(existingOutput.stdout).pipe(
+          Option.map((issues) => issues.find((issue) => issue.body.includes(marker))),
+          Option.getOrUndefined,
+        );
+        if (existing) return { number: existing.number, url: existing.url };
+        const output = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "create",
+            "--repo",
+            repositoryReference(input.repository),
+            "--title",
+            input.title,
+            "--body",
+            `${input.body}\n\n${marker}`,
+            ...input.labels.flatMap((label) => ["--label", label]),
+          ],
+        });
+        const issue = issueFromCreateOutput(input.repository, output.stdout);
+        if (issue) return issue;
+        return yield* new GitHubCli.GitHubCliCommandError({
+          command: "gh",
+          cwd: input.cwd,
+          cause: new Error(`GitHub returned no canonical URL for ${input.key}.`),
+        });
+      }),
+      addChild: Effect.fn("IssueTracker.addChild")(function* (input) {
+        const [parentId, childId] = yield* Effect.all([
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.parentNumber,
+          }),
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.childNumber,
+          }),
+        ]);
+        const existingOutput = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=query($issueId:ID!){node(id:$issueId){... on Issue{subIssues(first:100){nodes{number}}}}}",
+            "-f",
+            `issueId=${parentId}`,
+          ],
+        });
+        const existing = decodeChildNumbersProbe(existingOutput.stdout);
+        if (
+          Option.isSome(existing) &&
+          existing.value.data.node.subIssues.nodes.some(
+            (issue) => issue.number === input.childNumber,
+          )
+        ) {
+          return;
+        }
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($issueId:ID!,$subIssueId:ID!){addSubIssue(input:{issueId:$issueId,subIssueId:$subIssueId}){clientMutationId}}",
+            "-f",
+            `issueId=${parentId}`,
+            "-f",
+            `subIssueId=${childId}`,
+          ],
+        });
+      }),
+      addBlockedBy: Effect.fn("IssueTracker.addBlockedBy")(function* (input) {
+        const [blockedId, blockerId] = yield* Effect.all([
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.blockedNumber,
+          }),
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.blockerNumber,
+          }),
+        ]);
+        const existingOutput = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=query($issueId:ID!){node(id:$issueId){... on Issue{blockedBy(first:100){nodes{number}}}}}",
+            "-f",
+            `issueId=${blockedId}`,
+          ],
+        });
+        const existing = decodeBlockerNumbersProbe(existingOutput.stdout);
+        if (
+          Option.isSome(existing) &&
+          existing.value.data.node.blockedBy.nodes.some(
+            (issue) => issue.number === input.blockerNumber,
+          )
+        ) {
+          return;
+        }
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($issueId:ID!,$blockingIssueId:ID!){addBlockedBy(input:{issueId:$issueId,blockingIssueId:$blockingIssueId}){clientMutationId}}",
+            "-f",
+            `issueId=${blockedId}`,
+            "-f",
+            `blockingIssueId=${blockerId}`,
+          ],
+        });
       }),
     });
   }),

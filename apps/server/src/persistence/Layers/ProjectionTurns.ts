@@ -18,6 +18,7 @@ import {
   ProjectionTurn,
   ProjectionTurnById,
   ProjectionTurnRepository,
+  UpdateProjectionSkillInvocationInput,
   type ProjectionTurnRepositoryShape,
 } from "../Services/ProjectionTurns.ts";
 
@@ -261,6 +262,21 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
       `,
   });
 
+  const updateProjectionSkillInvocation = SqlSchema.void({
+    Request: UpdateProjectionSkillInvocationInput.mapFields(
+      Struct.assign({
+        skillInvocation: Schema.fromJsonString(SkillInvocation),
+      }),
+    ),
+    execute: (input) =>
+      sql`
+        UPDATE projection_turns
+        SET skill_invocation_json = ${input.skillInvocation}
+        WHERE thread_id = ${input.threadId}
+          AND json_extract(skill_invocation_json, '$.skillRunId') = ${input.skillRunId}
+      `,
+  });
+
   const deleteProjectionTurnsByThread = SqlSchema.void({
     Request: DeleteProjectionTurnsByThreadInput,
     execute: ({ threadId }) =>
@@ -348,6 +364,16 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         ),
       );
 
+  const updateSkillInvocation: ProjectionTurnRepositoryShape["updateSkillInvocation"] = (input) =>
+    updateProjectionSkillInvocation(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionTurnRepository.updateSkillInvocation:query",
+          "ProjectionTurnRepository.updateSkillInvocation:encodeRequest",
+        ),
+      ),
+    );
+
   const deleteByThreadId: ProjectionTurnRepositoryShape["deleteByThreadId"] = (input) =>
     deleteProjectionTurnsByThread(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionTurnRepository.deleteByThreadId:query")),
@@ -361,6 +387,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
     listByThreadId,
     getByTurnId,
     clearCheckpointTurnConflict,
+    updateSkillInvocation,
     deleteByThreadId,
   } satisfies ProjectionTurnRepositoryShape;
 });

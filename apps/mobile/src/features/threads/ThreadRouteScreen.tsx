@@ -215,6 +215,10 @@ function ThreadRouteContent(
   const gitActions = useSelectedThreadGitActions();
   const requests = useSelectedThreadRequests();
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, "thread interrupt");
+  const publishWayfinderDraftCommand = useAtomCommand(
+    threadEnvironment.publishWayfinderDraft,
+    "publish Wayfinder draft",
+  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -235,7 +239,10 @@ function ThreadRouteContent(
   const wayfinderWorkstream = selectedThread
     ? findThreadWayfinderWorkstream(selectedThread.id, projectWorkstreams)
     : null;
-  const wayfinderMap = wayfinderWorkstream?.wayfinderMap ?? null;
+  const wayfinderMap =
+    wayfinderWorkstream?.wayfinderMap ??
+    selectedThreadDetail?.latestTurn?.skillInvocation?.wayfinderMap ??
+    null;
   const routeThreadIdentity =
     environmentIdRaw !== null && threadId !== null ? `${environmentIdRaw}:${threadId}` : null;
   const [inspectorSelection, setInspectorSelection] = useState<ThreadInspectorSelection | null>(
@@ -800,8 +807,10 @@ function ThreadRouteContent(
     [navigation],
   );
   const latestWayfinderInvocation = useMemo(
-    () => findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id),
-    [environmentSkillRuns, selectedThread?.id],
+    () =>
+      selectedThreadDetail?.latestTurn?.skillInvocation ??
+      findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id),
+    [environmentSkillRuns, selectedThread?.id, selectedThreadDetail?.latestTurn?.skillInvocation],
   );
   const wayfinderDraft = useMemo(
     () =>
@@ -815,6 +824,41 @@ function ThreadRouteContent(
       selectedThreadDetail?.latestTurn?.skillInvocation,
     ],
   );
+  const wayfinderPublication = latestWayfinderInvocation?.wayfinderPublication ?? null;
+  const previousWayfinderPublicationStatus = useRef(wayfinderPublication?.status);
+  useEffect(() => {
+    const previous = previousWayfinderPublicationStatus.current;
+    previousWayfinderPublicationStatus.current = wayfinderPublication?.status;
+    if (
+      previous === "synchronized" ||
+      wayfinderPublication?.status !== "synchronized" ||
+      !selectedThread ||
+      !wayfinderMap
+    ) {
+      return;
+    }
+    navigation.navigate("WayfinderWorkbench", {
+      environmentId: String(selectedThread.environmentId),
+      threadId: String(selectedThread.id),
+    });
+  }, [navigation, selectedThread, wayfinderMap, wayfinderPublication?.status]);
+  const publishWayfinderDraft = useCallback(() => {
+    if (!selectedThread || !wayfinderDraft || !latestWayfinderInvocation) return;
+    void publishWayfinderDraftCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        skillRunId: latestWayfinderInvocation.skillRunId,
+        confirmed: wayfinderPublication?.status === "awaiting-approval",
+      },
+    });
+  }, [
+    latestWayfinderInvocation,
+    publishWayfinderDraftCommand,
+    selectedThread,
+    wayfinderDraft,
+    wayfinderPublication?.status,
+  ]);
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -853,6 +897,7 @@ function ThreadRouteContent(
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
           wayfinderDraft={wayfinderDraft}
+          wayfinderPublication={wayfinderPublication}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}
@@ -880,6 +925,7 @@ function ThreadRouteContent(
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
           onSubmitUserInput={requests.onSubmitUserInput}
+          onPublishWayfinderDraft={publishWayfinderDraft}
         />
       </View>
     </>

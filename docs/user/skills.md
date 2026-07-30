@@ -44,3 +44,11 @@ choice and reasoning when available, while still accepting a custom answer. Agen
 separate from confirmed decisions until the answer is recorded. The draft and its structured
 decision receipts are rebuilt from persisted run and transcript state after restart, reconnect, or
 continuation on another web, desktop, or mobile client.
+
+Once the draft has a destination, at least one decision ticket, and no pending Decision Card, the
+Workbench can publish it to GitHub. Publication follows the thread's runtime permission mode:
+approval-required threads show a separate confirmation step, while full-access threads begin after
+the publish action. Web, desktop, and mobile show the exact current step until GitHub receipts and a
+canonical graph reconciliation complete. A failed step keeps every verified issue and relationship
+identity and offers an idempotent resume instead of starting over. Only successful reconciliation
+removes draft authority and switches the Workbench to the synchronized GitHub graph.

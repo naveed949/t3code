@@ -556,6 +556,7 @@ export interface ChatComposerProps {
   activePendingQuestionIndex: number;
   respondingRequestIds: ApprovalRequestId[];
   wayfinderDraft: import("@t3tools/contracts").WayfinderDraft | null;
+  wayfinderPublication: import("@t3tools/contracts").WayfinderPublication | null;
 
   // Plan
   showPlanFollowUpPrompt: boolean;
@@ -601,6 +602,7 @@ export interface ChatComposerProps {
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
+  onPublishWayfinderDraft: () => void;
   onSelectActivePendingUserInputOption: (questionId: string, optionLabel: string) => void;
   onAdvanceActivePendingUserInput: () => void;
   onPreviousActivePendingUserInputQuestion: () => void;
@@ -659,6 +661,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingQuestionIndex,
     respondingRequestIds,
     wayfinderDraft,
+    wayfinderPublication,
+    onPublishWayfinderDraft,
     showPlanFollowUpPrompt,
     activeProposedPlan,
     activePlan,
@@ -2750,7 +2754,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         >
           {!isComposerCollapsedMobile && wayfinderDraft ? (
             <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-              <ComposerWayfinderDraftPanel draft={wayfinderDraft} />
+              <ComposerWayfinderDraftPanel
+                draft={wayfinderDraft}
+                publication={wayfinderPublication}
+                onPublish={onPublishWayfinderDraft}
+              />
             </div>
           ) : null}
           {!isComposerCollapsedMobile &&

@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ApprovalRequestId } from "./baseSchemas.ts";
-import { WayfinderDraft } from "./nativeSkills.ts";
+import { WayfinderDraft, WayfinderPublication } from "./nativeSkills.ts";
 
 describe("WayfinderDraft", () => {
   it("represents every unpublished map section without making it canonical", () => {
@@ -40,5 +40,29 @@ describe("WayfinderDraft", () => {
     expect(decoded.fogOfWar).toHaveLength(1);
     expect(decoded.outOfScope).toHaveLength(1);
     expect(decoded.proposedDependencyEdges).toHaveLength(1);
+  });
+});
+
+describe("WayfinderPublication", () => {
+  it("keeps verified artifacts and the exact resumable step", () => {
+    const decoded = Schema.decodeUnknownSync(WayfinderPublication)({
+      status: "failed",
+      artifacts: [
+        { kind: "label", name: "wayfinder:map" },
+        {
+          kind: "issue",
+          key: "map",
+          number: 42,
+          url: "https://github.com/t3tools/t3code/issues/42",
+        },
+      ],
+      nextStep: "create decision ticket choose-target",
+      error: "GitHub unavailable",
+      updatedAt: "2026-07-30T10:05:00.000Z",
+    });
+
+    expect(decoded.status).toBe("failed");
+    expect(decoded.artifacts).toHaveLength(2);
+    expect(decoded.nextStep).toBe("create decision ticket choose-target");
   });
 });

@@ -13,7 +13,10 @@ import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import { hasActiveWayfinderDraftAuthority } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
+import {
+  activeWayfinderDraftSkillRunId,
+  hasActiveWayfinderDraftAuthority,
+} from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -976,6 +979,36 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.wayfinder.publish": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (activeWayfinderDraftSkillRunId(thread.activities) !== command.skillRunId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder publication requires the matching active unpublished draft.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-publication-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          runtimeMode: thread.runtimeMode,
+          confirmed: command.confirmed,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.checkpoint.revert": {
       yield* requireThread({
         readModel,
@@ -1245,6 +1278,55 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    case "thread.wayfinder.publication.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-publication-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          publication: command.publication,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+      if (command.publication.status !== "synchronized") return updated;
+      const published: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.activity-appended",
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: EventId.make(`wayfinder-publication:${command.commandId}`),
+            tone: "info",
+            kind: "wayfinder.draft.published",
+            summary: "Wayfinder draft published and reconciled",
+            payload: {
+              skillRunId: command.skillRunId,
+              canonicalReference: command.wayfinderMap?.canonicalReference,
+            },
+            turnId: null,
+            createdAt: command.createdAt,
+          },
+        },
+      };
+      return [updated, published];
     }
 
     default: {

@@ -74,3 +74,12 @@ Only the latest active draft receives this retention. If a restart has discarded
 in-memory user-input callback, the server records a response against the persisted, Skill
 Run-scoped request directly; live callbacks still resume through the provider. The thread's
 configured runtime mode is not changed.
+
+Publication is a server-owned reactor flow rather than provider prose. The client dispatches a typed
+Skill Run-scoped command, the decider preserves the thread's current runtime permission mode, and a
+drainable worker creates labels, issues, child links, and blockers in dependency order. Every
+verified artifact produces a typed runtime receipt and a persisted Skill Run progress update.
+GitHub issues carry a Skill Run-scoped idempotency marker, while relationship writes read the
+canonical relationship first, so recovery is safe even if the process stops between a GitHub write
+and its receipt. Draft authority clears only after the tracker adapter reloads the canonical map and
+reconciles every expected child and blocker identity.

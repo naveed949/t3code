@@ -15,6 +15,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
   SkillInvocation,
+  SkillRunId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -110,6 +111,13 @@ export const ClearCheckpointTurnConflictInput = Schema.Struct({
 });
 export type ClearCheckpointTurnConflictInput = typeof ClearCheckpointTurnConflictInput.Type;
 
+export const UpdateProjectionSkillInvocationInput = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  skillInvocation: SkillInvocation,
+});
+export type UpdateProjectionSkillInvocationInput = typeof UpdateProjectionSkillInvocationInput.Type;
+
 export interface ProjectionTurnRepositoryShape {
   /**
    * Inserts or updates the canonical row for a concrete `{threadId, turnId}` turn lifecycle state.
@@ -158,6 +166,10 @@ export interface ProjectionTurnRepositoryShape {
    */
   readonly clearCheckpointTurnConflict: (
     input: ClearCheckpointTurnConflictInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  readonly updateSkillInvocation: (
+    input: UpdateProjectionSkillInvocationInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**
