@@ -51,6 +51,7 @@ import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetailState } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
+import { shouldOpenSynchronizedWayfinderMap } from "./wayfinderPublicationNavigation";
 import {
   buildTerminalMenuSessions,
   nextOpenTerminalId,
@@ -808,8 +809,8 @@ function ThreadRouteContent(
   );
   const latestWayfinderInvocation = useMemo(
     () =>
-      selectedThreadDetail?.latestTurn?.skillInvocation ??
-      findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id),
+      findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id) ??
+      selectedThreadDetail?.latestTurn?.skillInvocation,
     [environmentSkillRuns, selectedThread?.id, selectedThreadDetail?.latestTurn?.skillInvocation],
   );
   const wayfinderDraft = useMemo(
@@ -830,10 +831,13 @@ function ThreadRouteContent(
     const previous = previousWayfinderPublicationStatus.current;
     previousWayfinderPublicationStatus.current = wayfinderPublication?.status;
     if (
-      previous === "synchronized" ||
-      wayfinderPublication?.status !== "synchronized" ||
-      !selectedThread ||
-      !wayfinderMap
+      !shouldOpenSynchronizedWayfinderMap({
+        previousStatus: previous,
+        status: wayfinderPublication?.status,
+        hasThread: selectedThread !== null,
+        hasMap: wayfinderMap !== null,
+      }) ||
+      !selectedThread
     ) {
       return;
     }

@@ -2024,8 +2024,8 @@ function ChatViewContent(props: ChatViewProps) {
     [threadActivities],
   );
   const latestWayfinderDraftInvocation =
-    activeLatestTurn?.skillInvocation ??
-    findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id);
+    findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id) ??
+    activeLatestTurn?.skillInvocation;
   const wayfinderDraft = useMemo(
     () => deriveWayfinderDraft(latestWayfinderDraftInvocation, threadActivities),
     [latestWayfinderDraftInvocation, threadActivities],

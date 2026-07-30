@@ -15,6 +15,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { ComposerWayfinderDraftPanel } from "./ComposerWayfinderDraftPanel";
 
 describe("ComposerWayfinderDraftPanel", () => {
+  const publishableDraft = {
+    ...createEmptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
+    destination: "Choose a release plan",
+    candidateTickets: [{ id: "choose-target", title: "Choose the target" }],
+  };
+
   it("keeps the unpublished map and agent recommendation visually distinct", () => {
     const draft = {
       ...createEmptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
@@ -112,5 +118,35 @@ describe("ComposerWayfinderDraftPanel", () => {
     );
     expect(markup).toContain("1 confirmed");
     expect(markup).toContain("Remote ready");
+  });
+
+  it("renders approval, in-progress, and resumable publication states", () => {
+    const renderPublication = (
+      status: "awaiting-approval" | "publishing" | "failed",
+      nextStep: string,
+    ) =>
+      renderToStaticMarkup(
+        <ComposerWayfinderDraftPanel
+          draft={publishableDraft}
+          publication={{
+            status,
+            artifacts: [],
+            nextStep,
+            ...(status === "failed" ? { error: "offline" } : {}),
+            updatedAt: "2026-01-01T00:05:00.000Z",
+          }}
+          onPublish={() => {}}
+        />,
+      );
+
+    expect(renderPublication("awaiting-approval", "confirm GitHub publication")).toContain(
+      "Confirm publication",
+    );
+    expect(renderPublication("publishing", "create canonical map issue")).toContain(
+      "Publishing · create canonical map issue",
+    );
+    expect(renderPublication("failed", "link child ticket choose-target")).toContain(
+      "Resume publication",
+    );
   });
 });
