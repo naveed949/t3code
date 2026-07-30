@@ -6,10 +6,6 @@ import * as Schema from "effect/Schema";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import {
-  findAuthenticatedGitHubAccount,
-  parseGitHubAuthStatus,
-} from "../sourceControl/gitHubAuthStatus.ts";
 
 export interface IssueTrackerRepository {
   readonly canonicalKey: string;
@@ -33,10 +29,6 @@ export interface IssueTrackerIssue {
 export class IssueTracker extends Context.Service<
   IssueTracker,
   {
-    readonly inspectGitHubCli: (cwd: string) => Effect.Effect<{
-      readonly available: boolean;
-      readonly authenticated: boolean;
-    }>;
     readonly resolveProjectRepository: (
       cwd: string,
     ) => Effect.Effect<IssueTrackerRepository | null>;
@@ -112,20 +104,6 @@ export const GitHubIssueTrackerLive = Layer.effect(
     const repositories = yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
 
     return IssueTracker.of({
-      inspectGitHubCli: Effect.fn("IssueTracker.inspectGitHubCli")(function* (cwd) {
-        const available = yield* github.execute({ cwd, args: ["--version"] }).pipe(Effect.option);
-        if (Option.isNone(available)) return { available: false, authenticated: false };
-        const authentication = yield* github
-          .execute({ cwd, args: ["auth", "status", "--json", "hosts"] })
-          .pipe(Effect.option);
-        const authenticated = Option.match(authentication, {
-          onNone: () => false,
-          onSome: (result) =>
-            findAuthenticatedGitHubAccount(parseGitHubAuthStatus(result.stdout).accounts) !==
-            undefined,
-        });
-        return { available: true, authenticated };
-      }),
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
         const identity = yield* repositories.resolve(cwd);
         return identity?.provider === "github" && identity.owner && identity.name

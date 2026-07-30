@@ -29,7 +29,7 @@ export type NativeSkillRunInvocationIntent =
 
 export type NativeSkillRunInvocationChooser = {
   readonly kind: "chooser";
-  readonly reason: "continuation-reference-required";
+  readonly reason: "launch-selection-required" | "continuation-reference-required";
 };
 
 function resolveGitHubIssueReference(reference: string | undefined): string | null {
@@ -80,7 +80,7 @@ export function resolveNativeSkillRunInvocation(
         ? { ...request, action: { id: "continue-map", reference: issueReference } }
         : { kind: "chooser", reason: "continuation-reference-required" };
     }
-    return request;
+    return { kind: "chooser", reason: "launch-selection-required" };
   }
   if (!intent.skill.enabled) {
     return null;

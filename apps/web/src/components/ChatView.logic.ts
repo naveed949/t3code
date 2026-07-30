@@ -59,7 +59,7 @@ export function resolveChatSkillInvocationRequest(input: {
   }
   return {
     ...input.explicitRequest,
-    ...(leadingRequest.arguments === undefined ? {} : { arguments: leadingRequest.arguments }),
+    ...leadingRequest,
   };
 }
 

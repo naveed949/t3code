@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 
+import * as GitHubPreflightInspector from "./GitHubPreflightInspector.ts";
 import * as IssueTracker from "./IssueTracker.ts";
 import { preflightWayfinderLaunch, type WayfinderPreflightResult } from "./WayfinderPreflight.ts";
 
@@ -21,6 +22,7 @@ export class NativeWayfinderPreflightService extends Context.Service<
 >()("t3/nativeSkills/NativeWayfinderPreflightService") {}
 
 export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* () {
+  const githubPreflight = yield* GitHubPreflightInspector.GitHubPreflightInspector;
   const issueTracker = yield* IssueTracker.IssueTracker;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -61,7 +63,7 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
           supportsBlockingRelationships: false,
           labels: [],
         };
-    const githubCli = yield* issueTracker.inspectGitHubCli(input.workspaceRoot);
+    const githubCli = yield* githubPreflight.inspectCli(input.workspaceRoot);
     const repositoryInstructions = yield* inspectRepositoryInstructions(input.workspaceRoot);
     const environmentResult = preflightWayfinderLaunch({
       skillDigest: input.skillDigest,

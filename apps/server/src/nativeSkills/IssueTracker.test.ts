@@ -99,40 +99,6 @@ it.effect("resolves a GitHub project and reads its native issue capabilities", (
   ),
 );
 
-it.effect("requires a parsed authenticated GitHub CLI account", () =>
-  Effect.gen(function* () {
-    const tracker = yield* IssueTracker.IssueTracker;
-    assert.deepStrictEqual(yield* tracker.inspectGitHubCli("/project"), {
-      available: true,
-      authenticated: false,
-    });
-  }).pipe(
-    Effect.provide(
-      layer({
-        execute: ({ args }) =>
-          Effect.succeed(
-            output(
-              args[0] === "--version"
-                ? "gh version 2"
-                : JSON.stringify({
-                    hosts: {
-                      "github.com": [
-                        {
-                          state: "failed",
-                          active: true,
-                          host: "github.com",
-                          login: "octocat",
-                        },
-                      ],
-                    },
-                  }),
-            ),
-          ),
-      }),
-    ),
-  ),
-);
-
 it.effect("resolves only an unambiguous GitHub issue number or URL", () =>
   Effect.gen(function* () {
     const tracker = yield* IssueTracker.IssueTracker;

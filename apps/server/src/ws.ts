@@ -116,6 +116,7 @@ import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import * as NativeWayfinderPreflightService from "./nativeSkills/NativeWayfinderPreflightService.ts";
 import { dispatchWithNativeWayfinderPreflight } from "./nativeSkills/WayfinderDispatchGate.ts";
+import * as GitHubPreflightInspector from "./nativeSkills/GitHubPreflightInspector.ts";
 import * as IssueTracker from "./nativeSkills/IssueTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
@@ -2128,7 +2129,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
     Effect.provide(
       NativeWayfinderPreflightService.layer.pipe(
         Layer.provide(
-          IssueTracker.GitHubIssueTrackerLive.pipe(
+          Layer.merge(IssueTracker.GitHubIssueTrackerLive, GitHubPreflightInspector.layer).pipe(
             Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
             Layer.provide(RepositoryIdentityResolver.layer),
           ),

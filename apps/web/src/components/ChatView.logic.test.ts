@@ -52,17 +52,18 @@ describe("resolveChatSkillInvocationRequest", () => {
     },
   ];
 
-  it("uses the same typed identity for picker text and a leading skill command", () => {
+  it("preserves an explicit generic Wayfinder fallback", () => {
     expect(
       resolveChatSkillInvocationRequest({
-        text: "$wayfinder chart a release",
+        text: "$wayfinder generic chart a release",
         providerInstanceId: ProviderInstanceId.make("codex"),
         providers,
       }),
     ).toEqual({
       skillName: "wayfinder",
       skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "chart a release",
+      arguments: "generic chart a release",
+      executionPreference: "generic",
     });
   });
 
@@ -89,7 +90,7 @@ describe("resolveChatSkillInvocationRequest", () => {
   it("dispatches a user-reachable native action through the same typed request", () => {
     expect(
       resolveChatSkillInvocationRequest({
-        text: "$wayfinder chart a release",
+        text: "$wayfinder new-map",
         providerInstanceId: ProviderInstanceId.make("codex"),
         providers,
         explicitRequest: {
@@ -100,7 +101,8 @@ describe("resolveChatSkillInvocationRequest", () => {
     ).toEqual({
       skillName: "wayfinder",
       skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "chart a release",
+      arguments: "new-map",
+      action: { id: "new-map" },
     });
   });
 });

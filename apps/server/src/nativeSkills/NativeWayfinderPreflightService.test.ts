@@ -5,12 +5,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 
+import * as GitHubPreflightInspector from "./GitHubPreflightInspector.ts";
 import * as IssueTracker from "./IssueTracker.ts";
 import * as NativeWayfinderPreflightService from "./NativeWayfinderPreflightService.ts";
 import { VERIFIED_WAYFINDER_CONTENT_DIGEST } from "./WayfinderPreflight.ts";
 
 const tracker = Layer.mock(IssueTracker.IssueTracker)({
-  inspectGitHubCli: () => Effect.succeed({ available: true, authenticated: true }),
   resolveProjectRepository: () =>
     Effect.succeed({ canonicalKey: "github.com/t3tools/t3code", owner: "t3tools", name: "t3code" }),
   inspectCapabilities: () =>
@@ -26,6 +26,9 @@ const tracker = Layer.mock(IssueTracker.IssueTracker)({
 
 const testLayer = Layer.mergeAll(
   tracker,
+  Layer.mock(GitHubPreflightInspector.GitHubPreflightInspector)({
+    inspectCli: () => Effect.succeed({ available: true, authenticated: true }),
+  }),
   FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
   NodePath.layer,
 );

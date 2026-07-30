@@ -8,31 +8,32 @@ describe("resolveNativeSkillRunInvocation", () => {
     path: "/skills/wayfinder/SKILL.md",
     enabled: true,
   };
-  const expected = {
-    skillName: "wayfinder",
-    skillPath: "/skills/wayfinder/SKILL.md",
-    arguments: "chart a release",
-  };
 
   it("gives picker, leading-token, and native-action entry points one typed identity", () => {
+    const genericSkill = { ...skill, name: "research" };
+    const expected = {
+      skillName: "research",
+      skillPath: genericSkill.path,
+      arguments: "chart a release",
+    };
     expect(
       resolveNativeSkillRunInvocation({
         kind: "picker-selection",
-        skill,
+        skill: genericSkill,
         arguments: "chart a release",
       }),
     ).toEqual(expected);
     expect(
       resolveNativeSkillRunInvocation({
         kind: "leading-token",
-        text: "$wayfinder chart a release",
-        skills: [skill],
+        text: "$research chart a release",
+        skills: [genericSkill],
       }),
     ).toEqual(expected);
     expect(
       resolveNativeSkillRunInvocation({
         kind: "native-action",
-        skill,
+        skill: genericSkill,
         arguments: "chart a release",
       }),
     ).toEqual(expected);
@@ -142,5 +143,15 @@ describe("resolveNativeSkillRunInvocation", () => {
         skills: [skill],
       }),
     ).toEqual({ kind: "chooser", reason: "continuation-reference-required" });
+  });
+
+  it("requires an explicit launch choice for a bare Wayfinder invocation", () => {
+    expect(
+      resolveNativeSkillRunInvocation({
+        kind: "leading-token",
+        text: "$wayfinder",
+        skills: [skill],
+      }),
+    ).toEqual({ kind: "chooser", reason: "launch-selection-required" });
   });
 });
