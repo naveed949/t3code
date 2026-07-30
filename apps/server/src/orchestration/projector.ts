@@ -1,11 +1,18 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  OrchestrationThreadActivity,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  SkillRunId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
@@ -35,6 +42,43 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_RECENT_THREAD_ACTIVITIES = 500;
+const WayfinderScopedActivityPayload = Schema.Struct({ skillRunId: SkillRunId });
+const decodeWayfinderScopedActivityPayload = Schema.decodeUnknownOption(
+  WayfinderScopedActivityPayload,
+);
+
+export function retainThreadActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  const ordered = activities.toSorted(compareThreadActivities);
+  const recent = ordered.slice(-MAX_RECENT_THREAD_ACTIVITIES);
+  const recentIds = new Set(recent.map((activity) => activity.id));
+  let activeDraft:
+    | { readonly marker: OrchestrationThreadActivity; readonly skillRunId: SkillRunId }
+    | undefined;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const activity = ordered[index];
+    if (!activity) continue;
+    if (activity.kind === "wayfinder.draft.published") break;
+    if (activity.kind !== "wayfinder.draft.started") continue;
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    if (Option.isSome(payload)) {
+      activeDraft = { marker: activity, skillRunId: payload.value.skillRunId };
+    }
+    break;
+  }
+  const durableWayfinderActivities = ordered.filter((activity) => {
+    if (activeDraft === undefined || recentIds.has(activity.id)) return false;
+    if (activity.id === activeDraft.marker.id) return true;
+    if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
+      return false;
+    }
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    return Option.isSome(payload) && payload.value.skillRunId === activeDraft.skillRunId;
+  });
+  return [...durableWayfinderActivities, ...recent];
+}
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -731,12 +775,10 @@ export function projectEvent(
             return nextBase;
           }
 
-          const activities = [
+          const activities = retainThreadActivities([
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          ]);
 
           return {
             ...nextBase,

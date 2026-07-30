@@ -112,6 +112,24 @@ A verified mapping from a pinned skill identity to a provider-native invocation 
 provider mapping or a mismatched digest uses generic execution without claiming native support. See
 [NativeSkillAdapterRegistry.ts][25].
 
+#### Unpublished Wayfinder draft
+
+A non-canonical map owned by a native Wayfinder `new-map` Skill Run. It contains the destination,
+notes, confirmed decisions, agent proposals, candidate tickets, fog of war, out-of-scope entries,
+and proposed dependency edges. Clients recover it from the durable Skill Run and structured-input
+activities; GitHub is unchanged until a later publication flow. See [nativeSkills.ts][26].
+
+#### Decision Card
+
+The client surface for one pending Wayfinder choice. It presents the agent's recommendation,
+reasoning, bounded options, and a free-form answer without treating the proposal as confirmed.
+
+#### Decision receipt
+
+The structured record of the user's answer to a Decision Card. A matching
+`user-input.requested`/`user-input.resolved` pair produces the receipt and moves the proposal into
+confirmed draft state. See [wayfinderDraft.ts][27].
+
 #### Receipt
 
 A lightweight typed runtime signal emitted when an async milestone completes. See [RuntimeReceiptBus.ts][13].
@@ -213,3 +231,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [23]: ../apps/server/src/checkpointing/Diffs.ts
 [24]: ./architecture.md
 [25]: ../../apps/server/src/nativeSkills/NativeSkillAdapterRegistry.ts
+[26]: ../../packages/contracts/src/nativeSkills.ts
+[27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts

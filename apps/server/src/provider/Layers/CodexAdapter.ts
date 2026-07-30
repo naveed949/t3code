@@ -40,6 +40,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { renderNativeWayfinderArguments } from "../../nativeSkills/WayfinderCompatibility.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -1546,10 +1547,13 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         : undefined;
     const nativeSkillInvocation =
       input.skillInvocation?.execution.mode === "native" ? input.skillInvocation : undefined;
+    const nativeSkillArguments = nativeSkillInvocation
+      ? renderNativeWayfinderArguments(nativeSkillInvocation)
+      : undefined;
     return yield* session.runtime
       .sendTurn({
-        ...(nativeSkillInvocation?.arguments !== undefined
-          ? { input: nativeSkillInvocation.arguments }
+        ...(nativeSkillArguments !== undefined
+          ? { input: nativeSkillArguments }
           : nativeSkillInvocation === undefined && input.input !== undefined
             ? { input: input.input }
             : {}),

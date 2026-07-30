@@ -12,6 +12,7 @@ import {
   SkillInvocation,
   WorkstreamId,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -2569,13 +2570,15 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
         path: "/skills/wayfinder/SKILL.md",
         contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
       },
-      arguments: "chart a release",
+      arguments: "new-map",
+      action: { id: "new-map" as const },
       execution: {
         mode: "native" as const,
         adapterId: "wayfinder",
         adapterVersion: 1,
       },
       createdAt: turnStartedAt,
+      wayfinderDraft: createEmptyWayfinderDraft(turnStartedAt),
     };
 
     yield* Effect.gen(function* () {

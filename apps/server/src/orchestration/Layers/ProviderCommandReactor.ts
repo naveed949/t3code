@@ -1,9 +1,11 @@
 import {
+  ApprovalRequestId,
   type ChatAttachment,
   CommandId,
   EventId,
   type ModelSelection,
   type OrchestrationEvent,
+  type OrchestrationThread,
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
@@ -11,9 +13,11 @@ import {
   type ProviderSession,
   type RuntimeMode,
   type SkillInvocation,
+  SkillRunId,
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
+import { isNativeWayfinderDraftInvocation } from "@t3tools/shared/wayfinderDraft";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -45,8 +49,16 @@ import {
 } from "../../serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { hasActiveWayfinderDraftAuthority } from "../../nativeSkills/WayfinderDraftMutationGuard.ts";
 const isProviderAdapterRequestError = Schema.is(ProviderAdapterRequestError);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
+const RecoveredWayfinderDecisionPayload = Schema.Struct({
+  requestId: ApprovalRequestId,
+  skillRunId: SkillRunId,
+});
+const decodeRecoveredWayfinderDecisionPayload = Schema.decodeUnknownOption(
+  RecoveredWayfinderDecisionPayload,
+);
 
 type ProviderIntentEvent = Extract<
   OrchestrationEvent,
@@ -167,6 +179,22 @@ function stalePendingRequestDetail(
   return `Stale pending ${requestKind} request: ${requestId}. Provider callback state does not survive app restarts or recovered sessions. Restart the turn to continue.`;
 }
 
+function findRecoveredWayfinderDecision(
+  thread: OrchestrationThread,
+  requestId: ApprovalRequestId,
+): { readonly skillRunId: SkillRunId; readonly turnId: TurnId | null } | null {
+  if (!hasActiveWayfinderDraftAuthority(thread.activities)) return null;
+  for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
+    const activity = thread.activities[index];
+    if (activity?.kind !== "user-input.requested") continue;
+    const payload = decodeRecoveredWayfinderDecisionPayload(activity.payload);
+    if (Option.isSome(payload) && payload.value.requestId === requestId) {
+      return { skillRunId: payload.value.skillRunId, turnId: activity.turnId };
+    }
+  }
+  return null;
+}
+
 function buildGeneratedWorktreeBranchName(raw: string): string {
   const normalized = raw
     .trim()
@@ -257,6 +285,39 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+
+  const appendRecoveredWayfinderDecision = Effect.fn("appendRecoveredWayfinderDecision")(function* (
+    event: Extract<ProviderIntentEvent, { type: "thread.user-input-response-requested" }>,
+    thread: OrchestrationThread,
+  ) {
+    const recovered = findRecoveredWayfinderDecision(thread, event.payload.requestId);
+    if (recovered === null) return false;
+    const { commandId, eventId } = yield* Effect.all({
+      commandId: serverCommandId("wayfinder-user-input-recovered"),
+      eventId: serverEventId(),
+    });
+    yield* orchestrationEngine.dispatch({
+      type: "thread.activity.append",
+      commandId,
+      threadId: thread.id,
+      activity: {
+        id: eventId,
+        tone: "info",
+        kind: "user-input.resolved",
+        summary: "Wayfinder decision recovered",
+        payload: {
+          requestId: event.payload.requestId,
+          skillRunId: recovered.skillRunId,
+          answers: event.payload.answers,
+          recoveredAfterRestart: true,
+        },
+        turnId: recovered.turnId,
+        createdAt: event.payload.createdAt,
+      },
+      createdAt: event.payload.createdAt,
+    });
+    return true;
+  });
 
   const formatFailureDetail = (cause: Cause.Cause<unknown>): string => {
     const failReason = cause.reasons.find(Cause.isFailReason);
@@ -364,6 +425,7 @@ const make = Effect.gen(function* () {
     options?: {
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
+      readonly runtimeMode?: RuntimeMode;
     },
   ) {
     const thread = yield* resolveThread(threadId);
@@ -371,7 +433,7 @@ const make = Effect.gen(function* () {
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`));
     }
 
-    const desiredRuntimeMode = thread.runtimeMode;
+    const desiredRuntimeMode = options?.runtimeMode ?? thread.runtimeMode;
     const requestedModelSelection = options?.modelSelection;
     const resolveActiveSession = (threadId: ThreadId) =>
       providerService
@@ -543,7 +605,7 @@ const make = Effect.gen(function* () {
     const existingSessionThreadId =
       thread.session && thread.session.status !== "stopped" && activeSession ? thread.id : null;
     if (existingSessionThreadId) {
-      const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode;
+      const runtimeModeChanged = desiredRuntimeMode !== thread.session?.runtimeMode;
       const cwdChanged = effectiveCwd !== activeSession?.cwd;
       const sessionModelSwitch = (yield* providerService.getCapabilities(desiredInstanceId))
         .sessionModelSwitch;
@@ -581,7 +643,7 @@ const make = Effect.gen(function* () {
         desiredInstanceId,
         desiredProvider: desiredModelSelection.instanceId,
         currentRuntimeMode: thread.session?.runtimeMode,
-        desiredRuntimeMode: thread.runtimeMode,
+        desiredRuntimeMode,
         runtimeModeChanged,
         previousCwd: activeSession?.cwd,
         desiredCwd: effectiveCwd,
@@ -630,6 +692,9 @@ const make = Effect.gen(function* () {
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
+      ...(isNativeWayfinderDraftInvocation(input.skillInvocation)
+        ? { runtimeMode: "approval-required" as const }
+        : {}),
     });
     if (input.modelSelection !== undefined) {
       threadModelSelections.set(input.threadId, input.modelSelection);
@@ -975,6 +1040,7 @@ const make = Effect.gen(function* () {
       }
       const hasSession = thread.session && thread.session.status !== "stopped";
       if (!hasSession) {
+        if (yield* appendRecoveredWayfinderDecision(event, thread)) return;
         return yield* appendProviderFailureActivity({
           threadId: event.payload.threadId,
           kind: "provider.user-input.respond.failed",
@@ -993,19 +1059,25 @@ const make = Effect.gen(function* () {
           answers: event.payload.answers,
         })
         .pipe(
-          Effect.catchCause((cause) =>
-            appendProviderFailureActivity({
-              threadId: event.payload.threadId,
-              kind: "provider.user-input.respond.failed",
-              summary: "Provider user input response failed",
-              detail: isUnknownPendingUserInputRequestError(cause)
-                ? stalePendingRequestDetail("user-input", event.payload.requestId)
-                : Cause.pretty(cause),
-              turnId: null,
-              createdAt: event.payload.createdAt,
-              requestId: event.payload.requestId,
-            }),
-          ),
+          Effect.catchCause((cause) => {
+            const appendFailure = () =>
+              appendProviderFailureActivity({
+                threadId: event.payload.threadId,
+                kind: "provider.user-input.respond.failed",
+                summary: "Provider user input response failed",
+                detail: isUnknownPendingUserInputRequestError(cause)
+                  ? stalePendingRequestDetail("user-input", event.payload.requestId)
+                  : Cause.pretty(cause),
+                turnId: null,
+                createdAt: event.payload.createdAt,
+                requestId: event.payload.requestId,
+              });
+            return isUnknownPendingUserInputRequestError(cause)
+              ? appendRecoveredWayfinderDecision(event, thread).pipe(
+                  Effect.flatMap((recovered) => (recovered ? Effect.void : appendFailure())),
+                )
+              : appendFailure();
+          }),
         );
     },
   );

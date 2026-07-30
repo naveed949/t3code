@@ -58,3 +58,19 @@ persist it without introducing a client-owned authority. A matching canonical ma
 project Workstream identity while each explicit continuation receives a new Skill Run identity.
 Client runtime derives active/completed discovery, the open-unblocked-unclaimed frontier, and a
 stable graph layout from the shared projection.
+
+Native new-map dispatch also supplies a versioned unpublished-draft contract to Codex and Claude.
+It requires one structured decision at a time and reserves structured question identifiers for the
+destination, notes, candidate tickets, fog of war, out-of-scope entries, and proposed dependency
+edges. The persisted Skill Run owns the initial non-canonical draft; clients deterministically fold
+durable `user-input.requested` and `user-input.resolved` activities into proposals, decision
+receipts, and confirmed map state. This keeps recovery provider-neutral without a second draft
+database or client-only state. The server forces these draft sessions into `approval-required`
+mode, scopes every structured decision activity to its originating Skill Run, and retains those
+activities outside the rolling work-log window. While draft authority is active, the server rejects
+every executable approval because an arbitrary command cannot be proven GitHub-read-only;
+structured Decision Card responses remain available. Publication clears that authority marker.
+Only the latest active draft receives this retention. If a restart has discarded the provider's
+in-memory user-input callback, the server records a response against the persisted, Skill
+Run-scoped request directly; live callbacks still resume through the provider. The thread's
+configured runtime mode is not changed.

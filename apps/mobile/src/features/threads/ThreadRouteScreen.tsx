@@ -14,7 +14,16 @@ import {
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
-import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type ProjectScript,
+  type SkillInvocation,
+} from "@t3tools/contracts";
+import {
+  deriveWayfinderDraft,
+  findLatestWayfinderDraftInvocation,
+} from "@t3tools/client-runtime/state/wayfinder-draft";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -86,6 +95,8 @@ interface ThreadInspectorSelection {
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
 const EMPTY_PROJECT_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
+const EMPTY_SKILL_RUNS: ReadonlyArray<SkillInvocation> = [];
+const EMPTY_SKILL_RUNS_ATOM = Atom.make(EMPTY_SKILL_RUNS);
 
 function InspectorPaneRoleActivation() {
   useAdaptiveWorkspacePaneRole("inspector");
@@ -208,6 +219,11 @@ function ThreadRouteContent(
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
+  const environmentSkillRuns = useAtomValue(
+    environmentId
+      ? environmentThreadShells.environmentSkillRunsAtom(environmentId)
+      : EMPTY_SKILL_RUNS_ATOM,
+  );
   const threadId = firstRouteParam(params.threadId);
   const projectWorkstreams = useAtomValue(
     selectedThread
@@ -783,6 +799,22 @@ function ThreadRouteContent(
     ],
     [navigation],
   );
+  const latestWayfinderInvocation = useMemo(
+    () => findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id),
+    [environmentSkillRuns, selectedThread?.id],
+  );
+  const wayfinderDraft = useMemo(
+    () =>
+      deriveWayfinderDraft(
+        latestWayfinderInvocation ?? selectedThreadDetail?.latestTurn?.skillInvocation,
+        selectedThreadDetail?.activities ?? [],
+      ),
+    [
+      latestWayfinderInvocation,
+      selectedThreadDetail?.activities,
+      selectedThreadDetail?.latestTurn?.skillInvocation,
+    ],
+  );
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -820,6 +852,7 @@ function ThreadRouteContent(
           activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
+          wayfinderDraft={wayfinderDraft}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}

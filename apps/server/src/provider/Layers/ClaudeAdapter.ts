@@ -70,6 +70,7 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { renderNativeWayfinderArguments } from "../../nativeSkills/WayfinderCompatibility.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -900,10 +901,14 @@ export function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
+  const nativeSkillArguments =
+    input.skillInvocation?.execution.mode === "native"
+      ? renderNativeWayfinderArguments(input.skillInvocation)
+      : undefined;
   const prompt =
     input.skillInvocation?.execution.mode === "native"
       ? `/${input.skillInvocation.skill.name}${
-          input.skillInvocation.arguments ? ` ${input.skillInvocation.arguments}` : ""
+          nativeSkillArguments ? ` ${nativeSkillArguments}` : ""
         }`
       : (input.input?.trim() ?? "");
   return applyClaudePromptEffortPrefix(prompt, promptEffort);

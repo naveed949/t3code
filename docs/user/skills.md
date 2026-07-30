@@ -36,3 +36,11 @@ maximize control. The dependency graph uses a deterministic, non-animated layout
 puts the frontier first. On mobile, linked threads expose a full-screen Wayfinder route with the same
 frontier-first list and an optional compact graph. Reopening the same canonical GitHub map creates a
 new Skill Run in the existing project Workstream.
+
+A native **New** run starts with a visible unpublished draft. The draft is explicitly non-canonical:
+T3 does not create or change GitHub issues, labels, assignments, comments, or relationships while
+the map is being charted. Wayfinder presents one Decision Card at a time, including its recommended
+choice and reasoning when available, while still accepting a custom answer. Agent proposals remain
+separate from confirmed decisions until the answer is recorded. The draft and its structured
+decision receipts are rebuilt from persisted run and transcript state after restart, reconnect, or
+continuation on another web, desktop, or mobile client.

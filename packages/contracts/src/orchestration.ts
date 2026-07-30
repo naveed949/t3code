@@ -23,6 +23,7 @@ import {
   SkillRunId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { OptionalWayfinderDraft } from "./nativeSkills.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -288,6 +289,7 @@ export const SkillInvocation = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
   createdAt: IsoDateTime,
+  wayfinderDraft: OptionalWayfinderDraft,
 });
 export type SkillInvocation = typeof SkillInvocation.Type;
 
