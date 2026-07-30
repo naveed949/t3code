@@ -1262,6 +1262,9 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const promptRef = useRef("");
   const explicitSkillInvocationRequestRef = useRef<SkillInvocationRequest | null>(null);
+  const onExplicitSkillInvocation = useCallback((request: SkillInvocationRequest) => {
+    explicitSkillInvocationRequestRef.current = request;
+  }, []);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
@@ -5901,9 +5904,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
-                            onExplicitSkillInvocation={(request) => {
-                              explicitSkillInvocationRequestRef.current = request;
-                            }}
+                            onExplicitSkillInvocation={onExplicitSkillInvocation}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}

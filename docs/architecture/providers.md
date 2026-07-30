@@ -41,5 +41,6 @@ Codex receives a native skill input item and Claude receives its native slash-co
 without a registered native adapter, unknown skills, and digest mismatches preserve the original
 prompt as a generic turn. The orchestration event owns the Workstream and Skill Run identifiers, and
 the projected turn stores the complete invocation record. Shared shell snapshots collect every
-stored run independently of the latest turn so restart and reconnect hydration cannot hide older
-Workstreams.
+thread's latest stored run independently of its latest turn. This bounded summary survives restart
+and reconnect without making base shell hydration grow with every historical run; complete run
+history remains in the persisted turns.

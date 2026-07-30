@@ -1663,6 +1663,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
   }, [readComposerSnapshot]);
 
+  const applySkillPromptReplacement = useCallback(
+    (
+      item: Extract<ComposerCommandItem, { type: "skill" }>,
+      currentValue: string,
+      rangeStart: number,
+      rangeEnd: number,
+    ) => {
+      const replacement = `$${item.skill.name} `;
+      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        currentValue,
+        rangeEnd,
+        replacement,
+      );
+      return applyPromptReplacement(rangeStart, replacementRangeEnd, replacement, {
+        expectedText: currentValue.slice(rangeStart, replacementRangeEnd),
+      });
+    },
+    [applyPromptReplacement],
+  );
+
   const onSelectComposerItem = useCallback(
     (item: ComposerCommandItem) => {
       if (composerSelectLockRef.current) return;
@@ -1734,22 +1754,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           kind: "picker-selection",
           skill: item.skill,
         });
-        if (request) {
-          onExplicitSkillInvocation(request);
-        }
-        const replacement = `$${item.skill.name} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        const applied = applySkillPromptReplacement(
+          item,
           snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
           trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          trigger.rangeEnd,
         );
         if (applied) {
+          if (request) {
+            onExplicitSkillInvocation(request);
+          }
           setComposerHighlightedItemId(null);
         }
         return;
@@ -1757,6 +1771,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [
       applyPromptReplacement,
+      applySkillPromptReplacement,
       handleInteractionModeChange,
       onExplicitSkillInvocation,
       resolveActiveComposerTrigger,
@@ -1765,16 +1780,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const onNativeSkillAction = useCallback(
     (item: Extract<ComposerCommandItem, { type: "skill" }>) => {
-      onSelectComposerItem(item);
+      const { snapshot, trigger } = resolveActiveComposerTrigger();
+      if (!trigger) return;
       const request = resolveNativeSkillRunInvocation({
         kind: "native-action",
         skill: item.skill,
       });
-      if (request) {
+      if (
+        request &&
+        applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)
+      ) {
         onExplicitSkillInvocation(request);
+        onSend();
       }
     },
-    [onExplicitSkillInvocation, onSelectComposerItem],
+    [applySkillPromptReplacement, onExplicitSkillInvocation, onSend, resolveActiveComposerTrigger],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
