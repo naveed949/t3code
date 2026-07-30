@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
+import {
+  buildMobileDependencyAction,
+  buildMobileTicketAction,
+  buildMobileWayfinderPresentation,
+} from "./WayfinderWorkbench.logic";
 import {
   createWayfinderTicketAction,
   WAYFINDER_TICKET_CLASSIFICATIONS,
@@ -64,5 +68,36 @@ describe("buildMobileWayfinderPresentation", () => {
       title: "Prototype sync",
       classification: "prototype",
     });
+  });
+
+  it("builds every ticket and dependency action dispatched by the mobile controls", () => {
+    const ticket = map.tickets[0]!;
+    expect(buildMobileTicketAction(ticket, { kind: "rename", value: "  New title  " })).toEqual({
+      kind: "rename-ticket",
+      ticketNumber: 44,
+      title: "New title",
+    });
+    expect(
+      buildMobileTicketAction(ticket, { kind: "classify", classification: "prototype" }),
+    ).toEqual({
+      kind: "classify-ticket",
+      ticketNumber: 44,
+      classification: "prototype",
+    });
+    expect(buildMobileTicketAction(ticket, { kind: "toggle-state" })).toEqual({
+      kind: "close-ticket",
+      ticketNumber: 44,
+    });
+    expect(buildMobileTicketAction(ticket, { kind: "resolve", value: "  Use Fly  " })).toEqual({
+      kind: "resolve-ticket",
+      ticketNumber: 44,
+      resolution: "Use Fly",
+    });
+    expect(buildMobileDependencyAction("add-dependency", "43", "44")).toEqual({
+      kind: "add-dependency",
+      blockerNumber: 43,
+      blockedNumber: 44,
+    });
+    expect(buildMobileDependencyAction("remove-dependency", "", "44")).toBeNull();
   });
 });

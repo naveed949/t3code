@@ -1092,23 +1092,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Wayfinder editing requires a published canonical map.",
         });
       }
-      const approved = thread.activities.some((activity) => {
-        if (activity.kind !== "wayfinder.mutation.approval-requested") return false;
+      let approvalRequested = false;
+      let approvalResolved = false;
+      for (const activity of thread.activities) {
+        if (
+          activity.kind !== "wayfinder.mutation.approval-requested" &&
+          activity.kind !== "wayfinder.mutation.approval-resolved"
+        ) {
+          continue;
+        }
         const payload = decodeWayfinderMutationApprovalPayload(activity.payload);
-        return (
+        const matches =
           Option.isSome(payload) &&
           payload.value.skillRunId === command.skillRunId &&
           payload.value.actionId === actionId &&
-          sameWayfinderMutationAction(payload.value.action, command.action)
-        );
-      });
-      if (thread.runtimeMode === "approval-required" && command.confirmed && !approved) {
+          sameWayfinderMutationAction(payload.value.action, command.action);
+        if (matches) {
+          approvalRequested ||= activity.kind === "wayfinder.mutation.approval-requested";
+          approvalResolved ||= activity.kind === "wayfinder.mutation.approval-resolved";
+        }
+      }
+      const pendingApproval = approvalRequested && !approvalResolved;
+      if (thread.runtimeMode === "approval-required" && command.confirmed && !pendingApproval) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "Wayfinder mutation confirmation requires a pending server approval.",
         });
       }
-      return {
+      const requested: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -1126,6 +1137,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+      if (thread.runtimeMode !== "approval-required" || !command.confirmed) return requested;
+      return [
+        requested,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-mutation-approval-resolved:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.mutation.approval-resolved",
+              summary: "Wayfinder change confirmed",
+              payload: {
+                skillRunId: command.skillRunId,
+                actionId,
+                action: command.action,
+              },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
     }
 
     case "thread.checkpoint.revert": {

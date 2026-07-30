@@ -396,9 +396,42 @@ it.layer(NodeServices.layer)("Wayfinder draft command safety", (it) => {
           createdAt: now,
         },
       });
-      expect(confirmedMutation).toMatchObject({
-        type: "thread.wayfinder-mutation-requested",
-        payload: { actionId: "action:close", confirmed: true },
+      expect(confirmedMutation).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "thread.wayfinder-mutation-requested",
+            payload: expect.objectContaining({ actionId: "action:close", confirmed: true }),
+          }),
+          expect.objectContaining({
+            type: "thread.activity-appended",
+            payload: expect.objectContaining({
+              activity: expect.objectContaining({
+                kind: "wayfinder.mutation.approval-resolved",
+              }),
+            }),
+          }),
+        ]),
+      );
+      for (const confirmedEvent of Array.isArray(confirmedMutation)
+        ? confirmedMutation
+        : [confirmedMutation]) {
+        readModel = yield* projectEvent(readModel, { ...confirmedEvent, sequence: sequence++ });
+      }
+      const replay = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("command-mutation-replay"),
+          threadId,
+          skillRunId,
+          actionId: "action:close",
+          action,
+          confirmed: true,
+          createdAt: now,
+        },
+      }).pipe(Effect.flip);
+      expect(replay).toMatchObject({
+        detail: expect.stringContaining("pending server approval"),
       });
     }),
   );

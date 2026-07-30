@@ -28,7 +28,11 @@ import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { environmentThreadDetails, environmentThreadShells } from "../../state/threads";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
-import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
+import {
+  buildMobileDependencyAction,
+  buildMobileTicketAction,
+  buildMobileWayfinderPresentation,
+} from "./WayfinderWorkbench.logic";
 
 const EMPTY_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
 
@@ -68,55 +72,54 @@ function TicketActions(props: {
       />
       <View className="flex-row flex-wrap gap-2">
         <Pressable
+          accessibilityRole="button"
           disabled={props.disabled || !value.trim()}
           className="rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            props.onMutate({
-              kind: "rename-ticket",
-              ticketNumber: props.ticket.number,
-              title: value.trim(),
-            })
-          }
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, { kind: "rename", value });
+            if (action) props.onMutate(action);
+          }}
         >
           <Text className="text-xs font-semibold">Rename</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
           disabled={props.disabled}
           className="rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            props.onMutate({
-              kind: "classify-ticket",
-              ticketNumber: props.ticket.number,
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, {
+              kind: "classify",
               classification: nextClassification,
-            })
-          }
+            });
+            if (action) props.onMutate(action);
+          }}
         >
           <Text className="text-xs font-semibold">Classify as {nextClassification}</Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
           disabled={props.disabled}
           className="rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            props.onMutate({
-              kind: props.ticket.state === "open" ? "close-ticket" : "reopen-ticket",
-              ticketNumber: props.ticket.number,
-            })
-          }
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, { kind: "toggle-state" });
+            if (action) props.onMutate(action);
+          }}
         >
           <Text className="text-xs font-semibold">
             {props.ticket.state === "open" ? "Close" : "Reopen"}
           </Text>
         </Pressable>
         <Pressable
+          accessibilityRole="button"
           disabled={props.disabled || !resolution.trim()}
           className="rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            props.onMutate({
-              kind: "resolve-ticket",
-              ticketNumber: props.ticket.number,
-              resolution: resolution.trim(),
-            })
-          }
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, {
+              kind: "resolve",
+              value: resolution,
+            });
+            if (action) props.onMutate(action);
+          }}
         >
           <Text className="text-xs font-semibold">Record resolution</Text>
         </Pressable>
@@ -418,28 +421,24 @@ function WayfinderWorkbenchContent(props: {
         </View>
         <View className="flex-row gap-2">
           <Pressable
+            accessibilityRole="button"
             disabled={working || !Number(blocker) || !Number(blocked)}
             className="rounded-lg border border-border px-3 py-2"
-            onPress={() =>
-              onMutate({
-                kind: "add-dependency",
-                blockerNumber: Number(blocker),
-                blockedNumber: Number(blocked),
-              })
-            }
+            onPress={() => {
+              const action = buildMobileDependencyAction("add-dependency", blocker, blocked);
+              if (action) onMutate(action);
+            }}
           >
             <Text className="text-xs font-semibold">Add dependency</Text>
           </Pressable>
           <Pressable
+            accessibilityRole="button"
             disabled={working || !Number(blocker) || !Number(blocked)}
             className="rounded-lg border border-border px-3 py-2"
-            onPress={() =>
-              onMutate({
-                kind: "remove-dependency",
-                blockerNumber: Number(blocker),
-                blockedNumber: Number(blocked),
-              })
-            }
+            onPress={() => {
+              const action = buildMobileDependencyAction("remove-dependency", blocker, blocked);
+              if (action) onMutate(action);
+            }}
           >
             <Text className="text-xs font-semibold">Remove</Text>
           </Pressable>
