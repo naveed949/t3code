@@ -20,9 +20,6 @@ const canonicalReadBlockers = new Set([
   "github-cli",
   "github-authentication",
   "issue-capability",
-  "required-labels",
-  "native-child-relationships",
-  "native-blocking-relationships",
 ]);
 
 function sameWayfinderMapContent(

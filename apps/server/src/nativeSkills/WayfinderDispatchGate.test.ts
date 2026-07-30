@@ -299,7 +299,7 @@ it.effect("marks a known cached map read-only when resume preflight cannot reach
   });
 });
 
-it.effect("preserves cached synchronization health for non-GitHub resume blockers", () => {
+it.effect("preserves cached synchronization health for setup-only resume blockers", () => {
   let updates = 0;
   const cachedMap = {
     canonicalReference: {
@@ -333,8 +333,8 @@ it.effect("preserves cached synchronization health for non-GitHub resume blocker
             kind: "blocked",
             blockers: [
               {
-                check: "supported-provider",
-                remediation: "Choose a supported native provider.",
+                check: "required-labels",
+                remediation: "Restore the labels required for native mutation.",
               },
             ],
           }),
