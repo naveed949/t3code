@@ -121,6 +121,12 @@ it.effect("dispatches a continuation with its synchronized read-only map project
       dispatched.type === "thread.turn.start" ? dispatched.skillInvocation?.wayfinderMap : null,
       wayfinderMap,
     );
+    assert.strictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronizedAt
+        : null,
+      wayfinderMap.lastSynchronizedAt,
+    );
   }),
 );
 
@@ -173,6 +179,17 @@ it.effect("reconnects a known canonical map to its project Workstream", () =>
         ? dispatched.skillInvocation?.reconnectWorkstreamId
         : null,
       reconnectWorkstreamId,
+    );
+    assert.isUndefined(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderMap
+        : undefined,
+    );
+    assert.strictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronizedAt
+        : null,
+      wayfinderMap.lastSynchronizedAt,
     );
   }),
 );

@@ -69,9 +69,23 @@ it("marks a reconciled map completed and keeps its canonical projection discover
     frontier: [],
     lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
   };
+  const refreshedAt = "2026-01-03T00:00:00.000Z";
   expect(
-    deriveProjectWorkstreams(ProjectId.make("project-1"), [{ ...invocation, wayfinderMap }]),
-  ).toMatchObject([{ status: "completed", wayfinderMap }]);
+    deriveProjectWorkstreams(ProjectId.make("project-1"), [
+      { ...invocation, wayfinderMap },
+      {
+        ...invocation,
+        skillRunId: SkillRunId.make("skill-run:2"),
+        createdAt: refreshedAt,
+        wayfinderSynchronizedAt: refreshedAt,
+      },
+    ]),
+  ).toMatchObject([
+    {
+      status: "completed",
+      wayfinderMap: { ...wayfinderMap, lastSynchronizedAt: refreshedAt },
+    },
+  ]);
 });
 
 it("finds the freshest Wayfinder Workstream linked to a thread", () => {

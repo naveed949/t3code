@@ -247,7 +247,7 @@ export const WayfinderMapProjection = Schema.Struct({
   decisionsSoFar: Schema.Array(
     Schema.Struct({
       title: TrimmedNonEmptyString,
-      url: TrimmedNonEmptyString,
+      url: Schema.NullOr(TrimmedNonEmptyString),
       summary: Schema.String,
     }),
   ),
@@ -276,6 +276,7 @@ export const ResolvedSkillInvocation = Schema.Struct({
   action: Schema.optional(SkillInvocationAction),
   execution: SkillExecution,
   wayfinderMap: Schema.optional(WayfinderMapProjection),
+  wayfinderSynchronizedAt: Schema.optional(IsoDateTime),
   reconnectWorkstreamId: Schema.optional(WorkstreamId),
 });
 export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;

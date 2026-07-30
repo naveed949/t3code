@@ -7,10 +7,11 @@ import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environ
 import { EnvironmentId, ThreadId, type WayfinderMapProjection } from "@t3tools/contracts";
 import type { StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { Linking, Pressable, ScrollView, View } from "react-native";
+import { Pressable, ScrollView, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
 
 import { AppText as Text } from "../../components/AppText";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { environmentThreadShells } from "../../state/threads";
 import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
 
@@ -31,7 +32,7 @@ function TicketList(props: { readonly map: WayfinderMapProjection }) {
           accessibilityRole="link"
           accessibilityLabel={`${ticket.title}, ${ticket.state}, ${ticket.classification}`}
           className="rounded-xl border border-border bg-card p-4"
-          onPress={() => void Linking.openURL(ticket.url)}
+          onPress={() => void tryOpenExternalUrl(ticket.url, "wayfinder")}
         >
           <View className="flex-row items-start justify-between gap-3">
             <Text className="min-w-0 flex-1 text-sm font-semibold text-foreground">
@@ -129,7 +130,7 @@ function WayfinderWorkbenchContent(props: {
         </Text>
         <Pressable
           accessibilityRole="link"
-          onPress={() => void Linking.openURL(map.canonicalReference.url)}
+          onPress={() => void tryOpenExternalUrl(map.canonicalReference.url, "wayfinder")}
         >
           <Text className="text-sm font-semibold text-foreground underline">
             GitHub #{map.canonicalReference.number}

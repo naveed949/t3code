@@ -27,6 +27,10 @@ shows the destination, notes, decisions, fog of war, out-of-scope entries, nativ
 dependencies, claims, issue states, canonical links, and the last synchronization time. Its frontier
 contains only open, unblocked, unclaimed tickets.
 
+The initial read-only slice supports up to 100 child tickets, labels, assignees, or native
+dependency relationships per GitHub connection. T3 blocks continuation with a specific remediation
+instead of displaying an incomplete map when GitHub reports more results.
+
 On web and desktop, the Workbench opens in the resizable right panel and supports the panel's
 maximize control. The dependency graph uses a deterministic, non-animated layout and the ticket list
 puts the frontier first. On mobile, linked threads expose a full-screen Wayfinder route with the same

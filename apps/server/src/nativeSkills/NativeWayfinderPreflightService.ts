@@ -97,13 +97,21 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
         });
       } else if (repository) {
         const synchronizedAt = DateTime.formatIso(yield* DateTime.now);
-        wayfinderMap = yield* issueTracker.loadWayfinderMap({
+        const mapResult = yield* issueTracker.loadWayfinderMap({
           cwd: input.workspaceRoot,
           repository,
           issueNumber: issue.number,
           synchronizedAt,
         });
-        if (wayfinderMap === null) {
+        if (mapResult.kind === "loaded") {
+          wayfinderMap = mapResult.map;
+        } else if (mapResult.kind === "truncated") {
+          blockers.unshift({
+            check: "continuation-issue",
+            remediation:
+              "This read-only slice supports up to 100 child tickets, labels, assignees, or dependencies per connection; split the map before continuing it.",
+          });
+        } else {
           blockers.unshift({
             check: "continuation-issue",
             remediation: "Refresh the GitHub map after its native relationships are available.",

@@ -68,11 +68,11 @@ function sectionEntries(lines: ReadonlyArray<string>): string[] {
 }
 
 function parseDecisions(lines: ReadonlyArray<string>): WayfinderMapProjection["decisionsSoFar"] {
-  return sectionEntries(lines).flatMap((line) => {
+  return sectionEntries(lines).map((line): WayfinderMapProjection["decisionsSoFar"][number] => {
     const match = /^\[([^\]]+)\]\(([^)]+)\)\s*(?:[—–-]\s*)?(.*)$/u.exec(line);
     return match?.[1] && match[2]
-      ? [{ title: match[1], url: match[2], summary: match[3]?.trim() ?? "" }]
-      : [];
+      ? { title: match[1], url: match[2], summary: match[3]?.trim() ?? "" }
+      : { title: line, url: null, summary: "" };
   });
 }
 

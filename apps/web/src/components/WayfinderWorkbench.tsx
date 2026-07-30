@@ -40,6 +40,10 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   const ticketsByNumber = new Map(
     props.map.tickets.map((ticket) => [ticket.number, ticket] as const),
   );
+  const incomingEdgesByNumber = new Map<number, typeof model.edges>();
+  for (const edge of model.edges) {
+    incomingEdgesByNumber.set(edge.to, [...(incomingEdgesByNumber.get(edge.to) ?? []), edge]);
+  }
   const columnCount = Math.max(1, ...model.nodes.map((node) => node.column + 1));
 
   return (
@@ -119,9 +123,20 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                   </p>
                   <p className="mt-1 text-xs font-medium text-foreground">{ticket.title}</p>
                   {ticket.blockedBy.length > 0 ? (
-                    <p className="mt-1 text-[10px] text-muted-foreground">
-                      Blocked by {ticket.blockedBy.map((number) => `#${number}`).join(", ")}
-                    </p>
+                    <div
+                      aria-label={`Dependencies for ${ticket.title}`}
+                      className="mt-1 flex flex-wrap gap-1 text-[10px] text-muted-foreground"
+                    >
+                      {(incomingEdgesByNumber.get(ticket.number) ?? []).map((edge) => (
+                        <span
+                          key={`${edge.from}:${edge.to}`}
+                          data-wayfinder-edge={`${edge.from}:${edge.to}`}
+                          className="rounded border border-border px-1"
+                        >
+                          #{edge.from} → #{edge.to}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
               );
@@ -167,8 +182,12 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           ) : (
             <ul className="space-y-2">
               {props.map.decisionsSoFar.map((decision) => (
-                <li key={decision.url} className="text-xs">
-                  <ReferenceLink href={decision.url}>{decision.title}</ReferenceLink>
+                <li key={`${decision.url ?? "plain"}:${decision.title}`} className="text-xs">
+                  {decision.url ? (
+                    <ReferenceLink href={decision.url}>{decision.title}</ReferenceLink>
+                  ) : (
+                    <span className="font-medium text-foreground">{decision.title}</span>
+                  )}
                   {decision.summary ? (
                     <span className="text-muted-foreground"> — {decision.summary}</span>
                   ) : null}

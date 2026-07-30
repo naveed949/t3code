@@ -233,6 +233,7 @@ describe("environment entity projections", () => {
     const harness = makeHarness();
     const projectRefsAtom = harness.projects.environmentProjectRefsAtom(ENVIRONMENT_ID);
     const threadRefsAtom = harness.threadShells.environmentThreadRefsAtom(ENVIRONMENT_ID);
+    const workstreamsAtom = harness.threadShells.workstreamsAtom;
     const projectsAtom = harness.projects.projectsAtom;
     const projectAtom = harness.projects.projectAtom({
       environmentId: ENVIRONMENT_ID,
@@ -244,6 +245,7 @@ describe("environment entity projections", () => {
     });
     const projectRefs = harness.registry.get(projectRefsAtom);
     const threadRefs = harness.registry.get(threadRefsAtom);
+    const workstreams = harness.registry.get(workstreamsAtom);
     const projects = harness.registry.get(projectsAtom);
     const project = harness.registry.get(projectAtom);
     const thread = harness.registry.get(threadAtom);
@@ -265,6 +267,7 @@ describe("environment entity projections", () => {
 
     expect(harness.registry.get(projectRefsAtom)).toBe(projectRefs);
     expect(harness.registry.get(threadRefsAtom)).toBe(threadRefs);
+    expect(harness.registry.get(workstreamsAtom)).toBe(workstreams);
     expect(harness.registry.get(projectsAtom)).toBe(projects);
     expect(harness.registry.get(projectAtom)).toBe(project);
     expect(harness.registry.get(threadAtom)).toBe(thread);

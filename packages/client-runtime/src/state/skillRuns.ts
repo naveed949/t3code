@@ -52,8 +52,15 @@ export const deriveProjectWorkstreams = (
         left.createdAt.localeCompare(right.createdAt) ||
         left.skillRunId.localeCompare(right.skillRunId),
     );
-    const wayfinderMap =
+    const storedWayfinderMap =
       sortedRuns.toReversed().find((run) => run.wayfinderMap)?.wayfinderMap ?? null;
+    const lastSynchronizedAt =
+      sortedRuns.toReversed().find((run) => run.wayfinderSynchronizedAt)?.wayfinderSynchronizedAt ??
+      storedWayfinderMap?.lastSynchronizedAt;
+    const wayfinderMap =
+      storedWayfinderMap && lastSynchronizedAt
+        ? { ...storedWayfinderMap, lastSynchronizedAt }
+        : storedWayfinderMap;
     const completed =
       wayfinderMap !== null &&
       (wayfinderMap.canonicalReference.state === "closed" ||

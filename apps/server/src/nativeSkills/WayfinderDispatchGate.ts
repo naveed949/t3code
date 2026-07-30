@@ -13,6 +13,15 @@ import * as Option from "effect/Option";
 
 import type { NativeWayfinderPreflightService } from "./NativeWayfinderPreflightService.ts";
 
+function sameWayfinderMapContent(
+  left: NonNullable<SkillInvocation["wayfinderMap"]>,
+  right: NonNullable<SkillInvocation["wayfinderMap"]>,
+): boolean {
+  const { lastSynchronizedAt: _leftSync, ...leftContent } = left;
+  const { lastSynchronizedAt: _rightSync, ...rightContent } = right;
+  return JSON.stringify(leftContent) === JSON.stringify(rightContent);
+}
+
 interface GateDependencies {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly getThread: (
@@ -90,7 +99,7 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
     });
   }
   if (command.type === "thread.turn.start" && command.skillInvocation && result.wayfinderMap) {
-    const existingRun = (yield* dependencies.getSkillRuns())
+    const matchingRuns = (yield* dependencies.getSkillRuns())
       .filter(
         (run) =>
           run.projectId === projectId &&
@@ -101,12 +110,17 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
         (left, right) =>
           right.createdAt.localeCompare(left.createdAt) ||
           right.skillRunId.localeCompare(left.skillRunId),
-      )[0];
+      );
+    const existingRun = matchingRuns[0];
+    const existingMap = matchingRuns.find((run) => run.wayfinderMap)?.wayfinderMap;
+    const shouldPersistProjection =
+      !existingMap || !sameWayfinderMapContent(existingMap, result.wayfinderMap);
     return {
       ...command,
       skillInvocation: {
         ...command.skillInvocation,
-        wayfinderMap: result.wayfinderMap,
+        ...(shouldPersistProjection ? { wayfinderMap: result.wayfinderMap } : {}),
+        wayfinderSynchronizedAt: result.wayfinderMap.lastSynchronizedAt,
         ...(existingRun ? { reconnectWorkstreamId: existingRun.workstreamId } : {}),
       },
     } satisfies OrchestrationCommand;
