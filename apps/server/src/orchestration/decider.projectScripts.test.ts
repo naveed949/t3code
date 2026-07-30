@@ -275,6 +275,20 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           ]),
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
+          skillInvocation: {
+            skill: {
+              name: "wayfinder",
+              path: "/skills/wayfinder/SKILL.md",
+              contentDigest:
+                "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+            },
+            arguments: "chart a release",
+            execution: {
+              mode: "native",
+              adapterId: "wayfinder",
+              adapterVersion: 1,
+            },
+          },
           createdAt: now,
         },
         readModel,
@@ -298,7 +312,24 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           { id: "fastMode", value: true },
         ]),
         runtimeMode: "approval-required",
+        skillInvocation: {
+          projectId: asProjectId("project-1"),
+          threadId: ThreadId.make("thread-1"),
+          skill: {
+            name: "wayfinder",
+            path: "/skills/wayfinder/SKILL.md",
+          },
+          arguments: "chart a release",
+          execution: {
+            mode: "native",
+            adapterId: "wayfinder",
+            adapterVersion: 1,
+          },
+          createdAt: now,
+        },
       });
+      expect(turnStartEvent.payload.skillInvocation?.workstreamId).toMatch(/^workstream:/);
+      expect(turnStartEvent.payload.skillInvocation?.skillRunId).toMatch(/^skill-run:/);
     }),
   );
 

@@ -113,6 +113,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
+  onNativeSkillAction: (item: Extract<ComposerCommandItem, { type: "skill" }>) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(
@@ -162,6 +163,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                       isActive={props.activeItemId === item.id}
                       onHighlight={props.onHighlightedItemChange}
                       onSelect={props.onSelect}
+                      onNativeSkillAction={props.onNativeSkillAction}
                     />
                   ))}
                 </CommandGroup>
@@ -205,9 +207,11 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   isActive: boolean;
   onHighlight: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
+  onNativeSkillAction: (item: Extract<ComposerCommandItem, { type: "skill" }>) => void;
 }) {
   const skillSourceLabel =
     props.item.type === "skill" ? formatProviderSkillInstallSource(props.item.skill) : null;
+  const skillItem = props.item.type === "skill" ? props.item : null;
 
   return (
     <CommandItem
@@ -242,7 +246,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           <SkillGlyph className="size-3.5" />
         </span>
       ) : null}
-      {props.item.type === "skill" ? (
+      {skillItem ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/80">
           <SkillGlyph className="size-3.5" />
         </span>
@@ -255,6 +259,25 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       </span>
       {skillSourceLabel ? (
         <span className="shrink-0 pl-2 text-muted-foreground/70 text-xs">{skillSourceLabel}</span>
+      ) : null}
+      {props.item.type === "skill" ? (
+        <button
+          type="button"
+          className="shrink-0 rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-background/70 hover:text-foreground"
+          aria-label={`Run ${props.item.label} as a native skill action`}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (skillItem) {
+              props.onNativeSkillAction(skillItem);
+            }
+          }}
+        >
+          Run
+        </button>
       ) : null}
     </CommandItem>
   );

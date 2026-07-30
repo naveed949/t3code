@@ -10,6 +10,7 @@ import {
   type ProviderApprovalDecision,
   ProviderInstanceId,
   type ServerProvider,
+  type SkillInvocationRequest,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
@@ -270,6 +271,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveChatSkillInvocationRequest,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -1259,6 +1261,10 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.setLogicalProjectDraftThreadId,
   );
   const promptRef = useRef("");
+  const explicitSkillInvocationRequestRef = useRef<SkillInvocationRequest | null>(null);
+  const onExplicitSkillInvocation = useCallback((request: SkillInvocationRequest) => {
+    explicitSkillInvocationRequestRef.current = request;
+  }, []);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
@@ -4642,6 +4648,13 @@ function ChatViewContent(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
+    const skillInvocationRequest = resolveChatSkillInvocationRequest({
+      text: messageTextForSend,
+      providerInstanceId: ctxSelectedModelSelection.instanceId,
+      providers: providerStatuses,
+      explicitRequest: explicitSkillInvocationRequestRef.current,
+    });
+    explicitSkillInvocationRequestRef.current = null;
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
@@ -4813,6 +4826,7 @@ function ChatViewContent(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode,
+          ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
@@ -5890,6 +5904,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            onExplicitSkillInvocation={onExplicitSkillInvocation}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}

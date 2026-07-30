@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ProviderInstanceId,
+  SkillRunId,
+  ThreadId,
+  TurnId,
+  WorkstreamId,
+} from "@t3tools/contracts";
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from "@t3tools/contracts";
 
 import { applyShellStreamEvent } from "./shellReducer.ts";
@@ -154,6 +161,117 @@ describe("applyShellStreamEvent", () => {
 
       expect(next.threads).toHaveLength(1);
       expect(next.threads[0]?.title).toBe("Updated Thread");
+    });
+
+    it("retains a Skill Run after an ordinary follow-up becomes the latest turn", () => {
+      const skillInvocation = {
+        workstreamId: WorkstreamId.make("workstream:1"),
+        skillRunId: SkillRunId.make("skill-run:1"),
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        execution: {
+          mode: "native" as const,
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+        createdAt: "2026-04-01T00:00:01.000Z",
+      };
+      const withSkillRun = applyShellStreamEvent(baseSnapshot, {
+        kind: "thread-upserted",
+        sequence: 1,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-skill"),
+            state: "running",
+            requestedAt: skillInvocation.createdAt,
+            startedAt: skillInvocation.createdAt,
+            completedAt: null,
+            assistantMessageId: null,
+            skillInvocation,
+          },
+        },
+      });
+
+      const afterFollowUp = applyShellStreamEvent(withSkillRun, {
+        kind: "thread-upserted",
+        sequence: 2,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-follow-up"),
+            state: "running",
+            requestedAt: "2026-04-01T00:00:02.000Z",
+            startedAt: "2026-04-01T00:00:02.000Z",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        },
+      });
+
+      expect(afterFollowUp.skillRuns).toEqual([skillInvocation]);
+    });
+
+    it("keeps only the latest Skill Run summary for each thread", () => {
+      const firstInvocation = {
+        workstreamId: WorkstreamId.make("workstream:1"),
+        skillRunId: SkillRunId.make("skill-run:1"),
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:first",
+        },
+        execution: { mode: "generic" as const, reason: "unsupported-provider" as const },
+        createdAt: "2026-04-01T00:00:01.000Z",
+      };
+      const latestInvocation = {
+        ...firstInvocation,
+        workstreamId: WorkstreamId.make("workstream:2"),
+        skillRunId: SkillRunId.make("skill-run:2"),
+        createdAt: "2026-04-01T00:00:02.000Z",
+      };
+      const withFirstRun = applyShellStreamEvent(baseSnapshot, {
+        kind: "thread-upserted",
+        sequence: 1,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "completed",
+            requestedAt: firstInvocation.createdAt,
+            startedAt: firstInvocation.createdAt,
+            completedAt: firstInvocation.createdAt,
+            assistantMessageId: null,
+            skillInvocation: firstInvocation,
+          },
+        },
+      });
+
+      const withLatestRun = applyShellStreamEvent(withFirstRun, {
+        kind: "thread-upserted",
+        sequence: 2,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-2"),
+            state: "running",
+            requestedAt: latestInvocation.createdAt,
+            startedAt: latestInvocation.createdAt,
+            completedAt: null,
+            assistantMessageId: null,
+            skillInvocation: latestInvocation,
+          },
+        },
+      });
+
+      expect(withLatestRun.skillRuns).toEqual([latestInvocation]);
     });
   });
 

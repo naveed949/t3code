@@ -887,7 +887,7 @@ const CLAUDE_SETTING_SOURCES = [
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
 
-function buildPromptText(
+export function buildPromptText(
   input: ProviderSendTurnInput,
   boundInstanceId: ProviderInstanceId,
 ): string {
@@ -900,7 +900,13 @@ function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel);
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  const prompt =
+    input.skillInvocation?.execution.mode === "native"
+      ? `/${input.skillInvocation.skill.name}${
+          input.skillInvocation.arguments ? ` ${input.skillInvocation.arguments}` : ""
+        }`
+      : (input.input?.trim() ?? "");
+  return applyClaudePromptEffortPrefix(prompt, promptEffort);
 }
 
 function buildUserMessage(input: {

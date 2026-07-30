@@ -114,6 +114,10 @@ export interface CodexSessionRuntimeSendTurnInput {
     readonly type: "image";
     readonly url: string;
   }>;
+  readonly skill?: {
+    readonly name: string;
+    readonly path: string;
+  };
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
@@ -366,6 +370,10 @@ export function buildTurnStartParams(input: {
     readonly type: "image";
     readonly url: string;
   }>;
+  readonly skill?: {
+    readonly name: string;
+    readonly path: string;
+  };
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
@@ -375,6 +383,13 @@ export function buildTurnStartParams(input: {
   CodexErrors.CodexAppServerProtocolParseError
 > {
   const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
+  if (input.skill) {
+    turnInput.push({
+      type: "skill",
+      name: input.skill.name,
+      path: input.skill.path,
+    });
+  }
   if (input.prompt) {
     turnInput.push({
       type: "text",
@@ -1297,6 +1312,7 @@ export const makeCodexSessionRuntime = (
             runtimeMode: options.runtimeMode,
             ...(input.input ? { prompt: input.input } : {}),
             ...(input.attachments ? { attachments: input.attachments } : {}),
+            ...(input.skill ? { skill: input.skill } : {}),
             ...(normalizedModel ? { model: normalizedModel } : {}),
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),

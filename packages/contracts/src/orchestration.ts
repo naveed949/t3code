@@ -19,6 +19,8 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
   TurnId,
+  WorkstreamId,
+  SkillRunId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -177,6 +179,53 @@ export const ChatAttachment = Schema.Union([ChatImageAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
+
+export const SkillInvocationRequest = Schema.Struct({
+  skillName: TrimmedNonEmptyString,
+  skillPath: TrimmedNonEmptyString,
+  arguments: Schema.optional(TrimmedNonEmptyString),
+});
+export type SkillInvocationRequest = typeof SkillInvocationRequest.Type;
+
+export const PinnedSkillIdentity = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  contentDigest: TrimmedNonEmptyString.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+});
+export type PinnedSkillIdentity = typeof PinnedSkillIdentity.Type;
+
+export const NativeSkillExecution = Schema.Struct({
+  mode: Schema.Literal("native"),
+  adapterId: TrimmedNonEmptyString,
+  adapterVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
+export type NativeSkillExecution = typeof NativeSkillExecution.Type;
+
+export const GenericSkillExecution = Schema.Struct({
+  mode: Schema.Literal("generic"),
+  reason: Schema.Literals(["unsupported-provider", "unsupported-digest", "unregistered-skill"]),
+});
+export type GenericSkillExecution = typeof GenericSkillExecution.Type;
+
+export const SkillExecution = Schema.Union([NativeSkillExecution, GenericSkillExecution]);
+export type SkillExecution = typeof SkillExecution.Type;
+
+export const ResolvedSkillInvocation = Schema.Struct({
+  skill: PinnedSkillIdentity,
+  arguments: Schema.optional(TrimmedNonEmptyString),
+  execution: SkillExecution,
+});
+export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;
+
+export const SkillInvocation = Schema.Struct({
+  ...ResolvedSkillInvocation.fields,
+  workstreamId: WorkstreamId,
+  skillRunId: SkillRunId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+export type SkillInvocation = typeof SkillInvocation.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -338,6 +387,7 @@ export const OrchestrationLatestTurn = Schema.Struct({
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(SkillInvocation),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
@@ -430,6 +480,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  skillRuns: Schema.optional(Schema.Array(SkillInvocation)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -682,6 +733,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(ResolvedSkillInvocation),
   createdAt: IsoDateTime,
 });
 
@@ -701,6 +753,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocationRequest: Schema.optional(SkillInvocationRequest),
   createdAt: IsoDateTime,
 });
 
@@ -1041,6 +1094,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(SkillInvocation),
   createdAt: IsoDateTime,
 });
 

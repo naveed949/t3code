@@ -20,6 +20,9 @@ import {
   type RuntimeMode,
   ThreadId,
   ProviderInstanceId,
+  ProjectId,
+  SkillRunId,
+  WorkstreamId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { assert, describe, it } from "@effect/vitest";
@@ -37,8 +40,46 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  buildPromptText,
+  makeClaudeAdapter,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+
+describe("buildPromptText", () => {
+  it("renders a native skill invocation through Claude's slash-command path", () => {
+    assert.strictEqual(
+      buildPromptText(
+        {
+          threadId: ThreadId.make("thread-native-skill"),
+          input: "$wayfinder chart a release",
+          skillInvocation: {
+            workstreamId: WorkstreamId.make("workstream:1"),
+            skillRunId: SkillRunId.make("skill-run:1"),
+            projectId: ProjectId.make("project-1"),
+            threadId: ThreadId.make("thread-native-skill"),
+            skill: {
+              name: "wayfinder",
+              path: "/skills/wayfinder/SKILL.md",
+              contentDigest:
+                "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+            },
+            arguments: "chart a release",
+            execution: {
+              mode: "native",
+              adapterId: "wayfinder",
+              adapterVersion: 1,
+            },
+            createdAt: "2026-01-01T00:00:00.000Z",
+          },
+        },
+        ProviderInstanceId.make("claudeAgent"),
+      ),
+      "/wayfinder chart a release",
+    );
+  });
+});
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(

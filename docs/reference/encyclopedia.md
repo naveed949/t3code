@@ -7,6 +7,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
+- [Skill runs](#skill-runs)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
 
@@ -77,6 +78,26 @@ The current materialized view of orchestration state. In [the contracts][1], it 
 #### Reactor
 
 A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
+
+### Skill runs
+
+#### Workstream
+
+A project-scoped identity that groups related skill work. The first explicit skill invocation creates
+the Workstream identifier in [decider.ts][8]; clients derive its current representation from the
+shared project Skill Run list and each run's linked thread.
+
+#### Skill Run
+
+One execution of a pinned skill within a Workstream. Its durable invocation record includes the skill
+name, installed path, content digest, provider execution mode, owning project and thread, and creation
+time. Native compatibility is decided by [NativeSkillAdapterRegistry.ts][25].
+
+#### Native skill adapter
+
+A verified mapping from a pinned skill identity to a provider-native invocation mechanism. A missing
+provider mapping or a mismatched digest uses generic execution without claiming native support. See
+[NativeSkillAdapterRegistry.ts][25].
 
 #### Receipt
 
@@ -178,3 +199,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../apps/server/src/checkpointing/Utils.ts
 [23]: ../apps/server/src/checkpointing/Diffs.ts
 [24]: ./architecture.md
+[25]: ../../apps/server/src/nativeSkills/NativeSkillAdapterRegistry.ts
