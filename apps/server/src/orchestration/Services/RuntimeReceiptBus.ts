@@ -14,7 +14,14 @@
  *
  * @module RuntimeReceiptBus
  */
-import { CheckpointRef, IsoDateTime, NonNegativeInt, ThreadId, TurnId } from "@t3tools/contracts";
+import {
+  CheckpointRef,
+  IsoDateTime,
+  NonNegativeInt,
+  SkillRunId,
+  ThreadId,
+  TurnId,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
@@ -49,10 +56,21 @@ export const TurnProcessingQuiescedReceipt = Schema.Struct({
 });
 export type TurnProcessingQuiescedReceipt = typeof TurnProcessingQuiescedReceipt.Type;
 
+export const WayfinderPublicationProgressReceipt = Schema.Struct({
+  type: Schema.Literal("wayfinder.publication.progress"),
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  status: Schema.Literals(["awaiting-approval", "publishing", "failed", "synchronized"]),
+  nextStep: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+});
+export type WayfinderPublicationProgressReceipt = typeof WayfinderPublicationProgressReceipt.Type;
+
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
   CheckpointDiffFinalizedReceipt,
   TurnProcessingQuiescedReceipt,
+  WayfinderPublicationProgressReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 

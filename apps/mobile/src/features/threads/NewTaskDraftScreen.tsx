@@ -8,6 +8,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { useFontFamily } from "../../lib/useFontFamily";
 
 import { EnvironmentId } from "@t3tools/contracts";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -25,6 +26,7 @@ import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStri
 import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ComposerSurface } from "./ThreadComposer";
+import { WayfinderLaunchChooser } from "./WayfinderLaunchChooser";
 
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
@@ -804,6 +806,18 @@ export function NewTaskDraftScreen(props: {
     const runtimeMode = draft.runtimeMode ?? flow.runtimeMode;
     const interactionMode = draft.interactionMode ?? flow.interactionMode;
     const initialMessageText = draft.text.trim();
+    const skillInvocationRequest = resolveNativeSkillRunInvocation({
+      kind: "leading-token",
+      text: initialMessageText,
+      skills: flow.selectedProviderSkills,
+    });
+    if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+      Alert.alert(
+        "Choose a continuation issue",
+        "Enter one issue number or GitHub issue URL after continue-map.",
+      );
+      return;
+    }
 
     if (
       !modelSelection ||
@@ -873,6 +887,7 @@ export function NewTaskDraftScreen(props: {
       interactionMode,
       initialMessageText,
       initialAttachments: draft.attachments,
+      ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
       ...(editingPendingTask
         ? {
             turnMetadata: {
@@ -1065,6 +1080,7 @@ export function NewTaskDraftScreen(props: {
                 : "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 40%, rgba(255,255,255,0.95) 100%)",
             }}
           >
+            <WayfinderLaunchChooser prompt={flow.prompt} onChangePrompt={flow.setPrompt} />
             <ComposerSurface
               isDarkMode={isDarkMode}
               style={
@@ -1129,7 +1145,10 @@ export function NewTaskDraftScreen(props: {
       <NativeStackScreenOptions options={{ title: selectedProject.title }} />
 
       <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1">
-        <View className="min-h-0 flex-1 px-5 pt-2">{promptEditor}</View>
+        <View className="min-h-0 flex-1 px-5 pt-2">
+          <WayfinderLaunchChooser prompt={flow.prompt} onChangePrompt={flow.setPrompt} />
+          {promptEditor}
+        </View>
 
         <View className="border-t border-border" style={{ paddingBottom: controlsBottomPadding }}>
           {flow.attachments.length > 0 ? (

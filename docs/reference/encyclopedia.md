@@ -7,6 +7,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
+- [Skill runs](#skill-runs)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
 
@@ -77,6 +78,64 @@ The current materialized view of orchestration state. In [the contracts][1], it 
 #### Reactor
 
 A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
+
+### Skill runs
+
+#### Workstream
+
+A project-scoped identity that groups related skill work. The first explicit skill invocation creates
+the Workstream identifier in [decider.ts][8]; clients derive its current representation from the
+shared project Skill Run list and each run's linked thread.
+
+#### Skill Run
+
+One execution of a pinned skill within a Workstream. Its durable invocation record includes the skill
+name, installed path, content digest, provider execution mode, owning project and thread, and creation
+time. Native compatibility is decided by [NativeSkillAdapterRegistry.ts][25].
+
+#### Wayfinder map
+
+The canonical GitHub issue map attached to a Wayfinder Workstream. Its read-only synchronized
+projection records the destination, notes, decisions, fog of war, out-of-scope items, child-ticket
+states and dependency relationships, claims, classifications, canonical reference, and last sync
+time. Reconnecting to the same canonical map creates a new Skill Run in the existing Workstream.
+
+#### Wayfinder Workbench
+
+The client view of a synchronized Wayfinder map. Web and desktop expose it as a right-panel surface;
+mobile exposes a full-screen route. Both prioritize the **frontier**: open, unblocked, unclaimed
+child tickets that are ready to advance.
+
+#### Native skill adapter
+
+A verified mapping from a pinned skill identity to a provider-native invocation mechanism. A missing
+provider mapping or a mismatched digest uses generic execution without claiming native support. See
+[NativeSkillAdapterRegistry.ts][25].
+
+#### Unpublished Wayfinder draft
+
+A non-canonical map owned by a native Wayfinder `new-map` Skill Run. It contains the destination,
+notes, confirmed decisions, agent proposals, candidate tickets, fog of war, out-of-scope entries,
+and proposed dependency edges. Clients recover it from the durable Skill Run and structured-input
+activities; GitHub is unchanged until a later publication flow. See [nativeSkills.ts][26].
+
+#### Decision Card
+
+The client surface for one pending Wayfinder choice. It presents the agent's recommendation,
+reasoning, bounded options, and a free-form answer without treating the proposal as confirmed.
+
+#### Decision receipt
+
+The structured record of the user's answer to a Decision Card. A matching
+`user-input.requested`/`user-input.resolved` pair produces the receipt and moves the proposal into
+confirmed draft state. See [wayfinderDraft.ts][27].
+
+#### Wayfinder publication
+
+The permission-aware server reactor that turns one confirmed unpublished draft into a canonical
+GitHub map. Its persisted progress records verified labels, issues, child relationships, blocking
+relationships, and the exact next step. Publication can resume those receipts idempotently; only a
+successful canonical reconciliation transfers authority to the synchronized Workbench projection.
 
 #### Receipt
 
@@ -178,3 +237,6 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../apps/server/src/checkpointing/Utils.ts
 [23]: ../apps/server/src/checkpointing/Diffs.ts
 [24]: ./architecture.md
+[25]: ../../apps/server/src/nativeSkills/NativeSkillAdapterRegistry.ts
+[26]: ../../packages/contracts/src/nativeSkills.ts
+[27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts

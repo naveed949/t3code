@@ -11,6 +11,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
+  SkillInvocation,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -102,6 +103,11 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   assistantMessageId: Schema.NullOr(MessageId),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  skillInvocation: Schema.NullOr(Schema.fromJsonString(SkillInvocation)),
+});
+const ProjectionSkillRunDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  skillInvocation: Schema.fromJsonString(SkillInvocation),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
 const ProjectionCountsRowSchema = Schema.Struct({
@@ -206,6 +212,7 @@ function mapLatestTurn(
           },
         }
       : {}),
+    ...(row.skillInvocation !== null ? { skillInvocation: row.skillInvocation } : {}),
   };
 }
 
@@ -584,7 +591,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           turns.completed_at AS "completedAt",
           turns.assistant_message_id AS "assistantMessageId",
           turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          turns.source_proposed_plan_id AS "sourceProposedPlanId"
+          turns.source_proposed_plan_id AS "sourceProposedPlanId",
+          turns.skill_invocation_json AS "skillInvocation"
         FROM projection_threads threads
         JOIN projection_turns turns
           ON turns.thread_id = threads.thread_id
@@ -608,7 +616,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           turns.completed_at AS "completedAt",
           turns.assistant_message_id AS "assistantMessageId",
           turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          turns.source_proposed_plan_id AS "sourceProposedPlanId"
+          turns.source_proposed_plan_id AS "sourceProposedPlanId",
+          turns.skill_invocation_json AS "skillInvocation"
         FROM projection_threads threads
         JOIN projection_turns turns
           ON turns.thread_id = threads.thread_id
@@ -634,7 +643,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           turns.completed_at AS "completedAt",
           turns.assistant_message_id AS "assistantMessageId",
           turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          turns.source_proposed_plan_id AS "sourceProposedPlanId"
+          turns.source_proposed_plan_id AS "sourceProposedPlanId",
+          turns.skill_invocation_json AS "skillInvocation"
         FROM projection_threads threads
         JOIN projection_turns turns
           ON turns.thread_id = threads.thread_id
@@ -643,6 +653,154 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND threads.archived_at IS NOT NULL
           AND threads.latest_turn_id IS NOT NULL
         ORDER BY turns.thread_id ASC
+      `,
+  });
+
+  const listActiveSkillRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          ranked."threadId",
+          ranked."skillInvocation"
+        FROM (
+          SELECT
+            turns.thread_id AS "threadId",
+            turns.skill_invocation_json AS "skillInvocation",
+            ROW_NUMBER() OVER (
+              PARTITION BY turns.thread_id
+              ORDER BY turns.requested_at DESC, turns.turn_id DESC
+            ) AS run_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderMap') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS map_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderDraft') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS draft_rank
+          FROM projection_turns turns
+          INNER JOIN projection_threads threads
+            ON threads.thread_id = turns.thread_id
+          WHERE turns.skill_invocation_json IS NOT NULL
+            AND threads.deleted_at IS NULL
+            AND threads.archived_at IS NULL
+        ) ranked
+        WHERE ranked.run_rank = 1
+          OR (
+            ranked.map_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderMap') IS NOT NULL
+          )
+          OR (
+            ranked.draft_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderDraft') IS NOT NULL
+            AND COALESCE(
+              json_extract(ranked."skillInvocation", '$.wayfinderPublication.status'),
+              ''
+            ) != 'synchronized'
+          )
+        ORDER BY ranked."threadId" ASC
+      `,
+  });
+
+  const listSkillRunRowsByThreadId = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          ranked."threadId",
+          ranked."skillInvocation"
+        FROM (
+          SELECT
+            turns.thread_id AS "threadId",
+            turns.skill_invocation_json AS "skillInvocation",
+            ROW_NUMBER() OVER (
+              PARTITION BY turns.thread_id
+              ORDER BY turns.requested_at DESC, turns.turn_id DESC
+            ) AS run_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderMap') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS map_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderDraft') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS draft_rank
+          FROM projection_turns turns
+          INNER JOIN projection_threads threads
+            ON threads.thread_id = turns.thread_id
+          WHERE turns.thread_id = ${threadId}
+            AND turns.skill_invocation_json IS NOT NULL
+            AND threads.deleted_at IS NULL
+            AND threads.archived_at IS NULL
+        ) ranked
+        WHERE ranked.run_rank = 1
+          OR (
+            ranked.map_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderMap') IS NOT NULL
+          )
+          OR (
+            ranked.draft_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderDraft') IS NOT NULL
+            AND COALESCE(
+              json_extract(ranked."skillInvocation", '$.wayfinderPublication.status'),
+              ''
+            ) != 'synchronized'
+          )
+        ORDER BY ranked."threadId" ASC
+      `,
+  });
+
+  const listArchivedSkillRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          ranked."threadId",
+          ranked."skillInvocation"
+        FROM (
+          SELECT
+            turns.thread_id AS "threadId",
+            turns.skill_invocation_json AS "skillInvocation",
+            ROW_NUMBER() OVER (
+              PARTITION BY turns.thread_id
+              ORDER BY turns.requested_at DESC, turns.turn_id DESC
+            ) AS run_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderMap') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS map_rank
+          FROM projection_turns turns
+          INNER JOIN projection_threads threads
+            ON threads.thread_id = turns.thread_id
+          WHERE turns.skill_invocation_json IS NOT NULL
+            AND threads.deleted_at IS NULL
+            AND threads.archived_at IS NOT NULL
+        ) ranked
+        WHERE ranked.run_rank = 1
+          OR (
+            ranked.map_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderMap') IS NOT NULL
+          )
+        ORDER BY ranked."threadId" ASC
       `,
   });
 
@@ -882,7 +1040,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           turns.completed_at AS "completedAt",
           turns.assistant_message_id AS "assistantMessageId",
           turns.source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
-          turns.source_proposed_plan_id AS "sourceProposedPlanId"
+          turns.source_proposed_plan_id AS "sourceProposedPlanId",
+          turns.skill_invocation_json AS "skillInvocation"
         FROM projection_threads threads
         JOIN projection_turns turns
           ON turns.thread_id = threads.thread_id
@@ -1153,6 +1312,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                         },
                       }
                     : {}),
+                  ...(row.skillInvocation !== null ? { skillInvocation: row.skillInvocation } : {}),
                 });
               }
 
@@ -1469,19 +1629,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listProjectionStateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:decodeRows",
+          Effect.all([
+            listActiveSkillRunRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:listSkillRuns:query",
+                  "ProjectionSnapshotQuery.getShellSnapshot:listSkillRuns:decodeRows",
+                ),
               ),
             ),
-          ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:query",
+                  "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+          ]),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, runStateRows]) =>
           Effect.gen(function* () {
+            const [skillRunRows, stateRows] = runStateRows;
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1549,6 +1720,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
               ),
+              skillRuns: skillRunRows.map((row) => row.skillInvocation),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 
@@ -1605,19 +1777,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listProjectionStateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:query",
-                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:decodeRows",
+          Effect.all([
+            listArchivedSkillRunRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listSkillRuns:query",
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listSkillRuns:decodeRows",
+                ),
               ),
             ),
-          ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:query",
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+          ]),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, runStateRows]) =>
           Effect.gen(function* () {
+            const [skillRunRows, stateRows] = runStateRows;
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1686,6 +1869,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
                 }),
               ),
+              skillRuns: skillRunRows.map((row) => row.skillInvocation),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 
@@ -2103,6 +2287,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         ),
       );
 
+  const getSkillRunsByThreadId: ProjectionSnapshotQueryShape["getSkillRunsByThreadId"] = Effect.fn(
+    "ProjectionSnapshotQuery.getSkillRunsByThreadId",
+  )(
+    function* (threadId) {
+      const rows = yield* listSkillRunRowsByThreadId({ threadId });
+      return rows.map((row) => row.skillInvocation);
+    },
+    (effect) =>
+      effect.pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSkillRunsByThreadId:query",
+            "ProjectionSnapshotQuery.getSkillRunsByThreadId:decodeRows",
+          ),
+        ),
+      ),
+  );
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2116,6 +2318,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getThreadCheckpointContext,
     getFullThreadDiffContext,
     getThreadShellById,
+    getSkillRunsByThreadId,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

@@ -784,6 +784,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":
+        case "thread.wayfinder-publication-requested":
+        case "thread.wayfinder-publication-updated":
         case "thread.approval-response-requested":
         case "thread.user-input-response-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -1085,7 +1087,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             messageId: event.payload.messageId,
             sourceProposedPlanThreadId: event.payload.sourceProposedPlan?.threadId ?? null,
             sourceProposedPlanId: event.payload.sourceProposedPlan?.planId ?? null,
+            skillInvocation: event.payload.skillInvocation ?? null,
             requestedAt: event.payload.createdAt,
+          });
+          return;
+        }
+
+        case "thread.wayfinder-publication-updated": {
+          const turns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const invocation = turns
+            .map((turn) => turn.skillInvocation)
+            .find(
+              (candidate) =>
+                candidate !== null && candidate.skillRunId === event.payload.skillRunId,
+            );
+          if (!invocation) return;
+          yield* projectionTurnRepository.updateSkillInvocation({
+            threadId: event.payload.threadId,
+            skillRunId: event.payload.skillRunId,
+            skillInvocation: {
+              ...invocation,
+              wayfinderPublication: event.payload.publication,
+              ...(event.payload.wayfinderMap !== undefined
+                ? {
+                    wayfinderMap: event.payload.wayfinderMap,
+                    wayfinderSynchronizedAt: event.payload.wayfinderMap.lastSynchronizedAt,
+                  }
+                : {}),
+            },
           });
           return;
         }
@@ -1181,6 +1212,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 (Option.isSome(pendingTurnStart)
                   ? pendingTurnStart.value.sourceProposedPlanId
                   : null),
+              skillInvocation:
+                existingTurn.value.skillInvocation ??
+                (Option.isSome(pendingTurnStart) ? pendingTurnStart.value.skillInvocation : null),
               startedAt:
                 existingTurn.value.startedAt ??
                 (Option.isSome(pendingTurnStart)
@@ -1204,6 +1238,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 : null,
               sourceProposedPlanId: Option.isSome(pendingTurnStart)
                 ? pendingTurnStart.value.sourceProposedPlanId
+                : null,
+              skillInvocation: Option.isSome(pendingTurnStart)
+                ? pendingTurnStart.value.skillInvocation
                 : null,
               assistantMessageId: null,
               state: "running",
@@ -1273,6 +1310,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
+            skillInvocation: null,
             assistantMessageId: event.payload.messageId,
             state: settlesTurn ? "completed" : "running",
             requestedAt: event.payload.createdAt,
@@ -1310,6 +1348,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
+            skillInvocation: null,
             assistantMessageId: null,
             state: "interrupted",
             requestedAt: event.payload.createdAt,
@@ -1365,6 +1404,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingMessageId: null,
             sourceProposedPlanThreadId: null,
             sourceProposedPlanId: null,
+            skillInvocation: null,
             assistantMessageId: event.payload.assistantMessageId,
             state: turnStillRunning ? "running" : nextState,
             requestedAt: event.payload.completedAt,

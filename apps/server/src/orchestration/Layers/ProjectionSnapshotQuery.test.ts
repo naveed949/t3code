@@ -6,11 +6,16 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  SkillInvocation,
+  SkillRunId,
+  WorkstreamId,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -24,6 +29,7 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+const encodeSkillInvocationJson = Schema.encodeEffect(Schema.fromJsonString(SkillInvocation));
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -38,7 +44,6 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
-
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_state`;
       yield* sql`DELETE FROM projection_thread_proposed_plans`;
@@ -1274,6 +1279,57 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
+      const skillInvocation = {
+        workstreamId: WorkstreamId.make("workstream:snapshot"),
+        skillRunId: SkillRunId.make("skill-run:snapshot"),
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        arguments: "chart a release",
+        execution: {
+          mode: "native",
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+        wayfinderMap: {
+          canonicalReference: {
+            number: 42,
+            title: "Release map",
+            url: "https://github.com/t3tools/t3code/issues/42",
+            state: "open",
+          },
+          destination: "A release plan.",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: "2026-04-03T00:00:30.000Z",
+        },
+        createdAt: "2026-04-03T00:00:30.000Z",
+      } satisfies SkillInvocation;
+      const { wayfinderMap: _wayfinderMap, ...compactInvocationFields } = skillInvocation;
+      const compactInvocation = {
+        ...compactInvocationFields,
+        skillRunId: SkillRunId.make("skill-run:reconnect"),
+        wayfinderSynchronizedAt: "2026-04-03T00:00:40.000Z",
+        createdAt: "2026-04-03T00:00:40.000Z",
+      } satisfies SkillInvocation;
+      const draftInvocation = {
+        ...compactInvocationFields,
+        workstreamId: WorkstreamId.make("workstream:draft"),
+        skillRunId: SkillRunId.make("skill-run:draft"),
+        wayfinderDraft: createEmptyWayfinderDraft("2026-04-03T00:00:25.000Z"),
+        createdAt: "2026-04-03T00:00:25.000Z",
+      } satisfies SkillInvocation;
+      const encodedSkillInvocation = yield* encodeSkillInvocationJson(skillInvocation);
+      const encodedCompactInvocation = yield* encodeSkillInvocationJson(compactInvocation);
+      const encodedDraftInvocation = yield* encodeSkillInvocationJson(draftInvocation);
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
@@ -1351,6 +1407,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pending_message_id,
           source_proposed_plan_thread_id,
           source_proposed_plan_id,
+          skill_invocation_json,
           assistant_message_id,
           state,
           requested_at,
@@ -1369,6 +1426,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             NULL,
             NULL,
             NULL,
+            NULL,
             'running',
             '2026-04-03T00:00:30.000Z',
             '2026-04-03T00:00:30.000Z',
@@ -1384,11 +1442,46 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'message-user-1',
             NULL,
             NULL,
+            ${encodedSkillInvocation},
             'message-assistant-1',
             'completed',
             '2026-04-03T00:00:05.000Z',
             '2026-04-03T00:00:06.000Z',
             '2026-04-03T00:00:20.000Z',
+            NULL,
+            NULL,
+            NULL,
+            '[]'
+          ),
+          (
+            'thread-1',
+            'turn-draft',
+            'message-user-draft',
+            NULL,
+            NULL,
+            ${encodedDraftInvocation},
+            'message-assistant-draft',
+            'completed',
+            '2026-04-03T00:00:25.000Z',
+            '2026-04-03T00:00:26.000Z',
+            '2026-04-03T00:00:27.000Z',
+            NULL,
+            NULL,
+            NULL,
+            '[]'
+          ),
+          (
+            'thread-1',
+            'turn-reconnect',
+            'message-user-3',
+            NULL,
+            NULL,
+            ${encodedCompactInvocation},
+            'message-assistant-3',
+            'completed',
+            '2026-04-03T00:00:35.000Z',
+            '2026-04-03T00:00:36.000Z',
+            '2026-04-03T00:00:40.000Z',
             NULL,
             NULL,
             NULL,
@@ -1411,14 +1504,42 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
+      assert.equal(commandReadModel.threads[0]?.latestTurn?.skillInvocation, undefined);
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      const shellSkillRuns = shellSnapshot.skillRuns ?? [];
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.state, "running");
+      assert.equal(shellSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
+      assert.deepEqual(
+        new Set(shellSkillRuns.map((run) => run.skillRunId)),
+        new Set([
+          skillInvocation.skillRunId,
+          compactInvocation.skillRunId,
+          draftInvocation.skillRunId,
+        ]),
+      );
+      assert.deepEqual(
+        shellSkillRuns.find((run) => run.wayfinderMap)?.wayfinderMap,
+        skillInvocation.wayfinderMap,
+      );
+      assert.deepEqual(
+        new Set(
+          (yield* snapshotQuery.getSkillRunsByThreadId(ThreadId.make("thread-1"))).map(
+            (run) => run.skillRunId,
+          ),
+        ),
+        new Set([
+          skillInvocation.skillRunId,
+          compactInvocation.skillRunId,
+          draftInvocation.skillRunId,
+        ]),
+      );
 
       const fullSnapshot = yield* snapshotQuery.getSnapshot();
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.state, "running");
+      assert.equal(fullSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
     }),
   );
 

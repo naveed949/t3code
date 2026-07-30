@@ -31,6 +31,7 @@ import { GitCommitSheet } from "./features/threads/git/GitCommitSheet";
 import { GitConfirmSheet } from "./features/threads/git/GitConfirmSheet";
 import { GitOverviewSheet } from "./features/threads/git/GitOverviewSheet";
 import { ThreadRouteScreen } from "./features/threads/ThreadRouteScreen";
+import { WayfinderWorkbenchRouteScreen } from "./features/wayfinder/WayfinderWorkbenchRouteScreen";
 import { ConnectionsRouteScreen } from "./features/connection/ConnectionsRouteScreen";
 import { ConnectionsNewRouteScreen } from "./features/connection/ConnectionsNewRouteScreen";
 import { HomeRouteScreen } from "./features/home/HomeRouteScreen";
@@ -395,6 +396,14 @@ export const RootStack = createNativeStackNavigator({
       screen: ThreadTerminalRouteScreen,
       linking: `${THREAD_LINKING_PREFIX}/terminal`,
       options: SOLID_HEADER_OPTIONS,
+    }),
+    WayfinderWorkbench: createNativeStackScreen({
+      screen: WayfinderWorkbenchRouteScreen,
+      linking: `${THREAD_LINKING_PREFIX}/wayfinder`,
+      options: {
+        ...SOLID_HEADER_OPTIONS,
+        title: "Wayfinder",
+      },
     }),
     ThreadReview: createNativeStackScreen({
       screen: ReviewSheet,

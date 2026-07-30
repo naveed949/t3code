@@ -17,6 +17,9 @@ import {
   type ProviderUserInputAnswers,
   ThreadId,
   TurnId,
+  ProjectId,
+  SkillRunId,
+  WorkstreamId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -357,6 +360,55 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         effort: "high",
         serviceTier: "priority",
       });
+    }),
+  );
+
+  it.effect("renders a native skill invocation through Codex skill input", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("sess-native-skill"),
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.sendTurnImpl.mockClear();
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("sess-native-skill"),
+        input: "$wayfinder chart a release",
+        attachments: [],
+        skillInvocation: {
+          workstreamId: WorkstreamId.make("workstream:1"),
+          skillRunId: SkillRunId.make("skill-run:1"),
+          projectId: ProjectId.make("project-1"),
+          threadId: asThreadId("sess-native-skill"),
+          skill: {
+            name: "wayfinder",
+            path: "/skills/wayfinder/SKILL.md",
+            contentDigest:
+              "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+          },
+          arguments: "new-map",
+          action: { id: "new-map" },
+          execution: {
+            mode: "native",
+            adapterId: "wayfinder",
+            adapterVersion: 1,
+          },
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      });
+
+      const request = runtime.sendTurnImpl.mock.calls[0]?.[0];
+      NodeAssert.deepStrictEqual(request?.skill, {
+        name: "wayfinder",
+        path: "/skills/wayfinder/SKILL.md",
+      });
+      NodeAssert.match(request?.input ?? "", /^new-map/u);
+      NodeAssert.match(request?.input ?? "", /one decision at a time/u);
+      NodeAssert.match(request?.input ?? "", /Do not create or mutate any GitHub/u);
     }),
   );
 

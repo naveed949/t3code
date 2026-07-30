@@ -8,13 +8,18 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  SkillRunId,
+  SkillInvocation,
+  WorkstreamId,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
@@ -51,6 +56,9 @@ const exists = (filePath: string) =>
   });
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
+const decodeSkillInvocationJson = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(SkillInvocation),
+);
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
   it.effect("bootstraps all projection states and writes projection rows", () =>
@@ -2552,6 +2560,26 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
     const sourcePlanId = "plan-source";
     const turnStartedAt = "2026-02-26T14:00:00.000Z";
     const sessionSetAt = "2026-02-26T14:00:05.000Z";
+    const skillInvocation = {
+      workstreamId: WorkstreamId.make("workstream:restart"),
+      skillRunId: SkillRunId.make("skill-run:restart"),
+      projectId: ProjectId.make("project-restart"),
+      threadId,
+      skill: {
+        name: "wayfinder",
+        path: "/skills/wayfinder/SKILL.md",
+        contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+      },
+      arguments: "new-map",
+      action: { id: "new-map" as const },
+      execution: {
+        mode: "native" as const,
+        adapterId: "wayfinder",
+        adapterVersion: 1,
+      },
+      createdAt: turnStartedAt,
+      wayfinderDraft: createEmptyWayfinderDraft(turnStartedAt),
+    };
 
     yield* Effect.gen(function* () {
       const eventStore = yield* OrchestrationEventStore;
@@ -2574,6 +2602,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
             threadId: sourcePlanThreadId,
             planId: sourcePlanId,
           },
+          skillInvocation,
           runtimeMode: "approval-required",
           createdAt: turnStartedAt,
         },
@@ -2627,6 +2656,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
         readonly userMessageId: string | null;
         readonly sourceProposedPlanThreadId: string | null;
         readonly sourceProposedPlanId: string | null;
+        readonly skillInvocation: string | null;
         readonly startedAt: string;
       }>`
         SELECT
@@ -2634,21 +2664,27 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
           pending_message_id AS "userMessageId",
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId",
+          skill_invocation_json AS "skillInvocation",
           started_at AS "startedAt"
         FROM projection_turns
         WHERE turn_id = ${turnId}
       `;
     }).pipe(Effect.provide(secondProjectionLayer));
 
-    assert.deepEqual(turnRows, [
-      {
-        turnId: "turn-restart",
-        userMessageId: "message-restart",
-        sourceProposedPlanThreadId: "thread-plan-source",
-        sourceProposedPlanId: "plan-source",
-        startedAt: turnStartedAt,
-      },
-    ]);
+    assert.deepEqual(
+      turnRows.map(({ skillInvocation: _skillInvocation, ...row }) => row),
+      [
+        {
+          turnId: "turn-restart",
+          userMessageId: "message-restart",
+          sourceProposedPlanThreadId: "thread-plan-source",
+          sourceProposedPlanId: "plan-source",
+          startedAt: turnStartedAt,
+        },
+      ],
+    );
+    const decodedSkillInvocation = yield* decodeSkillInvocationJson(turnRows[0]!.skillInvocation);
+    assert.deepEqual(decodedSkillInvocation, skillInvocation);
   }).pipe(
     Effect.provide(
       Layer.provideMerge(

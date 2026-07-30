@@ -1,4 +1,4 @@
-import { OrchestrationCheckpointFile } from "@t3tools/contracts";
+import { OrchestrationCheckpointFile, SkillInvocation } from "@t3tools/contracts";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import * as Effect from "effect/Effect";
@@ -18,18 +18,27 @@ import {
   ProjectionTurn,
   ProjectionTurnById,
   ProjectionTurnRepository,
+  UpdateProjectionSkillInvocationInput,
   type ProjectionTurnRepositoryShape,
 } from "../Services/ProjectionTurns.ts";
 
 const ProjectionTurnDbRowSchema = ProjectionTurn.mapFields(
   Struct.assign({
     checkpointFiles: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+    skillInvocation: Schema.NullOr(Schema.fromJsonString(SkillInvocation)),
   }),
 );
 
 const ProjectionTurnByIdDbRowSchema = ProjectionTurnById.mapFields(
   Struct.assign({
     checkpointFiles: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
+    skillInvocation: Schema.NullOr(Schema.fromJsonString(SkillInvocation)),
+  }),
+);
+
+const ProjectionPendingTurnStartDbRowSchema = ProjectionPendingTurnStart.mapFields(
+  Struct.assign({
+    skillInvocation: Schema.NullOr(Schema.fromJsonString(SkillInvocation)),
   }),
 );
 
@@ -53,6 +62,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id,
           source_proposed_plan_thread_id,
           source_proposed_plan_id,
+          skill_invocation_json,
           assistant_message_id,
           state,
           requested_at,
@@ -69,6 +79,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           ${row.pendingMessageId},
           ${row.sourceProposedPlanThreadId},
           ${row.sourceProposedPlanId},
+          ${row.skillInvocation},
           ${row.assistantMessageId},
           ${row.state},
           ${row.requestedAt},
@@ -84,6 +95,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id = excluded.pending_message_id,
           source_proposed_plan_thread_id = excluded.source_proposed_plan_thread_id,
           source_proposed_plan_id = excluded.source_proposed_plan_id,
+          skill_invocation_json = excluded.skill_invocation_json,
           assistant_message_id = excluded.assistant_message_id,
           state = excluded.state,
           requested_at = excluded.requested_at,
@@ -118,6 +130,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id,
           source_proposed_plan_thread_id,
           source_proposed_plan_id,
+          skill_invocation_json,
           assistant_message_id,
           state,
           requested_at,
@@ -134,6 +147,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           ${row.messageId},
           ${row.sourceProposedPlanThreadId},
           ${row.sourceProposedPlanId},
+          ${row.skillInvocation === null ? null : JSON.stringify(row.skillInvocation)},
           NULL,
           'pending',
           ${row.requestedAt},
@@ -149,7 +163,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
 
   const getPendingProjectionTurn = SqlSchema.findOneOption({
     Request: GetProjectionPendingTurnStartInput,
-    Result: ProjectionPendingTurnStart,
+    Result: ProjectionPendingTurnStartDbRowSchema,
     execute: ({ threadId }) =>
       sql`
         SELECT
@@ -157,6 +171,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id AS "messageId",
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId",
+          skill_invocation_json AS "skillInvocation",
           requested_at AS "requestedAt"
         FROM projection_turns
         WHERE thread_id = ${threadId}
@@ -180,6 +195,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id AS "pendingMessageId",
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId",
+          skill_invocation_json AS "skillInvocation",
           assistant_message_id AS "assistantMessageId",
           state,
           requested_at AS "requestedAt",
@@ -213,6 +229,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           pending_message_id AS "pendingMessageId",
           source_proposed_plan_thread_id AS "sourceProposedPlanThreadId",
           source_proposed_plan_id AS "sourceProposedPlanId",
+          skill_invocation_json AS "skillInvocation",
           assistant_message_id AS "assistantMessageId",
           state,
           requested_at AS "requestedAt",
@@ -242,6 +259,21 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}
           AND (turn_id IS NULL OR turn_id <> ${turnId})
+      `,
+  });
+
+  const updateProjectionSkillInvocation = SqlSchema.void({
+    Request: UpdateProjectionSkillInvocationInput.mapFields(
+      Struct.assign({
+        skillInvocation: Schema.fromJsonString(SkillInvocation),
+      }),
+    ),
+    execute: (input) =>
+      sql`
+        UPDATE projection_turns
+        SET skill_invocation_json = ${input.skillInvocation}
+        WHERE thread_id = ${input.threadId}
+          AND json_extract(skill_invocation_json, '$.skillRunId') = ${input.skillRunId}
       `,
   });
 
@@ -332,6 +364,16 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
         ),
       );
 
+  const updateSkillInvocation: ProjectionTurnRepositoryShape["updateSkillInvocation"] = (input) =>
+    updateProjectionSkillInvocation(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionTurnRepository.updateSkillInvocation:query",
+          "ProjectionTurnRepository.updateSkillInvocation:encodeRequest",
+        ),
+      ),
+    );
+
   const deleteByThreadId: ProjectionTurnRepositoryShape["deleteByThreadId"] = (input) =>
     deleteProjectionTurnsByThread(input).pipe(
       Effect.mapError(toPersistenceSqlError("ProjectionTurnRepository.deleteByThreadId:query")),
@@ -345,6 +387,7 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
     listByThreadId,
     getByTurnId,
     clearCheckpointTurnConflict,
+    updateSkillInvocation,
     deleteByThreadId,
   } satisfies ProjectionTurnRepositoryShape;
 });

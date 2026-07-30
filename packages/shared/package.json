@@ -206,6 +206,10 @@
     "./devProxy": {
       "types": "./src/devProxy.ts",
       "import": "./src/devProxy.ts"
+    },
+    "./wayfinderDraft": {
+      "types": "./src/wayfinderDraft.ts",
+      "import": "./src/wayfinderDraft.ts"
     }
   },
   "scripts": {
