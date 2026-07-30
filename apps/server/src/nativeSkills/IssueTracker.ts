@@ -165,6 +165,10 @@ const IssueListProbe = Schema.Array(
   }),
 );
 const decodeIssueListProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueListProbe));
+const decodeIssueUrl = Schema.decodeUnknownOption(Schema.URLFromString);
+const decodeIssueNumber = Schema.decodeUnknownOption(
+  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThan(0)),
+);
 const ChildNumbersProbe = Schema.Struct({
   data: Schema.Struct({
     node: Schema.Struct({
@@ -229,21 +233,18 @@ function issueFromCreateOutput(
   repository: IssueTrackerRepository,
   output: string,
 ): IssueTrackerIssue | null {
-  const line = output.trim().split(/\r?\n/u).at(-1);
-  if (!line) return null;
-  try {
-    const url = new URL(line);
-    const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
-    const [, owner, name, number] = match ?? [];
-    return url.hostname === "github.com" &&
-      owner?.toLowerCase() === repository.owner.toLowerCase() &&
-      name?.toLowerCase() === repository.name.toLowerCase() &&
-      number
-      ? { number: Number(number), url: url.toString() }
-      : null;
-  } catch {
-    return null;
-  }
+  const decodedUrl = decodeIssueUrl(output.trim());
+  if (Option.isNone(decodedUrl)) return null;
+  const url = decodedUrl.value;
+  const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
+  const [, owner, name, rawNumber] = match ?? [];
+  const number = decodeIssueNumber(rawNumber);
+  return url.hostname === "github.com" &&
+    owner?.toLowerCase() === repository.owner.toLowerCase() &&
+    name?.toLowerCase() === repository.name.toLowerCase() &&
+    Option.isSome(number)
+    ? { number: number.value, url: url.toString() }
+    : null;
 }
 
 export const GitHubIssueTrackerLive = Layer.effect(

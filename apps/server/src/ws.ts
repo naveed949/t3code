@@ -533,6 +533,7 @@ const makeWsRpcLayer = (
 
       const toShellStreamEvent = (
         event: OrchestrationEvent,
+        includeSkillRuns: boolean,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
           case "project.created":
@@ -556,12 +557,16 @@ const makeWsRpcLayer = (
               }),
             );
           case "thread.unarchived":
-            return threadUpsertOrRemove(event.payload.threadId, event.sequence);
+            return threadUpsertOrRemove(event.payload.threadId, event.sequence, includeSkillRuns);
           default:
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
             }
-            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
+            return threadUpsertOrRemove(
+              ThreadId.make(event.aggregateId),
+              event.sequence,
+              includeSkillRuns,
+            );
         }
       };
 
@@ -630,29 +635,38 @@ const makeWsRpcLayer = (
       const threadUpsertOrRemove = (
         threadId: ThreadId,
         sequence: number,
+        includeSkillRuns: boolean,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead(
-          "thread",
-          threadId,
-          projectionSnapshotQuery.getThreadShellById(threadId),
-        ).pipe(
-          Effect.map(
-            Option.flatMap((thread) =>
-              Option.match(thread, {
-                onNone: () =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: "thread-removed" as const,
-                    sequence,
-                    threadId,
-                  }),
-                onSome: (nextThread) =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: "thread-upserted" as const,
-                    sequence,
-                    thread: nextThread,
-                  }),
-              }),
-            ),
+        Effect.all({
+          thread: retryShellProjectionRead(
+            "thread",
+            threadId,
+            projectionSnapshotQuery.getThreadShellById(threadId),
+          ).pipe(Effect.map(Option.flatten)),
+          skillRuns: includeSkillRuns
+            ? retryShellProjectionRead(
+                "thread",
+                threadId,
+                projectionSnapshotQuery.getSkillRunsByThreadId(threadId),
+              )
+            : Effect.succeed(Option.none()),
+        }).pipe(
+          Effect.map(({ thread, skillRuns }) =>
+            Option.match(thread, {
+              onNone: () =>
+                Option.some<OrchestrationShellStreamEvent>({
+                  kind: "thread-removed" as const,
+                  sequence,
+                  threadId,
+                }),
+              onSome: (nextThread) =>
+                Option.some<OrchestrationShellStreamEvent>({
+                  kind: "thread-upserted" as const,
+                  sequence,
+                  thread: nextThread,
+                  ...(Option.isSome(skillRuns) ? { skillRuns: skillRuns.value } : {}),
+                }),
+            }),
           ),
         );
 
@@ -676,16 +690,27 @@ const makeWsRpcLayer = (
           if (events.length === 0) {
             return [];
           }
-          const latestByAggregate = new Map<string, OrchestrationEvent>();
+          const latestByAggregate = new Map<
+            string,
+            { readonly event: OrchestrationEvent; readonly includeSkillRuns: boolean }
+          >();
           for (const event of events) {
-            latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
+            const key = `${event.aggregateKind}:${event.aggregateId}`;
+            latestByAggregate.set(key, {
+              event,
+              includeSkillRuns:
+                latestByAggregate.get(key)?.includeSkillRuns === true ||
+                event.type === "thread.wayfinder-publication-updated",
+            });
           }
           const survivors = Array.from(latestByAggregate.values()).sort(
-            (left, right) => left.sequence - right.sequence,
+            (left, right) => left.event.sequence - right.event.sequence,
           );
-          const shellEvents = yield* Effect.forEach(survivors, toShellStreamEvent, {
-            concurrency: SHELL_REFETCH_CONCURRENCY,
-          });
+          const shellEvents = yield* Effect.forEach(
+            survivors,
+            ({ event, includeSkillRuns }) => toShellStreamEvent(event, includeSkillRuns),
+            { concurrency: SHELL_REFETCH_CONCURRENCY },
+          );
           return shellEvents.flatMap((option) => (Option.isSome(option) ? [option.value] : []));
         });
 

@@ -78,9 +78,6 @@ interface PublicationStep<ErrorType> {
   ) => Effect.Effect<WayfinderPublicationArtifact, ErrorType>;
 }
 
-const classificationForTicket = (id: string) =>
-  /^(research|prototype|grilling|task)(?::|-)/u.exec(id)?.[1] ?? "task";
-
 function topologicallySortedTicketIds(draft: WayfinderDraft): ReadonlyArray<string> | null {
   const order = new Map(draft.candidateTickets.map((ticket, index) => [ticket.id, index] as const));
   const incoming = new Map<string, number>(
@@ -182,9 +179,15 @@ function buildSteps<ErrorType>(
   const ticketById = new Map(input.draft.candidateTickets.map((ticket) => [ticket.id, ticket]));
   const publicationKey = input.publicationKey ?? input.draft.updatedAt;
   const ticketIds = topologicallySortedTicketIds(input.draft) ?? [];
-  const classifications = [...new Set(ticketIds.map((id) => classificationForTicket(id)))].sort();
+  const classificationForTicket = (ticketId: string) =>
+    ticketById.get(ticketId)?.classification ?? "task";
+  const classifications = [...new Set(ticketIds.map(classificationForTicket))].sort();
   const steps: PublicationStep<ErrorType>[] = [
-    ...["wayfinder:map", ...classifications.map((value) => `wayfinder:${value}`)].map(
+    ...[
+      "wayfinder:map",
+      "wayfinder:decision",
+      ...classifications.map((value) => `wayfinder:${value}`),
+    ].map(
       (name): PublicationStep<ErrorType> => ({
         key: `label:${name}`,
         description: `create label ${name}`,
@@ -235,7 +238,7 @@ function buildSteps<ErrorType>(
               title: ticket.title,
               body:
                 ticket.detail ?? `Decision ticket for ${input.draft.destination ?? "Wayfinder"}.`,
-              labels: [`wayfinder:${classificationForTicket(ticketId)}`],
+              labels: ["wayfinder:decision", `wayfinder:${classificationForTicket(ticketId)}`],
             })
             .pipe(
               Effect.map((issue) => ({

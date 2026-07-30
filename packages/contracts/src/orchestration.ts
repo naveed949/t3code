@@ -571,6 +571,7 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-upserted"),
     sequence: NonNegativeInt,
     thread: OrchestrationThreadShell,
+    skillRuns: Schema.optional(Schema.Array(SkillInvocation)),
   }),
   Schema.Struct({
     kind: Schema.Literal("thread-removed"),

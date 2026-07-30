@@ -9,6 +9,20 @@ export const WayfinderDraftItem = Schema.Struct({
 });
 export type WayfinderDraftItem = typeof WayfinderDraftItem.Type;
 
+export const WayfinderDraftTicketClassification = Schema.Literals([
+  "research",
+  "prototype",
+  "grilling",
+  "task",
+]);
+export type WayfinderDraftTicketClassification = typeof WayfinderDraftTicketClassification.Type;
+
+export const WayfinderDecisionTicket = Schema.Struct({
+  ...WayfinderDraftItem.fields,
+  classification: Schema.optional(WayfinderDraftTicketClassification),
+});
+export type WayfinderDecisionTicket = typeof WayfinderDecisionTicket.Type;
+
 export const WayfinderProposedDependencyEdge = Schema.Struct({
   from: TrimmedNonEmptyString,
   to: TrimmedNonEmptyString,
@@ -43,7 +57,11 @@ export type WayfinderDecisionReceipt = typeof WayfinderDecisionReceipt.Type;
 export const WayfinderDecisionTarget = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("destination") }),
   Schema.Struct({ kind: Schema.Literal("note"), id: TrimmedNonEmptyString }),
-  Schema.Struct({ kind: Schema.Literal("candidate-ticket"), id: TrimmedNonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal("candidate-ticket"),
+    id: TrimmedNonEmptyString,
+    classification: Schema.optional(WayfinderDraftTicketClassification),
+  }),
   Schema.Struct({ kind: Schema.Literal("fog-of-war"), id: TrimmedNonEmptyString }),
   Schema.Struct({ kind: Schema.Literal("out-of-scope"), id: TrimmedNonEmptyString }),
   Schema.Struct({
@@ -61,7 +79,7 @@ export const WayfinderDraft = Schema.Struct({
   notes: Schema.Array(TrimmedNonEmptyString),
   confirmedDecisions: Schema.Array(WayfinderConfirmedDecision),
   proposedDecisions: Schema.Array(WayfinderDecisionProposal),
-  candidateTickets: Schema.Array(WayfinderDraftItem),
+  candidateTickets: Schema.Array(WayfinderDecisionTicket),
   fogOfWar: Schema.Array(WayfinderDraftItem),
   outOfScope: Schema.Array(WayfinderDraftItem),
   proposedDependencyEdges: Schema.Array(WayfinderProposedDependencyEdge),

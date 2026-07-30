@@ -39,7 +39,8 @@ export function applyShellStreamEvent(
         : Arr.append(snapshot.threads, event.thread);
       const invocation = event.thread.latestTurn?.skillInvocation;
       const skillRuns =
-        invocation === undefined
+        event.skillRuns ??
+        (invocation === undefined
           ? snapshot.skillRuns
           : Arr.append(
               Arr.filter(
@@ -51,11 +52,18 @@ export function applyShellStreamEvent(
                       invocation.wayfinderMap === undefined)),
               ),
               invocation,
-            );
+            ));
+      const mergedSkillRuns =
+        event.skillRuns === undefined
+          ? skillRuns
+          : [
+              ...Arr.filter(snapshot.skillRuns ?? [], (run) => run.threadId !== event.thread.id),
+              ...event.skillRuns,
+            ];
       return {
         ...snapshot,
         threads,
-        ...(skillRuns ? { skillRuns } : {}),
+        ...(mergedSkillRuns ? { skillRuns: mergedSkillRuns } : {}),
         snapshotSequence: event.sequence,
       };
     }

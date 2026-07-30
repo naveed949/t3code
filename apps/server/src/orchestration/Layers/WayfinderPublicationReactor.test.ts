@@ -52,6 +52,25 @@ it.effect("waits for confirmation in approval-required mode without writing to G
           latestSequence: Effect.succeed(0),
         }),
         Layer.mock(ProjectionSnapshotQuery)({
+          getSkillRunsByThreadId: () =>
+            Effect.succeed([
+              {
+                skill: {
+                  name: "wayfinder",
+                  path: "/skills/wayfinder/SKILL.md",
+                  contentDigest:
+                    "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+                },
+                action: { id: "new-map" },
+                execution: { mode: "native", adapterId: "wayfinder", adapterVersion: 1 },
+                workstreamId: WorkstreamId.make("workstream:publish"),
+                skillRunId,
+                projectId,
+                threadId,
+                createdAt: now,
+                wayfinderDraft: createEmptyWayfinderDraft(now),
+              },
+            ]),
           getSnapshot: () =>
             Effect.succeed({
               snapshotSequence: 0,
@@ -169,4 +188,171 @@ it.effect("waits for confirmation in approval-required mode without writing to G
       );
     }),
   ),
+);
+
+it.effect(
+  "loads an older draft by Skill Run and preserves its artifacts on repository failure",
+  () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const events = yield* Queue.unbounded<OrchestrationEvent>();
+        const receipt = yield* Deferred.make<OrchestrationRuntimeReceipt>();
+        const dispatched: Array<{ readonly type: string; readonly publication?: unknown }> = [];
+        const now = "2026-07-30T10:10:00.000Z";
+        const threadId = ThreadId.make("thread:older-draft");
+        const skillRunId = SkillRunId.make("skill-run:older-draft");
+        const projectId = ProjectId.make("project:older-draft");
+        const invocation = {
+          skill: {
+            name: "wayfinder",
+            path: "/skills/wayfinder/SKILL.md",
+            contentDigest:
+              "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+          },
+          action: { id: "new-map" as const },
+          execution: { mode: "native" as const, adapterId: "wayfinder", adapterVersion: 1 },
+          workstreamId: WorkstreamId.make("workstream:older-draft"),
+          skillRunId,
+          projectId,
+          threadId,
+          createdAt: now,
+          wayfinderDraft: createEmptyWayfinderDraft(now),
+          wayfinderPublication: {
+            status: "failed" as const,
+            artifacts: [{ kind: "label" as const, name: "wayfinder:map" }],
+            nextStep: "resolve GitHub repository",
+            error: "offline",
+            updatedAt: now,
+          },
+        };
+        const dependencies = Layer.mergeAll(
+          NodeServices.layer,
+          Layer.succeed(OrchestrationEngineService, {
+            readEvents: () => Stream.empty,
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatched.push(command);
+                return { sequence: dispatched.length };
+              }),
+            streamDomainEvents: Stream.fromQueue(events),
+            latestSequence: Effect.succeed(0),
+          }),
+          Layer.mock(ProjectionSnapshotQuery)({
+            getSkillRunsByThreadId: () => Effect.succeed([invocation]),
+            getSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                projects: [
+                  {
+                    id: projectId,
+                    title: "Older draft project",
+                    workspaceRoot: "/project",
+                    defaultModelSelection: null,
+                    scripts: [],
+                    createdAt: now,
+                    updatedAt: now,
+                    deletedAt: null,
+                  },
+                ],
+                threads: [
+                  {
+                    id: threadId,
+                    projectId,
+                    title: "Older draft thread",
+                    modelSelection: {
+                      instanceId: ProviderInstanceId.make("codex"),
+                      model: "gpt-5",
+                    },
+                    interactionMode: "default",
+                    runtimeMode: "full-access",
+                    branch: null,
+                    worktreePath: null,
+                    latestTurn: {
+                      turnId: TurnId.make("turn:follow-up"),
+                      state: "completed",
+                      requestedAt: now,
+                      startedAt: now,
+                      completedAt: now,
+                      assistantMessageId: null,
+                    },
+                    createdAt: now,
+                    updatedAt: now,
+                    archivedAt: null,
+                    settledOverride: null,
+                    settledAt: null,
+                    deletedAt: null,
+                    messages: [],
+                    proposedPlans: [],
+                    activities: [
+                      {
+                        id: EventId.make("activity:older-draft"),
+                        tone: "info",
+                        kind: "wayfinder.draft.started",
+                        summary: "Draft started",
+                        payload: { skillRunId },
+                        turnId: null,
+                        createdAt: now,
+                      },
+                    ],
+                    checkpoints: [],
+                    session: null,
+                  },
+                ],
+                updatedAt: now,
+              }),
+          }),
+          Layer.succeed(
+            IssueTracker,
+            IssueTracker.of({
+              resolveProjectRepository: () => Effect.succeed(null),
+              inspectCapabilities: () => Effect.die("unexpected tracker read"),
+              resolveIssue: () => Effect.die("unexpected tracker read"),
+              loadWayfinderMap: () => Effect.die("unexpected tracker read"),
+              ensureLabel: () => Effect.die("unexpected tracker write"),
+              createIssue: () => Effect.die("unexpected tracker write"),
+              addChild: () => Effect.die("unexpected tracker write"),
+              addBlockedBy: () => Effect.die("unexpected tracker write"),
+            }),
+          ),
+          Layer.succeed(
+            RuntimeReceiptBus,
+            RuntimeReceiptBus.of({
+              publish: (value) => Deferred.succeed(receipt, value).pipe(Effect.asVoid),
+              streamEventsForTest: Stream.empty,
+            }),
+          ),
+        );
+        const reactor = yield* makeWayfinderPublicationReactor.pipe(Effect.provide(dependencies));
+        yield* reactor.start();
+        yield* Queue.offer(events, {
+          sequence: 1,
+          eventId: EventId.make("event:older-draft"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          type: "thread.wayfinder-publication-requested",
+          occurredAt: now,
+          commandId: CommandId.make("command:older-draft"),
+          causationEventId: null,
+          correlationId: CommandId.make("command:older-draft"),
+          metadata: {},
+          payload: {
+            threadId,
+            skillRunId,
+            runtimeMode: "full-access",
+            confirmed: false,
+            createdAt: now,
+          },
+        });
+        yield* Deferred.await(receipt);
+        yield* reactor.drain;
+
+        assert.deepStrictEqual(dispatched[0]?.publication, {
+          status: "failed",
+          artifacts: [{ kind: "label", name: "wayfinder:map" }],
+          nextStep: "resolve GitHub repository",
+          error: "The Wayfinder thread is not linked to a writable GitHub repository.",
+          updatedAt: now,
+        });
+      }),
+    ),
 );

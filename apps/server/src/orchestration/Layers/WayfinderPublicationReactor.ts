@@ -32,8 +32,12 @@ export const makeWayfinderPublicationReactor = Effect.gen(function* () {
   const snapshots = yield* ProjectionSnapshotQuery;
   const tracker = yield* IssueTracker;
   const receipts = yield* RuntimeReceiptBus;
-  const serverCommandId = (tag: string) =>
-    crypto.randomUUIDv4.pipe(Effect.map((uuid) => CommandId.make(`server:${tag}:${uuid}`)));
+  const serverCommandId = Effect.fn("WayfinderPublicationReactor.serverCommandId")(function* (
+    tag: string,
+  ) {
+    const uuid = yield* crypto.randomUUIDv4;
+    return CommandId.make(`server:${tag}:${uuid}`);
+  });
 
   const publishProgress = Effect.fn("WayfinderPublicationReactor.publishProgress")(function* (
     event: PublicationRequestedEvent,
@@ -65,15 +69,13 @@ export const makeWayfinderPublicationReactor = Effect.gen(function* () {
   ) {
     const snapshot = yield* snapshots.getSnapshot();
     const thread = snapshot.threads.find((candidate) => candidate.id === event.payload.threadId);
-    const invocation = thread?.latestTurn?.skillInvocation;
-    const previous =
-      invocation?.skillRunId === event.payload.skillRunId
-        ? invocation.wayfinderPublication
-        : undefined;
-    const draft =
-      invocation?.skillRunId === event.payload.skillRunId
-        ? deriveWayfinderDraft(invocation, thread?.activities ?? [])
-        : null;
+    const skillRuns = yield* snapshots.getSkillRunsByThreadId(event.payload.threadId);
+    const invocation = skillRuns.find(
+      (candidate) => candidate.skillRunId === event.payload.skillRunId,
+    );
+    const previous = invocation?.wayfinderPublication;
+    if (previous?.status === "synchronized") return;
+    const draft = deriveWayfinderDraft(invocation, thread?.activities ?? []);
     if (draft === null) {
       yield* publishProgress(event, {
         status: "failed",
@@ -101,14 +103,14 @@ export const makeWayfinderPublicationReactor = Effect.gen(function* () {
     if (!thread || !cwd || !repository) {
       yield* publishProgress(event, {
         status: "failed",
-        artifacts: [],
+        artifacts: previous?.artifacts ?? [],
         nextStep: "resolve GitHub repository",
         error: "The Wayfinder thread is not linked to a writable GitHub repository.",
         updatedAt: event.payload.createdAt,
       });
       return;
     }
-    const resumablePrevious = previous?.status !== "synchronized" ? previous : undefined;
+    const resumablePrevious = previous;
     yield* publishWayfinderDraft(
       {
         cwd,
@@ -125,17 +127,22 @@ export const makeWayfinderPublicationReactor = Effect.gen(function* () {
     );
   });
 
-  const processEventSafely = (event: PublicationRequestedEvent) =>
-    processEvent(event).pipe(
-      Effect.catchCause((cause) => {
-        if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
-        return Effect.logWarning("Wayfinder publication reactor failed to process event", {
-          threadId: event.payload.threadId,
-          skillRunId: event.payload.skillRunId,
-          cause: Cause.pretty(cause),
-        });
-      }),
-    );
+  const processEventSafely = Effect.fn("WayfinderPublicationReactor.processEventSafely")(
+    function* (event: PublicationRequestedEvent) {
+      yield* processEvent(event);
+    },
+    (effect, event) =>
+      effect.pipe(
+        Effect.catchCause((cause) => {
+          if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+          return Effect.logWarning("Wayfinder publication reactor failed to process event", {
+            threadId: event.payload.threadId,
+            skillRunId: event.payload.skillRunId,
+            cause: Cause.pretty(cause),
+          });
+        }),
+      ),
+  );
 
   const worker = yield* makeDrainableWorker(processEventSafely);
   const start: WayfinderPublicationReactorShape["start"] = Effect.fn("start")(function* () {

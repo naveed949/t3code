@@ -215,6 +215,50 @@ describe("applyShellStreamEvent", () => {
       });
 
       expect(afterFollowUp.skillRuns).toEqual([skillInvocation]);
+
+      const synchronizedInvocation = {
+        ...skillInvocation,
+        wayfinderPublication: {
+          status: "synchronized" as const,
+          artifacts: [],
+          nextStep: null,
+          updatedAt: "2026-04-01T00:00:03.000Z",
+        },
+        wayfinderMap: {
+          canonicalReference: {
+            number: 42,
+            title: "Release map",
+            url: "https://github.com/t3tools/t3code/issues/42",
+            state: "open" as const,
+          },
+          destination: "Ship the release",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: "2026-04-01T00:00:03.000Z",
+        },
+      };
+      const afterPublication = applyShellStreamEvent(afterFollowUp, {
+        kind: "thread-upserted",
+        sequence: 3,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-follow-up"),
+            state: "running",
+            requestedAt: "2026-04-01T00:00:02.000Z",
+            startedAt: "2026-04-01T00:00:02.000Z",
+            completedAt: null,
+            assistantMessageId: null,
+          },
+        },
+        skillRuns: [synchronizedInvocation],
+      });
+
+      expect(afterPublication.skillRuns).toEqual([synchronizedInvocation]);
     });
 
     it("keeps only the latest Skill Run summary for each thread", () => {

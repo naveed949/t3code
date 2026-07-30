@@ -79,7 +79,10 @@ Publication is a server-owned reactor flow rather than provider prose. The clien
 Skill Run-scoped command, the decider preserves the thread's current runtime permission mode, and a
 drainable worker creates labels, issues, child links, and blockers in dependency order. Every
 verified artifact produces a typed runtime receipt and a persisted Skill Run progress update.
+In approval-required mode, the first request persists a server-owned pending approval activity; a
+confirmation command is rejected unless that activity exists for the same active Skill Run.
 GitHub issues carry a Skill Run-scoped idempotency marker, while relationship writes read the
 canonical relationship first, so recovery is safe even if the process stops between a GitHub write
 and its receipt. Draft authority clears only after the tracker adapter reloads the canonical map and
-reconciles every expected child and blocker identity.
+reconciles every expected child and blocker identity. Publication updates also refresh the exact
+Skill Run in the shell stream, even when a later ordinary turn is the thread's latest turn.
