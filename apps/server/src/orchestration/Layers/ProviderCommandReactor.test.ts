@@ -18,6 +18,7 @@ import {
   EventId,
   MessageId,
   ProjectId,
+  SkillRunId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -2224,6 +2225,94 @@ describe("ProviderCommandReactor", () => {
     );
     expect(resolvedActivity).toBeUndefined();
   });
+
+  effectIt.effect("recovers a persisted Wayfinder decision without provider callback state", () =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const now = "2026-01-01T00:00:00.000Z";
+      const requestId = asApprovalRequestId("user-input-request-wayfinder-recovered");
+      const skillRunId = SkillRunId.make("skill-run:wayfinder-recovered");
+
+      for (const [index, activity] of [
+        {
+          kind: "wayfinder.draft.started",
+          summary: "Unpublished Wayfinder draft started",
+          payload: { skillRunId, canonical: false },
+        },
+        {
+          kind: "user-input.requested",
+          summary: "User input requested",
+          payload: {
+            requestId,
+            skillRunId,
+            questions: [
+              {
+                id: "destination",
+                header: "Destination",
+                question: "Where should the map lead?",
+                options: [{ label: "Recovery", description: "Survives restart." }],
+              },
+            ],
+          },
+        },
+      ].entries()) {
+        yield* harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make(`cmd-wayfinder-recovered-${index}`),
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            id: EventId.make(`activity-wayfinder-recovered-${index}`),
+            tone: "info",
+            ...activity,
+            turnId: null,
+            createdAt: now,
+          },
+          createdAt: now,
+        });
+      }
+
+      yield* harness.engine.dispatch({
+        type: "thread.user-input.respond",
+        commandId: CommandId.make("cmd-wayfinder-recovered-response"),
+        threadId: ThreadId.make("thread-1"),
+        requestId,
+        answers: { destination: "Recovery" },
+        createdAt: now,
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(async () => {
+          const thread = (await harness.readModel()).threads.find(
+            (entry) => entry.id === ThreadId.make("thread-1"),
+          );
+          return (
+            thread?.activities.some(
+              (activity) =>
+                activity.kind === "user-input.resolved" &&
+                activity.summary === "Wayfinder decision recovered",
+            ) ?? false
+          );
+        }),
+      );
+
+      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
+        (entry) => entry.id === ThreadId.make("thread-1"),
+      );
+      expect(
+        thread?.activities.find(
+          (activity) =>
+            activity.kind === "user-input.resolved" &&
+            activity.summary === "Wayfinder decision recovered",
+        )?.payload,
+      ).toMatchObject({
+        requestId,
+        skillRunId,
+        answers: { destination: "Recovery" },
+        recoveredAfterRestart: true,
+      });
+      expect(harness.respondToUserInput).not.toHaveBeenCalled();
+    }),
+  );
 
   it("reacts to thread.session.stop by stopping provider session and clearing thread session state", async () => {
     const harness = await createHarness();

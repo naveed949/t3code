@@ -70,4 +70,7 @@ mode, scopes every structured decision activity to its originating Skill Run, an
 activities outside the rolling work-log window. While draft authority is active, the server rejects
 every executable approval because an arbitrary command cannot be proven GitHub-read-only;
 structured Decision Card responses remain available. Publication clears that authority marker.
-The thread's configured runtime mode is not changed.
+Only the latest active draft receives this retention. If a restart has discarded the provider's
+in-memory user-input callback, the server records a response against the persisted, Skill
+Run-scoped request directly; live callbacks still resume through the provider. The thread's
+configured runtime mode is not changed.

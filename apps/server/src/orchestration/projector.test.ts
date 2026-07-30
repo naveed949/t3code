@@ -959,8 +959,29 @@ describe("orchestration projector", () => {
   });
 
   it("retains Wayfinder authority and scoped decisions beyond the activity window", () => {
-    const now = "2026-03-01T10:00:00.000Z";
     const durableActivities: ReadonlyArray<OrchestrationThreadActivity> = [
+      {
+        id: EventId.make("event-wayfinder-old-0"),
+        tone: "info",
+        kind: "wayfinder.draft.started",
+        summary: "Old draft started",
+        payload: { skillRunId: "skill-run:wayfinder-old", canonical: false },
+        turnId: null,
+        createdAt: "2026-03-01T08:00:00.000Z",
+      },
+      {
+        id: EventId.make("event-wayfinder-old-1"),
+        tone: "info",
+        kind: "user-input.resolved",
+        summary: "Old decision resolved",
+        payload: {
+          skillRunId: "skill-run:wayfinder-old",
+          requestId: "request:wayfinder-old",
+          answers: { destination: "Old map" },
+        },
+        turnId: null,
+        createdAt: "2026-03-01T08:01:00.000Z",
+      },
       {
         id: EventId.make("event-wayfinder-durable-0"),
         tone: "info",
@@ -968,7 +989,7 @@ describe("orchestration projector", () => {
         summary: "Draft started",
         payload: { skillRunId: "skill-run:wayfinder", canonical: false },
         turnId: null,
-        createdAt: now,
+        createdAt: "2026-03-01T09:00:00.000Z",
       },
       {
         id: EventId.make("event-wayfinder-durable-1"),
@@ -981,7 +1002,7 @@ describe("orchestration projector", () => {
           answers: { destination: "Reliable recovery" },
         },
         turnId: null,
-        createdAt: now,
+        createdAt: "2026-03-01T09:01:00.000Z",
       },
     ];
     const fillerActivities: ReadonlyArray<OrchestrationThreadActivity> = Array.from(
@@ -1007,5 +1028,8 @@ describe("orchestration projector", () => {
       ),
     ).toBe(true);
     expect(activities).toHaveLength(502);
+    expect(
+      activities.some((activity) => activity.id === EventId.make("event-wayfinder-old-0")),
+    ).toBe(false);
   });
 });

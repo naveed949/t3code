@@ -1,10 +1,7 @@
 import { ApprovalRequestId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  blockedWayfinderDraftApprovalDetail,
-  hasActiveWayfinderDraft,
-} from "./WayfinderDraftMutationGuard.ts";
+import { hasActiveWayfinderDraftAuthority } from "./WayfinderDraftMutationGuard.ts";
 
 const requestId = ApprovalRequestId.make("request:github");
 const started = {
@@ -13,36 +10,21 @@ const started = {
 };
 
 describe("WayfinderDraftMutationGuard", () => {
-  it.each([
-    "gh issue view 5",
-    "npm test",
-    'mcp__github__add_issue_comment {"body":"Draft"}',
-    "node indirect-github-script.js",
-  ])("blocks every executable approval while an unpublished draft is active: %s", (detail) => {
+  it("identifies active unpublished draft authority", () => {
     expect(
-      blockedWayfinderDraftApprovalDetail([
+      hasActiveWayfinderDraftAuthority([
         started,
         {
           kind: "approval.requested",
-          payload: { requestId, requestKind: "command", detail },
+          payload: { requestId, requestKind: "command", detail: "node indirect-script.js" },
         },
       ]),
-    ).toBe("provider action");
+    ).toBe(true);
   });
 
   it("stops guarding after publication", () => {
     expect(
-      blockedWayfinderDraftApprovalDetail([
-        started,
-        { kind: "wayfinder.draft.published", payload: { issue: 5 } },
-        {
-          kind: "approval.requested",
-          payload: { requestId, requestKind: "command", detail: "gh issue view 5" },
-        },
-      ]),
-    ).toBeNull();
-    expect(
-      hasActiveWayfinderDraft([
+      hasActiveWayfinderDraftAuthority([
         started,
         { kind: "wayfinder.draft.published", payload: { issue: 5 } },
       ]),

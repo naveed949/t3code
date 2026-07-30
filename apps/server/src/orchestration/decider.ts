@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import { blockedWayfinderDraftApprovalDetail } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
+import { hasActiveWayfinderDraftAuthority } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -921,11 +921,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const blockedMutation =
-        command.decision === "accept" || command.decision === "acceptForSession"
-          ? blockedWayfinderDraftApprovalDetail(thread.activities)
-          : null;
-      if (blockedMutation !== null) {
+      const acceptsExecutableAction =
+        command.decision === "accept" || command.decision === "acceptForSession";
+      if (acceptsExecutableAction && hasActiveWayfinderDraftAuthority(thread.activities)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:

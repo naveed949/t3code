@@ -12,6 +12,7 @@ import {
   SkillRunId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
@@ -42,7 +43,10 @@ type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
 const MAX_RECENT_THREAD_ACTIVITIES = 500;
-const isWayfinderScopedActivityPayload = Schema.is(Schema.Struct({ skillRunId: SkillRunId }));
+const WayfinderScopedActivityPayload = Schema.Struct({ skillRunId: SkillRunId });
+const decodeWayfinderScopedActivityPayload = Schema.decodeUnknownOption(
+  WayfinderScopedActivityPayload,
+);
 
 export function retainThreadActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
@@ -50,14 +54,29 @@ export function retainThreadActivities(
   const ordered = activities.toSorted(compareThreadActivities);
   const recent = ordered.slice(-MAX_RECENT_THREAD_ACTIVITIES);
   const recentIds = new Set(recent.map((activity) => activity.id));
-  const durableWayfinderActivities = ordered.filter(
-    (activity) =>
-      !recentIds.has(activity.id) &&
-      (activity.kind === "wayfinder.draft.started" ||
-        activity.kind === "wayfinder.draft.published" ||
-        ((activity.kind === "user-input.requested" || activity.kind === "user-input.resolved") &&
-          isWayfinderScopedActivityPayload(activity.payload))),
-  );
+  let activeDraft:
+    | { readonly marker: OrchestrationThreadActivity; readonly skillRunId: SkillRunId }
+    | undefined;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const activity = ordered[index];
+    if (!activity) continue;
+    if (activity.kind === "wayfinder.draft.published") break;
+    if (activity.kind !== "wayfinder.draft.started") continue;
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    if (Option.isSome(payload)) {
+      activeDraft = { marker: activity, skillRunId: payload.value.skillRunId };
+    }
+    break;
+  }
+  const durableWayfinderActivities = ordered.filter((activity) => {
+    if (activeDraft === undefined || recentIds.has(activity.id)) return false;
+    if (activity.id === activeDraft.marker.id) return true;
+    if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
+      return false;
+    }
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    return Option.isSome(payload) && payload.value.skillRunId === activeDraft.skillRunId;
+  });
   return [...durableWayfinderActivities, ...recent];
 }
 
