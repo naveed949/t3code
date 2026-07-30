@@ -9,6 +9,7 @@ import type {
   RuntimeMode,
   ScopedThreadRef,
   ServerProvider,
+  SkillInvocationRequest,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -19,6 +20,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -589,6 +591,7 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onExplicitSkillInvocation: (request: SkillInvocationRequest) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
@@ -676,6 +679,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    onExplicitSkillInvocation,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1726,6 +1730,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "skill") {
+        const request = resolveNativeSkillRunInvocation({
+          kind: "picker-selection",
+          skill: item.skill,
+        });
+        if (request) {
+          onExplicitSkillInvocation(request);
+        }
         const replacement = `$${item.skill.name} `;
         const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
           snapshot.value,
@@ -1744,7 +1755,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
     },
-    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      handleInteractionModeChange,
+      onExplicitSkillInvocation,
+      resolveActiveComposerTrigger,
+    ],
+  );
+
+  const onNativeSkillAction = useCallback(
+    (item: Extract<ComposerCommandItem, { type: "skill" }>) => {
+      onSelectComposerItem(item);
+      const request = resolveNativeSkillRunInvocation({
+        kind: "native-action",
+        skill: item.skill,
+      });
+      if (request) {
+        onExplicitSkillInvocation(request);
+      }
+    },
+    [onExplicitSkillInvocation, onSelectComposerItem],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
@@ -2846,6 +2876,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeItemId={activeComposerMenuItem?.id ?? null}
                   onHighlightedItemChange={onComposerMenuItemHighlighted}
                   onSelect={onSelectComposerItem}
+                  onNativeSkillAction={onNativeSkillAction}
                 />
               </ComposerCommandMenuLayer>
             )}

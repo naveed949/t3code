@@ -75,6 +75,24 @@ describe("resolveChatSkillInvocationRequest", () => {
       }),
     ).toBeNull();
   });
+
+  it("dispatches a user-reachable native action through the same typed request", () => {
+    expect(
+      resolveChatSkillInvocationRequest({
+        text: "$wayfinder chart a release",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providers,
+        explicitRequest: {
+          skillName: "wayfinder",
+          skillPath: "/skills/wayfinder/SKILL.md",
+        },
+      }),
+    ).toEqual({
+      skillName: "wayfinder",
+      skillPath: "/skills/wayfinder/SKILL.md",
+      arguments: "chart a release",
+    });
+  });
 });
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {

@@ -41,9 +41,10 @@ export function applyShellStreamEvent(
       const skillRuns =
         invocation === undefined
           ? snapshot.skillRuns
-          : snapshot.skillRuns?.some((run) => run.skillRunId === invocation.skillRunId)
-            ? snapshot.skillRuns
-            : Arr.append(snapshot.skillRuns ?? [], invocation);
+          : Arr.append(
+              Arr.filter(snapshot.skillRuns ?? [], (run) => run.threadId !== event.thread.id),
+              invocation,
+            );
       return {
         ...snapshot,
         threads,
@@ -55,6 +56,11 @@ export function applyShellStreamEvent(
       return {
         ...snapshot,
         threads: Arr.filter(snapshot.threads, (t) => t.id !== event.threadId),
+        ...(snapshot.skillRuns
+          ? {
+              skillRuns: Arr.filter(snapshot.skillRuns, (run) => run.threadId !== event.threadId),
+            }
+          : {}),
         snapshotSequence: event.sequence,
       };
     default:

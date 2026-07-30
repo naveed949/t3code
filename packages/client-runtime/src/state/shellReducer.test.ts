@@ -216,6 +216,63 @@ describe("applyShellStreamEvent", () => {
 
       expect(afterFollowUp.skillRuns).toEqual([skillInvocation]);
     });
+
+    it("keeps only the latest Skill Run summary for each thread", () => {
+      const firstInvocation = {
+        workstreamId: WorkstreamId.make("workstream:1"),
+        skillRunId: SkillRunId.make("skill-run:1"),
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:first",
+        },
+        execution: { mode: "generic" as const, reason: "unsupported-provider" as const },
+        createdAt: "2026-04-01T00:00:01.000Z",
+      };
+      const latestInvocation = {
+        ...firstInvocation,
+        workstreamId: WorkstreamId.make("workstream:2"),
+        skillRunId: SkillRunId.make("skill-run:2"),
+        createdAt: "2026-04-01T00:00:02.000Z",
+      };
+      const withFirstRun = applyShellStreamEvent(baseSnapshot, {
+        kind: "thread-upserted",
+        sequence: 1,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-1"),
+            state: "completed",
+            requestedAt: firstInvocation.createdAt,
+            startedAt: firstInvocation.createdAt,
+            completedAt: firstInvocation.createdAt,
+            assistantMessageId: null,
+            skillInvocation: firstInvocation,
+          },
+        },
+      });
+
+      const withLatestRun = applyShellStreamEvent(withFirstRun, {
+        kind: "thread-upserted",
+        sequence: 2,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-2"),
+            state: "running",
+            requestedAt: latestInvocation.createdAt,
+            startedAt: latestInvocation.createdAt,
+            completedAt: null,
+            assistantMessageId: null,
+            skillInvocation: latestInvocation,
+          },
+        },
+      });
+
+      expect(withLatestRun.skillRuns).toEqual([latestInvocation]);
+    });
   });
 
   describe("thread-removed", () => {

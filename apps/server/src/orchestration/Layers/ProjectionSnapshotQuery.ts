@@ -662,18 +662,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          turns.thread_id AS "threadId",
-          turns.skill_invocation_json AS "skillInvocation"
-        FROM projection_turns turns
-        INNER JOIN projection_threads threads
-          ON threads.thread_id = turns.thread_id
-        WHERE turns.skill_invocation_json IS NOT NULL
-          AND threads.deleted_at IS NULL
-          AND threads.archived_at IS NULL
-        ORDER BY
-          turns.thread_id ASC,
-          turns.requested_at ASC,
-          turns.turn_id ASC
+          ranked."threadId",
+          ranked."skillInvocation"
+        FROM (
+          SELECT
+            turns.thread_id AS "threadId",
+            turns.skill_invocation_json AS "skillInvocation",
+            ROW_NUMBER() OVER (
+              PARTITION BY turns.thread_id
+              ORDER BY turns.requested_at DESC, turns.turn_id DESC
+            ) AS run_rank
+          FROM projection_turns turns
+          INNER JOIN projection_threads threads
+            ON threads.thread_id = turns.thread_id
+          WHERE turns.skill_invocation_json IS NOT NULL
+            AND threads.deleted_at IS NULL
+            AND threads.archived_at IS NULL
+        ) ranked
+        WHERE ranked.run_rank = 1
+        ORDER BY ranked."threadId" ASC
       `,
   });
 
@@ -683,18 +690,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     execute: () =>
       sql`
         SELECT
-          turns.thread_id AS "threadId",
-          turns.skill_invocation_json AS "skillInvocation"
-        FROM projection_turns turns
-        INNER JOIN projection_threads threads
-          ON threads.thread_id = turns.thread_id
-        WHERE turns.skill_invocation_json IS NOT NULL
-          AND threads.deleted_at IS NULL
-          AND threads.archived_at IS NOT NULL
-        ORDER BY
-          turns.thread_id ASC,
-          turns.requested_at ASC,
-          turns.turn_id ASC
+          ranked."threadId",
+          ranked."skillInvocation"
+        FROM (
+          SELECT
+            turns.thread_id AS "threadId",
+            turns.skill_invocation_json AS "skillInvocation",
+            ROW_NUMBER() OVER (
+              PARTITION BY turns.thread_id
+              ORDER BY turns.requested_at DESC, turns.turn_id DESC
+            ) AS run_rank
+          FROM projection_turns turns
+          INNER JOIN projection_threads threads
+            ON threads.thread_id = turns.thread_id
+          WHERE turns.skill_invocation_json IS NOT NULL
+            AND threads.deleted_at IS NULL
+            AND threads.archived_at IS NOT NULL
+        ) ranked
+        WHERE ranked.run_rank = 1
+        ORDER BY ranked."threadId" ASC
       `,
   });
 

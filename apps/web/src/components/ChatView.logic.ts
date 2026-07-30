@@ -35,15 +35,28 @@ export function resolveChatSkillInvocationRequest(input: {
   readonly text: string;
   readonly providerInstanceId: ProviderInstanceId;
   readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "skills">>;
+  readonly explicitRequest?: SkillInvocationRequest | null;
 }): SkillInvocationRequest | null {
   const skills =
     input.providers.find((provider) => provider.instanceId === input.providerInstanceId)?.skills ??
     [];
-  return resolveNativeSkillRunInvocation({
+  const leadingRequest = resolveNativeSkillRunInvocation({
     kind: "leading-token",
     text: input.text,
     skills,
   });
+  if (
+    input.explicitRequest == null ||
+    leadingRequest === null ||
+    input.explicitRequest.skillName !== leadingRequest.skillName ||
+    input.explicitRequest.skillPath !== leadingRequest.skillPath
+  ) {
+    return leadingRequest;
+  }
+  return {
+    ...input.explicitRequest,
+    ...(leadingRequest.arguments === undefined ? {} : { arguments: leadingRequest.arguments }),
+  };
 }
 
 export function startNewThreadForProject(
