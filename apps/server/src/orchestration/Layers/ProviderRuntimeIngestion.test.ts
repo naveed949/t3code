@@ -18,7 +18,9 @@ import {
   MessageId,
   ProjectId,
   ProviderItemId,
+  RuntimeRequestId,
   type ServerSettings,
+  SkillRunId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -44,7 +46,10 @@ import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityRes
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { ProviderRuntimeIngestionLive } from "./ProviderRuntimeIngestion.ts";
+import {
+  ProviderRuntimeIngestionLive,
+  runtimeEventToActivities,
+} from "./ProviderRuntimeIngestion.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeIngestion.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -191,6 +196,35 @@ async function waitForThread(
 }
 
 describe("ProviderRuntimeIngestion", () => {
+  it("scopes structured Wayfinder input to its durable Skill Run", () => {
+    const skillRunId = SkillRunId.make("skill-run:wayfinder");
+    const activities = runtimeEventToActivities(
+      {
+        type: "user-input.requested",
+        eventId: asEventId("event-wayfinder-input"),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-wayfinder"),
+        requestId: RuntimeRequestId.make("request-wayfinder"),
+        payload: {
+          questions: [
+            {
+              id: "destination",
+              header: "Destination",
+              question: "Where should the map lead?",
+              options: [{ label: "Recovery", description: "Keep it durable." }],
+            },
+          ],
+        },
+      },
+      undefined,
+      skillRunId,
+    );
+
+    expect(activities[0]?.payload).toMatchObject({ skillRunId });
+  });
+
   let runtime: ManagedRuntime.ManagedRuntime<
     OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
     unknown

@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  SkillRunId,
   TrimmedNonEmptyString,
   UserInputQuestion,
   type OrchestrationThreadActivity,
@@ -17,10 +18,12 @@ import * as Schema from "effect/Schema";
 const RECOMMENDED_SUFFIX = /\s*\(Recommended\)\s*$/iu;
 const RequestedDecisionPayload = Schema.Struct({
   requestId: ApprovalRequestId,
+  skillRunId: SkillRunId,
   questions: Schema.Array(UserInputQuestion).check(Schema.isMinLength(1)),
 });
 const ResolvedDecisionPayload = Schema.Struct({
   requestId: ApprovalRequestId,
+  skillRunId: SkillRunId,
   answers: Schema.Record(Schema.String, Schema.Unknown),
 });
 const DecisionAnswer = Schema.Union([
@@ -108,7 +111,7 @@ export const deriveWayfinderDraft = (
   )) {
     if (activity.kind === "user-input.requested") {
       const payload = decodeRequestedDecision(activity.payload);
-      if (Option.isSome(payload)) {
+      if (Option.isSome(payload) && payload.value.skillRunId === invocation.skillRunId) {
         requested.set(payload.value.requestId, {
           questions: payload.value.questions,
           createdAt: activity.createdAt,
@@ -117,7 +120,7 @@ export const deriveWayfinderDraft = (
     }
     if (activity.kind === "user-input.resolved") {
       const payload = decodeResolvedDecision(activity.payload);
-      if (Option.isSome(payload)) {
+      if (Option.isSome(payload) && payload.value.skillRunId === invocation.skillRunId) {
         resolved.set(payload.value.requestId, {
           answers: payload.value.answers,
           createdAt: activity.createdAt,

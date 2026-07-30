@@ -2770,7 +2770,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   questionIndex={activePendingQuestionIndex}
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
-                  isWayfinderDecision={wayfinderDraft !== null}
+                  isWayfinderDecision={
+                    wayfinderDraft?.proposedDecisions[0]?.requestId ===
+                    pendingUserInputs[0]?.requestId
+                  }
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -2811,7 +2814,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 questionIndex={activePendingQuestionIndex}
                 onToggleOption={onSelectActivePendingUserInputOption}
                 onAdvance={onAdvanceActivePendingUserInput}
-                isWayfinderDecision={wayfinderDraft !== null}
+                isWayfinderDecision={
+                  wayfinderDraft?.proposedDecisions[0]?.requestId ===
+                  pendingUserInputs[0]?.requestId
+                }
               />
               <div className="px-3 pb-3 sm:px-4">
                 <div

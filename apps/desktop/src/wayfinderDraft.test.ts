@@ -36,6 +36,7 @@ it("uses the shared recoverable Wayfinder draft model in the desktop web shell",
         kind: "user-input.requested",
         payload: {
           requestId,
+          skillRunId: invocation.skillRunId,
           questions: [
             {
               id: "destination",
@@ -58,7 +59,11 @@ it("uses the shared recoverable Wayfinder draft model in the desktop web shell",
       {
         id: EventId.make("event:desktop-resolved"),
         kind: "user-input.resolved",
-        payload: { requestId, answers: { destination: "Reliable recovery" } },
+        payload: {
+          requestId,
+          skillRunId: invocation.skillRunId,
+          answers: { destination: "Reliable recovery" },
+        },
         createdAt: "2026-01-01T00:02:00.000Z",
         summary: "Decision resolved",
         tone: "info",

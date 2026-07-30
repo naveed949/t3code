@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import { blockedGitHubMutationDetail } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
+import { blockedWayfinderDraftApprovalDetail } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -923,13 +923,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
       const blockedMutation =
         command.decision === "accept" || command.decision === "acceptForSession"
-          ? blockedGitHubMutationDetail(thread.activities, command.requestId)
+          ? blockedWayfinderDraftApprovalDetail(thread.activities)
           : null;
       if (blockedMutation !== null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:
-            "GitHub issue mutations are disabled while the Wayfinder map is an unpublished draft.",
+            "Executable approvals are disabled while the Wayfinder map is an unpublished draft, ensuring GitHub remains unchanged.",
         });
       }
       return {

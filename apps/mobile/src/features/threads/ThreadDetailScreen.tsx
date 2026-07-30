@@ -418,7 +418,10 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       onSelectOption={props.onSelectUserInputOption}
                       onChangeCustomAnswer={props.onChangeUserInputCustomAnswer}
                       onSubmit={props.onSubmitUserInput}
-                      isWayfinderDecision={props.wayfinderDraft !== null}
+                      isWayfinderDecision={
+                        props.wayfinderDraft?.proposedDecisions[0]?.requestId ===
+                        props.activePendingUserInput.requestId
+                      }
                     />
                   ) : null}
                 </Animated.View>

@@ -66,5 +66,8 @@ edges. The persisted Skill Run owns the initial non-canonical draft; clients det
 durable `user-input.requested` and `user-input.resolved` activities into proposals, decision
 receipts, and confirmed map state. This keeps recovery provider-neutral without a second draft
 database or client-only state. The server forces these draft sessions into `approval-required`
-mode, records an active-draft activity, and rejects approved GitHub issue mutation commands until
-publication clears that marker. The thread's configured runtime mode is not changed.
+mode, scopes every structured decision activity to its originating Skill Run, and retains those
+activities outside the rolling work-log window. While draft authority is active, the server rejects
+every executable approval because an arbitrary command cannot be proven GitHub-read-only;
+structured Decision Card responses remain available. Publication clears that authority marker.
+The thread's configured runtime mode is not changed.

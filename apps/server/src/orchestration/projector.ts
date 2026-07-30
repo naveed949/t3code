@@ -1,9 +1,15 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  OrchestrationThreadActivity,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  SkillRunId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -35,6 +41,25 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_RECENT_THREAD_ACTIVITIES = 500;
+const isWayfinderScopedActivityPayload = Schema.is(Schema.Struct({ skillRunId: SkillRunId }));
+
+export function retainThreadActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  const ordered = activities.toSorted(compareThreadActivities);
+  const recent = ordered.slice(-MAX_RECENT_THREAD_ACTIVITIES);
+  const recentIds = new Set(recent.map((activity) => activity.id));
+  const durableWayfinderActivities = ordered.filter(
+    (activity) =>
+      !recentIds.has(activity.id) &&
+      (activity.kind === "wayfinder.draft.started" ||
+        activity.kind === "wayfinder.draft.published" ||
+        ((activity.kind === "user-input.requested" || activity.kind === "user-input.resolved") &&
+          isWayfinderScopedActivityPayload(activity.payload))),
+  );
+  return [...durableWayfinderActivities, ...recent];
+}
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -731,12 +756,10 @@ export function projectEvent(
             return nextBase;
           }
 
-          const activities = [
+          const activities = retainThreadActivities([
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          ]);
 
           return {
             ...nextBase,

@@ -53,6 +53,7 @@ describe("deriveWayfinderDraft", () => {
         "user-input.requested",
         {
           requestId,
+          skillRunId: invocation.skillRunId,
           questions: [
             {
               id: "audience",
@@ -90,6 +91,7 @@ describe("deriveWayfinderDraft", () => {
       "user-input.requested",
       {
         requestId,
+        skillRunId: invocation.skillRunId,
         questions: [
           {
             id: "audience",
@@ -112,7 +114,11 @@ describe("deriveWayfinderDraft", () => {
       activity(
         "event:resolved",
         "user-input.resolved",
-        { requestId, answers: { audience: "Maintainers" } },
+        {
+          requestId,
+          skillRunId: invocation.skillRunId,
+          answers: { audience: "Maintainers" },
+        },
         "2026-01-01T00:02:00.000Z",
       ),
     ]);
@@ -169,13 +175,13 @@ describe("deriveWayfinderDraft", () => {
       activity(
         "event:requested",
         "user-input.requested",
-        { requestId, questions },
+        { requestId, skillRunId: invocation.skillRunId, questions },
         "2026-01-01T00:01:00.000Z",
       ),
       activity(
         "event:resolved",
         "user-input.resolved",
-        { requestId, answers },
+        { requestId, skillRunId: invocation.skillRunId, answers },
         "2026-01-01T00:02:00.000Z",
       ),
     ]);
@@ -203,6 +209,43 @@ describe("deriveWayfinderDraft", () => {
     expect(
       deriveWayfinderDraft({ ...invocation, action: { id: "continue-map", reference: "5" } }, []),
     ).toBeNull();
+  });
+
+  it("ignores structured input from another Skill Run", () => {
+    const requestId = ApprovalRequestId.make("request:unrelated");
+    const unrelatedSkillRunId = SkillRunId.make("skill-run:unrelated");
+    const draft = deriveWayfinderDraft(invocation, [
+      activity(
+        "event:unrelated-requested",
+        "user-input.requested",
+        {
+          requestId,
+          skillRunId: unrelatedSkillRunId,
+          questions: [
+            {
+              id: "destination",
+              header: "Destination",
+              question: "Where next?",
+              options: [{ label: "Wrong map", description: "Belongs elsewhere." }],
+            },
+          ],
+        },
+        "2026-01-01T00:03:00.000Z",
+      ),
+      activity(
+        "event:unrelated-resolved",
+        "user-input.resolved",
+        {
+          requestId,
+          skillRunId: unrelatedSkillRunId,
+          answers: { destination: "Wrong map" },
+        },
+        "2026-01-01T00:04:00.000Z",
+      ),
+    ]);
+
+    expect(draft?.destination).toBeNull();
+    expect(draft?.decisionReceipts).toEqual([]);
   });
 
   it("recovers the latest unpublished run independently of the thread's latest turn", () => {
