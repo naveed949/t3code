@@ -24,6 +24,7 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  WayfinderSynchronizationState,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 
@@ -55,6 +56,55 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeWayfinderSynchronizationState = Schema.decodeUnknownEffect(
+  WayfinderSynchronizationState,
+);
+
+it.effect("decodes a revision-scoped Wayfinder reconciliation request", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.wayfinder.reconcile",
+      commandId: "cmd-wayfinder-refresh",
+      threadId: "thread-1",
+      skillRunId: "skill-run-1",
+      reason: "manual",
+      expectedRevision: "revision:before-refresh",
+      createdAt: "2026-07-30T16:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.wayfinder.reconcile");
+    if (parsed.type !== "thread.wayfinder.reconcile") return;
+    assert.strictEqual(parsed.reason, "manual");
+    assert.strictEqual(parsed.expectedRevision, "revision:before-refresh");
+  }),
+);
+
+it.effect("decodes structured Wayfinder conflict and outage states", () =>
+  Effect.gen(function* () {
+    const conflict = yield* decodeWayfinderSynchronizationState({
+      status: "conflict",
+      reason: "mutation",
+      lastAttemptedAt: "2026-07-30T16:01:00.000Z",
+      lastSuccessfulAt: "2026-07-30T16:00:00.000Z",
+      canMutate: false,
+      expectedRevision: "revision:expected",
+      actualRevision: "revision:actual",
+      message: "GitHub changed before this action completed.",
+    });
+    const unavailable = yield* decodeWayfinderSynchronizationState({
+      status: "unavailable",
+      reason: "poll",
+      lastAttemptedAt: "2026-07-30T16:02:00.000Z",
+      lastSuccessfulAt: "2026-07-30T16:00:00.000Z",
+      canMutate: false,
+      message: "GitHub is unavailable. The cached map is read-only.",
+    });
+
+    assert.strictEqual(conflict.canMutate, false);
+    assert.strictEqual(conflict.actualRevision, "revision:actual");
+    assert.strictEqual(unavailable.status, "unavailable");
+  }),
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {

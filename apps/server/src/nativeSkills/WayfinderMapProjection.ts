@@ -5,6 +5,12 @@ interface GitHubMapIssue {
   readonly title: string;
   readonly url: string;
   readonly state: "OPEN" | "CLOSED";
+  readonly comments:
+    | {
+        readonly totalCount: number;
+        readonly nodes: ReadonlyArray<{ readonly updatedAt: string }>;
+      }
+    | undefined;
   readonly body: string;
   readonly subIssues: {
     readonly nodes: ReadonlyArray<{
@@ -12,6 +18,12 @@ interface GitHubMapIssue {
       readonly title: string;
       readonly url: string;
       readonly state: "OPEN" | "CLOSED";
+      readonly comments:
+        | {
+            readonly totalCount: number;
+            readonly nodes: ReadonlyArray<{ readonly updatedAt: string }>;
+          }
+        | undefined;
       readonly assignees: { readonly nodes: ReadonlyArray<{ readonly login: string }> };
       readonly labels: { readonly nodes: ReadonlyArray<{ readonly name: string }> };
       readonly blockedBy: {
@@ -95,6 +107,7 @@ function classification(labels: ReadonlyArray<{ readonly name: string }>) {
 export function projectWayfinderMap(
   issue: GitHubMapIssue,
   synchronizedAt: string,
+  revision?: string,
 ): WayfinderMapProjection {
   const sections = parseMapSections(issue.body);
   const tickets = issue.subIssues.nodes
@@ -107,6 +120,10 @@ export function projectWayfinderMap(
       claimedBy: ticket.assignees.nodes[0]?.login ?? null,
       blockedBy: ticket.blockedBy.nodes.map((blocker) => blocker.number).sort((a, b) => a - b),
       blocks: ticket.blocking.nodes.map((blocked) => blocked.number).sort((a, b) => a - b),
+      ...(ticket.comments ? { commentCount: ticket.comments.totalCount } : {}),
+      ...(ticket.comments?.nodes[0]?.updatedAt
+        ? { lastCommentedAt: ticket.comments.nodes[0].updatedAt }
+        : {}),
       hasOpenBlocker: ticket.blockedBy.nodes.some((blocker) => blocker.state === "OPEN"),
     }))
     .sort((left, right) => left.number - right.number);
@@ -117,7 +134,9 @@ export function projectWayfinderMap(
       title: issue.title,
       url: issue.url,
       state: issue.state === "OPEN" ? "open" : "closed",
+      ...(issue.comments ? { commentCount: issue.comments.totalCount } : {}),
     },
+    ...(revision !== undefined ? { revision } : {}),
     destination: sectionText(sections.destination),
     notes: sectionText(sections.notes),
     decisionsSoFar: parseDecisions(sections.decisionsSoFar),

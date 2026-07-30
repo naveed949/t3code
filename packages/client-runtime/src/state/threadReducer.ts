@@ -545,8 +545,40 @@ export function applyThreadDetailEvent(
       };
     }
 
+    case "thread.wayfinder-reconciliation-updated": {
+      const invocation = thread.latestTurn?.skillInvocation;
+      if (!invocation || invocation.skillRunId !== event.payload.skillRunId) {
+        return { kind: "unchanged" };
+      }
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          latestTurn: {
+            ...thread.latestTurn!,
+            skillInvocation: {
+              ...invocation,
+              wayfinderSynchronization: event.payload.synchronization,
+              ...(event.payload.synchronization.lastSuccessfulAt !== undefined
+                ? {
+                    wayfinderSynchronizedAt: event.payload.synchronization.lastSuccessfulAt,
+                  }
+                : {}),
+              ...(event.payload.wayfinderMap !== undefined
+                ? {
+                    wayfinderMap: event.payload.wayfinderMap,
+                  }
+                : {}),
+            },
+          },
+          updatedAt: event.occurredAt,
+        },
+      };
+    }
+
     // ── Events that don't mutate thread state directly ──────────────
     case "thread.wayfinder-publication-requested":
+    case "thread.wayfinder-reconciliation-requested":
     case "thread.approval-response-requested":
     case "thread.user-input-response-requested":
     case "thread.checkpoint-revert-requested":

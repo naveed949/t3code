@@ -10,9 +10,11 @@ import type {
   WayfinderMapProjection,
   WayfinderMutation,
   WayfinderMutationAction,
+  WayfinderReconcileReason,
+  WayfinderSynchronizationState,
 } from "@t3tools/contracts";
-import { ExternalLinkIcon } from "lucide-react";
-import { memo, type ReactNode, useEffect, useState } from "react";
+import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
+import { memo, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -317,7 +319,33 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     action: WayfinderMutationAction,
     options?: { readonly actionId?: string; readonly confirmed?: boolean },
   ) => void;
+  readonly synchronization: WayfinderSynchronizationState | null;
+  readonly connected: boolean;
+  readonly onReconcile: (reason: WayfinderReconcileReason) => void;
 }) {
+  const reconcileRef = useRef(props.onReconcile);
+  reconcileRef.current = props.onReconcile;
+  const wasConnected = useRef(props.connected);
+  useEffect(() => {
+    reconcileRef.current("open");
+  }, []);
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") reconcileRef.current("focus");
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, []);
+  useEffect(() => {
+    if (!wasConnected.current && props.connected) reconcileRef.current("reconnect");
+    wasConnected.current = props.connected;
+  }, [props.connected]);
+  useEffect(() => {
+    if (!props.connected) return;
+    const interval = window.setInterval(() => reconcileRef.current("poll"), 60_000);
+    return () => window.clearInterval(interval);
+  }, [props.connected]);
+
   const map = applyOptimisticWayfinderMutation(props.map, props.mutation ?? null);
   const model = deriveWayfinderWorkbenchModel(map);
   const ticketsByNumber = new Map(map.tickets.map((ticket) => [ticket.number, ticket] as const));
@@ -326,6 +354,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     incomingEdgesByNumber.set(edge.to, [...(incomingEdgesByNumber.get(edge.to) ?? []), edge]);
   }
   const columnCount = Math.max(1, ...model.nodes.map((node) => node.column + 1));
+  const synchronizationStatus = props.synchronization?.status ?? "healthy";
+  const lastSuccessfulAt = props.synchronization?.lastSuccessfulAt ?? props.map.lastSynchronizedAt;
+  const synchronizationMessage =
+    props.synchronization?.message ??
+    (synchronizationStatus === "synchronizing" ? "Refreshing canonical GitHub state…" : null);
 
   return (
     <section
@@ -347,11 +380,44 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
               {map.canonicalReference.state}
             </span>
           </div>
-          <p className="text-xs text-muted-foreground">
-            GitHub canonical · Synchronized {map.lastSynchronizedAt}
-          </p>
-          <ReferenceLink href={map.canonicalReference.url}>
-            GitHub #{String(map.canonicalReference.number)}
+          <div
+            aria-live="polite"
+            data-wayfinder-mutations-enabled={
+              props.connected && props.synchronization?.canMutate !== false ? "true" : "false"
+            }
+            className="flex items-center justify-between gap-3 text-xs text-muted-foreground"
+          >
+            <p>
+              {synchronizationStatus === "unavailable" || synchronizationStatus === "conflict"
+                ? "Cached read-only map"
+                : "Canonical GitHub map"}
+              {` · Last synchronized ${lastSuccessfulAt}`}
+            </p>
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!props.connected || synchronizationStatus === "synchronizing"}
+              onClick={() => props.onReconcile("manual")}
+            >
+              <RefreshCwIcon aria-hidden className="size-3" />
+              Refresh
+            </button>
+          </div>
+          {synchronizationMessage ? (
+            <p
+              role={synchronizationStatus === "conflict" ? "alert" : "status"}
+              className={cn(
+                "rounded-md border px-3 py-2 text-xs",
+                synchronizationStatus === "conflict"
+                  ? "border-destructive/40 text-destructive"
+                  : "border-border text-muted-foreground",
+              )}
+            >
+              {synchronizationMessage}
+            </p>
+          ) : null}
+          <ReferenceLink href={props.map.canonicalReference.url}>
+            GitHub #{String(props.map.canonicalReference.number)}
           </ReferenceLink>
         </header>
 
@@ -448,6 +514,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                   <p className="mt-1 text-[11px] text-muted-foreground">
                     {ticket.classification}
                     {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
+                    {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
                     {ticket.blockedBy.length > 0
                       ? ` · Blocked by ${ticket.blockedBy.map((number) => `#${number}`).join(", ")}`
                       : ""}

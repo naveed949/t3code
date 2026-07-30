@@ -36,6 +36,7 @@ export interface IssueTrackerIssue {
 
 export type WayfinderMapLoadResult =
   | { readonly kind: "loaded"; readonly map: WayfinderMapProjection }
+  | { readonly kind: "unchanged"; readonly revision: string }
   | { readonly kind: "not-wayfinder-map" }
   | { readonly kind: "truncated" };
 
@@ -60,6 +61,13 @@ export class IssueTracker extends Context.Service<
       readonly issueNumber: number;
       readonly synchronizedAt: string;
     }) => Effect.Effect<WayfinderMapLoadResult>;
+    readonly reconcileWayfinderMap: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly synchronizedAt: string;
+      readonly currentRevision?: string;
+    }) => Effect.Effect<WayfinderMapLoadResult, GitHubCli.GitHubCliError>;
     readonly ensureLabel: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
@@ -161,6 +169,13 @@ const WayfinderMapProbe = Schema.Struct({
           title: Schema.String,
           url: Schema.String,
           state: Schema.Literals(["OPEN", "CLOSED"]),
+          updatedAt: Schema.optional(Schema.String),
+          comments: Schema.optional(
+            Schema.Struct({
+              totalCount: Schema.Number,
+              nodes: Schema.Array(Schema.Struct({ updatedAt: Schema.String })),
+            }),
+          ),
           labels: Schema.Struct({
             nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
             pageInfo: ConnectionPageInfo,
@@ -173,6 +188,13 @@ const WayfinderMapProbe = Schema.Struct({
                 title: Schema.String,
                 url: Schema.String,
                 state: Schema.Literals(["OPEN", "CLOSED"]),
+                updatedAt: Schema.optional(Schema.String),
+                comments: Schema.optional(
+                  Schema.Struct({
+                    totalCount: Schema.Number,
+                    nodes: Schema.Array(Schema.Struct({ updatedAt: Schema.String })),
+                  }),
+                ),
                 assignees: Schema.Struct({
                   nodes: Schema.Array(Schema.Struct({ login: Schema.String })),
                   pageInfo: ConnectionPageInfo,
@@ -212,6 +234,67 @@ const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
 );
 const decodeWayfinderMapProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(WayfinderMapProbe),
+);
+const WayfinderRevisionProbe = Schema.Struct({
+  data: Schema.Struct({
+    repository: Schema.Struct({
+      issue: Schema.NullOr(
+        Schema.Struct({
+          number: Schema.Number,
+          title: Schema.String,
+          state: Schema.Literals(["OPEN", "CLOSED"]),
+          updatedAt: Schema.String,
+          comments: Schema.Struct({
+            totalCount: Schema.Number,
+            nodes: Schema.Array(Schema.Struct({ updatedAt: Schema.String })),
+          }),
+          labels: Schema.Struct({
+            nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+            pageInfo: ConnectionPageInfo,
+          }),
+          subIssues: Schema.Struct({
+            nodes: Schema.Array(
+              Schema.Struct({
+                number: Schema.Number,
+                title: Schema.String,
+                state: Schema.Literals(["OPEN", "CLOSED"]),
+                updatedAt: Schema.String,
+                comments: Schema.Struct({
+                  totalCount: Schema.Number,
+                  nodes: Schema.Array(Schema.Struct({ updatedAt: Schema.String })),
+                }),
+                assignees: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ login: Schema.String })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                labels: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                blockedBy: Schema.Struct({
+                  nodes: Schema.Array(
+                    Schema.Struct({
+                      number: Schema.Number,
+                      state: Schema.Literals(["OPEN", "CLOSED"]),
+                    }),
+                  ),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                blocking: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ number: Schema.Number })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+              }),
+            ),
+            pageInfo: ConnectionPageInfo,
+          }),
+        }),
+      ),
+    }),
+  }),
+});
+const decodeWayfinderRevisionProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(WayfinderRevisionProbe),
 );
 const IssueNodeProbe = Schema.Struct({ id: Schema.String });
 const decodeIssueNodeProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueNodeProbe));
@@ -299,6 +382,72 @@ function replaceMapSection(body: string, heading: string, value: string): string
     );
   const end = nextHeadingOffset < 0 ? lines.length : headingIndex + 1 + nextHeadingOffset;
   return [...lines.slice(0, headingIndex), ...replacement, "", ...lines.slice(end)].join("\n");
+}
+
+function wayfinderRevision(issue: {
+  readonly number: number;
+  readonly title: string;
+  readonly state: "OPEN" | "CLOSED";
+  readonly updatedAt: string | undefined;
+  readonly comments:
+    | {
+        readonly totalCount: number;
+        readonly nodes: ReadonlyArray<{ readonly updatedAt: string }>;
+      }
+    | undefined;
+  readonly labels?: { readonly nodes: ReadonlyArray<{ readonly name: string }> };
+  readonly subIssues: {
+    readonly nodes: ReadonlyArray<{
+      readonly number: number;
+      readonly title?: string;
+      readonly state?: "OPEN" | "CLOSED";
+      readonly updatedAt: string | undefined;
+      readonly comments:
+        | {
+            readonly totalCount: number;
+            readonly nodes: ReadonlyArray<{ readonly updatedAt: string }>;
+          }
+        | undefined;
+      readonly assignees?: {
+        readonly nodes: ReadonlyArray<{ readonly login: string }>;
+      };
+      readonly labels?: { readonly nodes: ReadonlyArray<{ readonly name: string }> };
+      readonly blockedBy?: {
+        readonly nodes: ReadonlyArray<{
+          readonly number: number;
+          readonly state: "OPEN" | "CLOSED";
+        }>;
+      };
+      readonly blocking?: { readonly nodes: ReadonlyArray<{ readonly number: number }> };
+    }>;
+  };
+}): string {
+  const issueEvidence = [
+    issue.number,
+    issue.title,
+    issue.state,
+    issue.updatedAt ?? "",
+    issue.comments?.totalCount ?? 0,
+    issue.comments?.nodes[0]?.updatedAt ?? "",
+    issue.labels?.nodes.map((label) => label.name).sort() ?? [],
+  ];
+  const ticketEvidence = issue.subIssues.nodes
+    .map((ticket) => [
+      ticket.number,
+      ticket.title ?? "",
+      ticket.state ?? "OPEN",
+      ticket.updatedAt ?? "",
+      ticket.comments?.totalCount ?? 0,
+      ticket.comments?.nodes[0]?.updatedAt ?? "",
+      ticket.assignees?.nodes.map((assignee) => assignee.login).sort() ?? [],
+      ticket.labels?.nodes.map((label) => label.name).sort() ?? [],
+      ticket.blockedBy?.nodes
+        .map((blocker) => [blocker.number, blocker.state] as const)
+        .sort(([left], [right]) => left - right) ?? [],
+      ticket.blocking?.nodes.map((blocked) => blocked.number).sort((a, b) => a - b) ?? [],
+    ])
+    .sort(([left], [right]) => Number(left) - Number(right));
+  return `github:${JSON.stringify([issueEvidence, ticketEvidence])}`;
 }
 
 function gitHubIssueReferenceSchema(repository: IssueTrackerRepository) {
@@ -420,6 +569,88 @@ export const GitHubIssueTrackerLive = Layer.effect(
       });
     });
 
+    const loadWayfinderMapEffect = Effect.fn("IssueTracker.loadWayfinderMapEffect")(
+      function* (input: {
+        readonly cwd: string;
+        readonly repository: IssueTrackerRepository;
+        readonly issueNumber: number;
+        readonly synchronizedAt: string;
+      }) {
+        const output = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            `query=query($owner:String!,$name:String!,$number:Int!){
+              repository(owner:$owner,name:$name){
+                issue(number:$number){
+                  number title url state body updatedAt
+                  comments(last:1){totalCount nodes{updatedAt}}
+                  labels(first:100){nodes{name} pageInfo{hasNextPage}}
+                  subIssues(first:100){
+                    nodes{
+                      number title url state updatedAt
+                      comments(last:1){totalCount nodes{updatedAt}}
+                      assignees(first:100){nodes{login} pageInfo{hasNextPage}}
+                      labels(first:100){nodes{name} pageInfo{hasNextPage}}
+                      blockedBy(first:100){nodes{number state} pageInfo{hasNextPage}}
+                      blocking(first:100){nodes{number} pageInfo{hasNextPage}}
+                    }
+                    pageInfo{hasNextPage}
+                  }
+                }
+              }
+            }`,
+            "-F",
+            `owner=${input.repository.owner}`,
+            "-F",
+            `name=${input.repository.name}`,
+            "-F",
+            `number=${input.issueNumber}`,
+          ],
+        });
+        const probe = decodeWayfinderMapProbe(output.stdout);
+        const issue = Option.isSome(probe) ? probe.value.data.repository.issue : null;
+        const isTruncated =
+          issue?.labels.pageInfo.hasNextPage ||
+          issue?.subIssues.pageInfo.hasNextPage ||
+          issue?.subIssues.nodes.some(
+            (ticket) =>
+              ticket.assignees.pageInfo.hasNextPage ||
+              ticket.labels.pageInfo.hasNextPage ||
+              ticket.blockedBy.pageInfo.hasNextPage ||
+              ticket.blocking.pageInfo.hasNextPage,
+          );
+        if (issue && isTruncated) return { kind: "truncated" as const };
+        const normalizedIssue = issue
+          ? {
+              ...issue,
+              updatedAt: issue.updatedAt,
+              comments: issue.comments,
+              subIssues: {
+                ...issue.subIssues,
+                nodes: issue.subIssues.nodes.map((ticket) => ({
+                  ...ticket,
+                  updatedAt: ticket.updatedAt,
+                  comments: ticket.comments,
+                })),
+              },
+            }
+          : null;
+        return issue?.labels.nodes.some((label) => label.name === "wayfinder:map")
+          ? {
+              kind: "loaded" as const,
+              map: projectWayfinderMap(
+                normalizedIssue!,
+                input.synchronizedAt,
+                issue.updatedAt === undefined ? undefined : wayfinderRevision(normalizedIssue!),
+              ),
+            }
+          : { kind: "not-wayfinder-map" as const };
+      },
+    );
+
     return IssueTracker.of({
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
         const identity = yield* repositories.resolve(cwd);
@@ -506,8 +737,12 @@ export const GitHubIssueTrackerLive = Layer.effect(
         );
       }),
       loadWayfinderMap: Effect.fn("IssueTracker.loadWayfinderMap")(function* (input) {
-        const output = yield* github
-          .execute({
+        const loaded = yield* loadWayfinderMapEffect(input).pipe(Effect.option);
+        return Option.getOrElse(loaded, () => ({ kind: "not-wayfinder-map" as const }));
+      }),
+      reconcileWayfinderMap: Effect.fn("IssueTracker.reconcileWayfinderMap")(function* (input) {
+        if (input.currentRevision !== undefined) {
+          const output = yield* github.execute({
             cwd: input.cwd,
             args: [
               "api",
@@ -516,11 +751,13 @@ export const GitHubIssueTrackerLive = Layer.effect(
               `query=query($owner:String!,$name:String!,$number:Int!){
                 repository(owner:$owner,name:$name){
                   issue(number:$number){
-                    number title url state body
+                    number title state updatedAt
+                    comments(last:1){totalCount nodes{updatedAt}}
                     labels(first:100){nodes{name} pageInfo{hasNextPage}}
                     subIssues(first:100){
                       nodes{
-                        number title url state
+                        number title state updatedAt
+                        comments(last:1){totalCount nodes{updatedAt}}
                         assignees(first:100){nodes{login} pageInfo{hasNextPage}}
                         labels(first:100){nodes{name} pageInfo{hasNextPage}}
                         blockedBy(first:100){nodes{number state} pageInfo{hasNextPage}}
@@ -538,25 +775,26 @@ export const GitHubIssueTrackerLive = Layer.effect(
               "-F",
               `number=${input.issueNumber}`,
             ],
-          })
-          .pipe(Effect.option);
-        if (Option.isNone(output)) return { kind: "not-wayfinder-map" };
-        const probe = decodeWayfinderMapProbe(output.value.stdout);
-        const issue = Option.isSome(probe) ? probe.value.data.repository.issue : null;
-        const isTruncated =
-          issue?.labels.pageInfo.hasNextPage ||
-          issue?.subIssues.pageInfo.hasNextPage ||
-          issue?.subIssues.nodes.some(
-            (ticket) =>
-              ticket.assignees.pageInfo.hasNextPage ||
-              ticket.labels.pageInfo.hasNextPage ||
-              ticket.blockedBy.pageInfo.hasNextPage ||
-              ticket.blocking.pageInfo.hasNextPage,
-          );
-        if (issue && isTruncated) return { kind: "truncated" };
-        return issue?.labels.nodes.some((label) => label.name === "wayfinder:map")
-          ? { kind: "loaded", map: projectWayfinderMap(issue, input.synchronizedAt) }
-          : { kind: "not-wayfinder-map" };
+          });
+          const probe = decodeWayfinderRevisionProbe(output.stdout);
+          const issue = Option.isSome(probe) ? probe.value.data.repository.issue : null;
+          const isTruncated =
+            issue?.labels.pageInfo.hasNextPage ||
+            issue?.subIssues.pageInfo.hasNextPage ||
+            issue?.subIssues.nodes.some(
+              (ticket) =>
+                ticket.assignees.pageInfo.hasNextPage ||
+                ticket.labels.pageInfo.hasNextPage ||
+                ticket.blockedBy.pageInfo.hasNextPage ||
+                ticket.blocking.pageInfo.hasNextPage,
+            );
+          if (issue && isTruncated) return { kind: "truncated" };
+          if (issue) {
+            const revision = wayfinderRevision(issue);
+            if (revision === input.currentRevision) return { kind: "unchanged", revision };
+          }
+        }
+        return yield* loadWayfinderMapEffect(input);
       }),
       ensureLabel: Effect.fn("IssueTracker.ensureLabel")(function* (input) {
         const existingOutput = yield* github.execute({

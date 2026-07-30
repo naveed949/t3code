@@ -17,16 +17,21 @@ import {
   type WayfinderMapProjection,
   type WayfinderMutation,
   type WayfinderMutationAction,
+  type WayfinderReconcileReason,
 } from "@t3tools/contracts";
 import type { StaticScreenProps } from "@react-navigation/native";
-import { useEffect, useState } from "react";
-import { Pressable, ScrollView, TextInput, View } from "react-native";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { AppState, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { environmentThreadDetails, environmentThreadShells } from "../../state/threads";
-import { threadEnvironment } from "../../state/threads";
+import { useEnvironments } from "../../state/environments";
+import {
+  environmentThreadDetails,
+  environmentThreadShells,
+  threadEnvironment,
+} from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   buildMobileDependencyAction,
@@ -153,6 +158,7 @@ function TicketList(props: {
           <Text className="mt-1 text-xs capitalize text-foreground-muted">
             {ticket.classification}
             {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
+            {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
           </Text>
           {ticket.blockedBy.length > 0 ? (
             <Text className="mt-1 text-xs text-foreground-muted">
@@ -207,6 +213,11 @@ function WayfinderWorkbenchContent(props: {
 }) {
   const [showGraph, setShowGraph] = useState(false);
   const mutateWayfinder = useAtomCommand(threadEnvironment.mutateWayfinder, "update Wayfinder");
+  const reconcileWayfinderMapCommand = useAtomCommand(
+    threadEnvironment.reconcileWayfinderMap,
+    "reconcile Wayfinder map",
+  );
+  const { environments } = useEnvironments();
   const workstreams = useAtomValue(
     environmentThreadShells.projectWorkstreamsAtom(
       scopeProjectRef(props.environmentId, props.projectId),
@@ -253,6 +264,44 @@ function WayfinderWorkbenchContent(props: {
       },
     });
   };
+  const connected =
+    environments.find((environment) => environment.environmentId === props.environmentId)
+      ?.connection.phase === "connected";
+  const reconcile = useCallback(
+    (reason: WayfinderReconcileReason) => {
+      if (!invocation) return;
+      void reconcileWayfinderMapCommand({
+        environmentId: props.environmentId,
+        input: {
+          threadId: props.threadId,
+          skillRunId: invocation.skillRunId,
+          reason,
+        },
+      });
+    },
+    [invocation, props.environmentId, props.threadId, reconcileWayfinderMapCommand],
+  );
+  const reconcileRef = useRef(reconcile);
+  reconcileRef.current = reconcile;
+  const wasConnected = useRef(connected);
+  useEffect(() => {
+    if (invocation) reconcileRef.current("open");
+  }, [invocation?.skillRunId]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") reconcileRef.current("focus");
+    });
+    return () => subscription.remove();
+  }, []);
+  useEffect(() => {
+    if (!wasConnected.current && connected) reconcileRef.current("reconnect");
+    wasConnected.current = connected;
+  }, [connected]);
+  useEffect(() => {
+    if (!connected) return;
+    const interval = setInterval(() => reconcileRef.current("poll"), 60_000);
+    return () => clearInterval(interval);
+  }, [connected]);
   if (!map) {
     return (
       <View className="flex-1 items-center justify-center bg-background p-6">
@@ -263,6 +312,9 @@ function WayfinderWorkbenchContent(props: {
     );
   }
   const presentation = buildMobileWayfinderPresentation(map);
+  const synchronization = workstream?.wayfinderSynchronization ?? null;
+  const synchronizationStatus = synchronization?.status ?? "healthy";
+  const lastSuccessfulAt = synchronization?.lastSuccessfulAt ?? map.lastSynchronizedAt;
 
   return (
     <ScrollView
@@ -277,8 +329,34 @@ function WayfinderWorkbenchContent(props: {
         </Text>
         <Text className="text-xl font-bold text-foreground">{map.canonicalReference.title}</Text>
         <Text className="text-xs text-foreground-muted">
-          GitHub canonical · Synchronized {map.lastSynchronizedAt}
+          {synchronizationStatus === "unavailable" || synchronizationStatus === "conflict"
+            ? "Cached read-only map"
+            : "Canonical GitHub map"}
+          {` · Last synchronized ${lastSuccessfulAt}`}
         </Text>
+        {synchronization?.message ? (
+          <Text
+            accessibilityRole={synchronizationStatus === "conflict" ? "alert" : "text"}
+            className={
+              synchronizationStatus === "conflict"
+                ? "text-xs text-destructive"
+                : "text-xs text-foreground-muted"
+            }
+          >
+            {synchronization.message}
+          </Text>
+        ) : null}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Refresh Wayfinder map from GitHub"
+          disabled={!connected || synchronizationStatus === "synchronizing"}
+          className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-50"
+          onPress={() => reconcile("manual")}
+        >
+          <Text className="text-xs font-semibold text-foreground">
+            {synchronizationStatus === "synchronizing" ? "Refreshing…" : "Refresh"}
+          </Text>
+        </Pressable>
         <Pressable
           accessibilityRole="link"
           onPress={() => void tryOpenExternalUrl(map.canonicalReference.url, "wayfinder")}

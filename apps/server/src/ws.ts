@@ -701,7 +701,8 @@ const makeWsRpcLayer = (
               includeSkillRuns:
                 latestByAggregate.get(key)?.includeSkillRuns === true ||
                 event.type === "thread.wayfinder-publication-updated" ||
-                event.type === "thread.wayfinder-mutation-updated",
+                event.type === "thread.wayfinder-mutation-updated" ||
+                event.type === "thread.wayfinder-reconciliation-updated",
             });
           }
           const survivors = Array.from(latestByAggregate.values()).sort(

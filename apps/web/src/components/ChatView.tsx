@@ -15,6 +15,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
+  type WayfinderReconcileReason,
   type KeybindingCommand,
   type WayfinderMutationAction,
   OrchestrationThreadActivity,
@@ -1198,6 +1199,9 @@ function ChatViewContent(props: ChatViewProps) {
   const mutateWayfinderCommand = useAtomCommand(threadEnvironment.mutateWayfinder, {
     reportFailure: false,
   });
+  const reconcileWayfinderMapCommand = useAtomCommand(threadEnvironment.reconcileWayfinderMap, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1717,6 +1721,20 @@ function ChatViewContent(props: ChatViewProps) {
       connection: activeEnvironment.connection,
     };
   }, [activeEnvironment, activeEnvironmentUnavailable, activeEnvironmentUnavailableLabel]);
+  const reconcileActiveWayfinderMap = useCallback(
+    (reason: WayfinderReconcileReason) => {
+      if (!activeThread || !activeWayfinderInvocation) return;
+      void reconcileWayfinderMapCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeThread.id,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          reason,
+        },
+      });
+    },
+    [activeThread, activeWayfinderInvocation, reconcileWayfinderMapCommand],
+  );
   const handleReconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
       const result = await retryEnvironment(environmentId);
@@ -5770,6 +5788,9 @@ function ChatViewContent(props: ChatViewProps) {
         map={activeWayfinderMap}
         mutation={activeWayfinderMutation}
         onMutate={onMutateWayfinder}
+        synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
+        connected={!activeEnvironmentUnavailable}
+        onReconcile={reconcileActiveWayfinderMap}
       />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&

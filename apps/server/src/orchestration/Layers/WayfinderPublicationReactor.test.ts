@@ -33,6 +33,7 @@ import {
 } from "./WayfinderProcessors.ts";
 
 const unusedMutationTrackerMethods = {
+  reconcileWayfinderMap: () => Effect.die("unexpected tracker read"),
   updateWayfinderMapField: () => Effect.die("unexpected tracker write"),
   updateWayfinderDecisions: () => Effect.die("unexpected tracker write"),
   updateIssueTitle: () => Effect.die("unexpected tracker write"),
@@ -735,6 +736,7 @@ it.effect("publishes, reconciles, and emits progress receipts through the reacto
                   lastSynchronizedAt: now,
                 },
               }),
+            reconcileWayfinderMap: () => Effect.die("unexpected tracker read"),
           }),
         ),
         Layer.succeed(

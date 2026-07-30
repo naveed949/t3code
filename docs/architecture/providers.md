@@ -94,3 +94,15 @@ one tracker mutation, emits typed in-flight and completion receipts, reloads the
 and persists both the active-action state and reconciled projection on the same Skill Run. Clients
 may project only an awaiting or mutating action optimistically and discard that projection on a
 failed receipt.
+Published maps use a separate queue-backed reconciliation reactor. Clients send a typed,
+Skill Run-scoped reason (`open`, `reconnect`, `focus`, `manual`, `poll`, `mutation`, or `resume`), and
+the environment-owning server performs every GitHub read. A lightweight revision query covers the
+map issue, child issue update timestamps, and latest comment evidence; an unchanged result advances
+sync health without loading another graph. Changed graphs are projected through persisted
+orchestration events and shell updates so web, desktop, mobile, and remote clients converge.
+
+Synchronization is explicit: `synchronizing`, `healthy`, `unavailable`, or `conflict`. Unavailable
+and partial responses retain the prior projection and set `canMutate` false. Mutation reconciliation
+compares expected revision evidence before any tracker action; a mismatch persists a structured
+conflict and leaves the cached graph untouched. Each terminal attempt emits a typed runtime receipt,
+so tests can wait on the worker rather than timers or polling.

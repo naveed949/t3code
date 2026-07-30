@@ -43,7 +43,14 @@ const map = {
 
 describe("WayfinderWorkbench", () => {
   it("renders the canonical map, frontier first, and a non-animated dependency graph", () => {
-    const markup = renderToStaticMarkup(<WayfinderWorkbench map={map} />);
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
     expect(markup).toContain('aria-label="Release map. 1 frontier ticket');
     expect(markup).toContain('href="https://github.com/t3tools/t3code/issues/42"');
     expect(markup.indexOf("Research hosting")).toBeLessThan(markup.indexOf("Choose deployment"));
@@ -64,6 +71,9 @@ describe("WayfinderWorkbench", () => {
           updatedAt: "2026-01-02T00:01:00.000Z",
         }}
         onMutate={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
       />,
     );
 
@@ -73,5 +83,28 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain('aria-label="New ticket title"');
     expect(markup).toContain('aria-label="Blocker ticket"');
     expect(markup).toContain('href="https://github.com/t3tools/t3code/issues/42"');
+  });
+
+  it("keeps the cached map visible and mutations disabled during a GitHub outage", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        synchronization={{
+          status: "unavailable",
+          reason: "poll",
+          lastAttemptedAt: "2026-01-02T00:01:00.000Z",
+          lastSuccessfulAt: "2026-01-02T00:00:00.000Z",
+          canMutate: false,
+          message: "GitHub is temporarily unavailable.",
+        }}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Cached read-only map");
+    expect(markup).toContain("GitHub is temporarily unavailable.");
+    expect(markup).toContain('data-wayfinder-mutations-enabled="false"');
+    expect(markup).toContain("Research hosting");
   });
 });

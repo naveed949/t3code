@@ -5,6 +5,7 @@ import type {
   SkillRunId,
   ThreadId,
   WayfinderMapProjection,
+  WayfinderSynchronizationState,
   WorkstreamId,
 } from "@t3tools/contracts";
 
@@ -15,6 +16,7 @@ export interface ProjectSkillWorkstream {
   readonly linkedThreadIds: ReadonlyArray<ThreadId>;
   readonly skillRuns: ReadonlyArray<SkillInvocation>;
   readonly wayfinderMap: WayfinderMapProjection | null;
+  readonly wayfinderSynchronization: WayfinderSynchronizationState | null;
 }
 
 export interface EnvironmentProjectSkillWorkstream extends ProjectSkillWorkstream {
@@ -61,8 +63,12 @@ export const deriveProjectWorkstreams = (
       storedWayfinderMap && lastSynchronizedAt
         ? { ...storedWayfinderMap, lastSynchronizedAt }
         : storedWayfinderMap;
+    const wayfinderSynchronization =
+      sortedRuns.toReversed().find((run) => run.wayfinderSynchronization)
+        ?.wayfinderSynchronization ?? null;
     const completed =
       wayfinderMap !== null &&
+      (wayfinderSynchronization === null || wayfinderSynchronization.status === "healthy") &&
       (wayfinderMap.canonicalReference.state === "closed" ||
         (wayfinderMap.destination.length > 0 &&
           wayfinderMap.fogOfWar.length === 0 &&
@@ -74,6 +80,7 @@ export const deriveProjectWorkstreams = (
       linkedThreadIds: Array.from(workstream.linkedThreadIds).sort(),
       skillRuns: sortedRuns,
       wayfinderMap,
+      wayfinderSynchronization,
     };
   }).sort((left, right) => left.id.localeCompare(right.id));
 };

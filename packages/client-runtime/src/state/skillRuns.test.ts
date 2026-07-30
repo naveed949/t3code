@@ -35,6 +35,7 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
       linkedThreadIds: [ThreadId.make("thread-1")],
       skillRuns: [invocation],
       wayfinderMap: null,
+      wayfinderSynchronization: null,
     },
   ]);
 });
@@ -135,6 +136,72 @@ it("finds the freshest Wayfinder Workstream linked to a thread", () => {
     findThreadWayfinderWorkstream(ThreadId.make("thread-1"), workstreams)?.wayfinderMap
       ?.canonicalReference.number,
   ).toBe(42);
+});
+
+it("does not report completion until reconciliation is healthy and reactivates reopened work", () => {
+  const synchronizedAt = "2026-01-04T00:00:00.000Z";
+  const baseMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Release map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "A release plan.",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [
+      {
+        number: 43,
+        title: "Choose hosting",
+        url: "https://github.com/t3tools/t3code/issues/43",
+        state: "open" as const,
+        classification: "grilling" as const,
+        claimedBy: null,
+        blockedBy: [],
+        blocks: [],
+      },
+    ],
+    frontier: [43],
+    lastSynchronizedAt: synchronizedAt,
+  };
+  const [workstream] = deriveProjectWorkstreams(ProjectId.make("project-1"), [
+    {
+      ...invocation,
+      wayfinderMap: baseMap,
+      wayfinderSynchronization: {
+        status: "healthy" as const,
+        reason: "resume" as const,
+        lastAttemptedAt: synchronizedAt,
+        lastSuccessfulAt: synchronizedAt,
+        canMutate: true,
+      },
+    },
+  ]);
+
+  expect(workstream?.status).toBe("active");
+  const [unavailableWorkstream] = deriveProjectWorkstreams(ProjectId.make("project-1"), [
+    {
+      ...invocation,
+      wayfinderMap: {
+        ...baseMap,
+        canonicalReference: { ...baseMap.canonicalReference, state: "closed" as const },
+        tickets: baseMap.tickets.map((ticket) => ({ ...ticket, state: "closed" as const })),
+        frontier: [],
+      },
+      wayfinderSynchronization: {
+        status: "unavailable" as const,
+        reason: "resume" as const,
+        lastAttemptedAt: synchronizedAt,
+        lastSuccessfulAt: synchronizedAt,
+        canMutate: false,
+        message: "GitHub unavailable",
+      },
+    },
+  ]);
+  expect(unavailableWorkstream?.status).toBe("active");
 });
 
 it("scopes project Workstreams to their owning environment", () => {

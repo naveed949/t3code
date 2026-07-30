@@ -668,6 +668,115 @@ it.effect("rejects a truncated native relationship projection", () =>
   ),
 );
 
+it.effect("uses lightweight revision evidence before reloading a visible map", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  const revision = `github:${JSON.stringify([
+    [
+      42,
+      "Release map",
+      "OPEN",
+      "2026-07-30T10:00:00.000Z",
+      2,
+      "2026-07-30T10:01:00.000Z",
+      ["wayfinder:map"],
+    ],
+    [
+      [
+        43,
+        "Research hosting",
+        "OPEN",
+        "2026-07-30T10:02:00.000Z",
+        1,
+        "2026-07-30T10:03:00.000Z",
+        ["alice"],
+        ["wayfinder:research"],
+        [[40, "CLOSED"]],
+        [44],
+      ],
+    ],
+  ])}`;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const result = yield* tracker.reconcileWayfinderMap({
+      cwd: "/project",
+      repository: project!,
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:04:00.000Z",
+      currentRevision: revision,
+    });
+
+    assert.deepStrictEqual(result, { kind: "unchanged", revision });
+    assert.strictEqual(calls.length, 1);
+    assert.match(calls[0]?.join(" ") ?? "", /comments\(last:1\)/u);
+    assert.match(calls[0]?.join(" ") ?? "", /assignees/u);
+    assert.notMatch(calls[0]?.join(" ") ?? "", /\bbody\b/u);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Release map",
+                      state: "OPEN",
+                      updatedAt: "2026-07-30T10:00:00.000Z",
+                      comments: {
+                        totalCount: 2,
+                        nodes: [{ updatedAt: "2026-07-30T10:01:00.000Z" }],
+                      },
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [
+                          {
+                            number: 43,
+                            title: "Research hosting",
+                            state: "OPEN",
+                            updatedAt: "2026-07-30T10:02:00.000Z",
+                            comments: {
+                              totalCount: 1,
+                              nodes: [{ updatedAt: "2026-07-30T10:03:00.000Z" }],
+                            },
+                            assignees: {
+                              nodes: [{ login: "alice" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            labels: {
+                              nodes: [{ name: "wayfinder:research" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            blockedBy: {
+                              nodes: [{ number: 40, state: "CLOSED" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            blocking: {
+                              nodes: [{ number: 44 }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});
+
 it.effect("preserves an existing publication label", () => {
   const calls: ReadonlyArray<string>[] = [];
   return Effect.gen(function* () {
