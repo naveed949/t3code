@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  collectComposerInlineTokens,
-  createSkillInvocationRequest,
-  resolveLeadingSkillInvocationRequest,
-} from "./composerInlineTokens.ts";
+import { collectComposerInlineTokens } from "./composerInlineTokens.ts";
 
 describe("collectComposerInlineTokens", () => {
   it("collects file links, mentions, and skills with source ranges", () => {
@@ -132,29 +128,5 @@ describe("collectComposerInlineTokens", () => {
         end: 18,
       },
     ]);
-  });
-});
-
-describe("resolveLeadingSkillInvocationRequest", () => {
-  const skills = [
-    {
-      name: "wayfinder",
-      path: "/skills/wayfinder/SKILL.md",
-      enabled: true,
-    },
-  ];
-
-  it("resolves a leading installed skill token and its arguments", () => {
-    expect(resolveLeadingSkillInvocationRequest("$wayfinder chart a release", skills)).toEqual(
-      createSkillInvocationRequest(skills[0]!, "chart a release"),
-    );
-  });
-
-  it("does not infer an invocation from prose or an unknown token", () => {
-    expect(
-      resolveLeadingSkillInvocationRequest("Tell me whether Wayfinder would help", skills),
-    ).toBeNull();
-    expect(resolveLeadingSkillInvocationRequest("Use $wayfinder to chart this", skills)).toBeNull();
-    expect(resolveLeadingSkillInvocationRequest("$unknown chart this", skills)).toBeNull();
   });
 });

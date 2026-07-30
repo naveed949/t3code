@@ -6,7 +6,6 @@ import {
   ProjectId,
   ThreadId,
   ProviderInstanceId,
-  WorkstreamId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect, it } from "@effect/vitest";
@@ -276,22 +275,6 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           ]),
           interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
           runtimeMode: "approval-required",
-          skillInvocation: {
-            skill: {
-              name: "wayfinder",
-              path: "/skills/wayfinder/SKILL.md",
-              contentDigest:
-                "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
-            },
-            arguments: "new-map",
-            action: { id: "new-map" },
-            execution: {
-              mode: "native",
-              adapterId: "wayfinder",
-              adapterVersion: 1,
-            },
-            reconnectWorkstreamId: WorkstreamId.make("workstream:existing-map"),
-          },
           createdAt: now,
         },
         readModel,
@@ -299,7 +282,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
 
       expect(Array.isArray(result)).toBe(true);
       const events = Array.isArray(result) ? result : [result];
-      expect(events).toHaveLength(3);
+      expect(events).toHaveLength(2);
       expect(events[0]?.type).toBe("thread.message-sent");
       const turnStartEvent = events[1];
       expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
@@ -315,54 +298,6 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           { id: "fastMode", value: true },
         ]),
         runtimeMode: "approval-required",
-        skillInvocation: {
-          projectId: asProjectId("project-1"),
-          threadId: ThreadId.make("thread-1"),
-          skill: {
-            name: "wayfinder",
-            path: "/skills/wayfinder/SKILL.md",
-          },
-          arguments: "new-map",
-          action: { id: "new-map" },
-          execution: {
-            mode: "native",
-            adapterId: "wayfinder",
-            adapterVersion: 1,
-          },
-          createdAt: now,
-        },
-      });
-      expect(turnStartEvent.payload.skillInvocation?.workstreamId).toBe(
-        WorkstreamId.make("workstream:existing-map"),
-      );
-      expect(turnStartEvent.payload.skillInvocation?.skillRunId).toMatch(/^skill-run:/);
-      expect(turnStartEvent.payload.skillInvocation).not.toHaveProperty("reconnectWorkstreamId");
-      expect(turnStartEvent.payload.skillInvocation?.wayfinderDraft).toEqual({
-        authority: "unpublished-draft",
-        canonical: false,
-        destination: null,
-        notes: [],
-        confirmedDecisions: [],
-        proposedDecisions: [],
-        candidateTickets: [],
-        fogOfWar: [],
-        outOfScope: [],
-        proposedDependencyEdges: [],
-        decisionReceipts: [],
-        updatedAt: now,
-      });
-      expect(events[2]).toMatchObject({
-        type: "thread.activity-appended",
-        payload: {
-          threadId: ThreadId.make("thread-1"),
-          activity: {
-            kind: "wayfinder.draft.started",
-            summary: "Unpublished Wayfinder draft started",
-            payload: {
-              canonical: false,
-            },
-          },
-        },
       });
     }),
   );

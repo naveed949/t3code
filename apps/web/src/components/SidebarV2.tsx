@@ -93,7 +93,7 @@ import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments"
 import { useProjects, useThreadShells } from "../state/entities";
 import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../state/server";
 import { vcsEnvironment } from "../state/vcs";
-import { environmentThreadShells, threadEnvironment } from "../state/threads";
+import { threadEnvironment } from "../state/threads";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -135,7 +135,6 @@ import {
   type SnoozePreset,
 } from "./Sidebar.snooze";
 import { ProjectFavicon } from "./ProjectFavicon";
-import { ProjectWorkstreamsShelf } from "./ProjectWorkstreamsShelf";
 import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { getTriggerDisplayModelLabel } from "./chat/providerIconUtils";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
@@ -1053,7 +1052,6 @@ export default function SidebarV2() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
   const threads = useThreadShells();
-  const projectWorkstreams = useAtomValue(environmentThreadShells.workstreamsAtom);
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -1218,6 +1216,7 @@ export default function SidebarV2() {
       ),
     [projectGroups],
   );
+
   // now is quantized to the minute so effectiveSettled memoization doesn't
   // churn on every render; auto-settle thresholds are day-granular anyway.
   const nowMinute = useNowMinute();
@@ -1269,15 +1268,6 @@ export default function SidebarV2() {
             ),
           ),
     [scopedProjectGroup],
-  );
-  const visibleProjectWorkstreams = useMemo(
-    () =>
-      projectWorkstreams.filter(
-        (workstream) =>
-          scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${workstream.environmentId}:${workstream.projectId}`),
-      ),
-    [projectWorkstreams, scopedProjectKeys],
   );
   useEffect(() => {
     if (projectScopeKey !== null && scopedProjectGroup === null) {
@@ -2480,11 +2470,6 @@ export default function SidebarV2() {
           </SidebarGroup>
         }
       >
-        <ProjectWorkstreamsShelf
-          workstreams={visibleProjectWorkstreams}
-          projectTitleByKey={projectDisplayNameByKey}
-          onOpenThread={navigateToThread}
-        />
         <SidebarGroup className="px-2 pb-1 pt-0">
           <TooltipProvider
             key="sidebar-thread-tooltips-150"

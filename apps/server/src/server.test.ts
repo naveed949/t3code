@@ -26,9 +26,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
-  SkillRunId,
   ThreadId,
-  WorkstreamId,
   WS_METHODS,
   WsRpcGroup,
   EditorId,
@@ -39,7 +37,6 @@ import {
   type DpopPublicJwk,
 } from "@t3tools/shared/dpop";
 import { RELAY_HEALTH_REQUEST_TYP, RELAY_MINT_REQUEST_TYP } from "@t3tools/shared/relayJwt";
-import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as RelayClient from "@t3tools/shared/relayClient";
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
@@ -6162,80 +6159,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(collected[2]?.kind, "synchronized");
       assert.equal(shellFetches.filter((id) => id === busyThreadId).length, 1);
       assert.equal(replayLimit, 50);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("subscribeShell includes retained Skill Runs after Wayfinder publication updates", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-wayfinder-publication");
-      const now = "2026-07-30T10:00:00.000Z";
-      const invocation = {
-        skill: {
-          name: "wayfinder",
-          path: "/skills/wayfinder/SKILL.md",
-          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
-        },
-        action: { id: "new-map" as const },
-        execution: { mode: "native" as const, adapterId: "wayfinder", adapterVersion: 1 },
-        workstreamId: WorkstreamId.make("workstream-wayfinder-publication"),
-        skillRunId: SkillRunId.make("skill-run-wayfinder-publication"),
-        projectId: defaultProjectId,
-        threadId,
-        createdAt: now,
-        wayfinderDraft: createEmptyWayfinderDraft(now),
-        wayfinderPublication: {
-          status: "publishing" as const,
-          artifacts: [],
-          nextStep: "create canonical map issue",
-          updatedAt: now,
-        },
-      };
-      const publicationEvent = {
-        sequence: 1,
-        eventId: EventId.make("event-wayfinder-publication"),
-        aggregateKind: "thread",
-        aggregateId: threadId,
-        occurredAt: now,
-        commandId: null,
-        causationEventId: null,
-        correlationId: null,
-        metadata: {},
-        type: "thread.wayfinder-publication-updated",
-        payload: {
-          threadId,
-          skillRunId: invocation.skillRunId,
-          publication: invocation.wayfinderPublication,
-        },
-      } satisfies Extract<OrchestrationEvent, { type: "thread.wayfinder-publication-updated" }>;
-
-      yield* buildAppUnderTest({
-        layers: {
-          orchestrationEngine: {
-            latestSequence: Effect.succeed(1),
-            readEvents: () => Stream.make(publicationEvent),
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(Option.some(makeDefaultOrchestrationThreadShell({ id: threadId }))),
-            getSkillRunsByThreadId: () => Effect.succeed([invocation]),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const first = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.subscribeShell]({ afterSequence: 0 }).pipe(
-            Stream.runHead,
-          ),
-        ),
-      );
-
-      const item = Option.getOrThrow(first);
-      assert.equal(item.kind, "thread-upserted");
-      if (item.kind === "thread-upserted") {
-        assert.deepEqual(item.skillRuns, [invocation]);
-      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

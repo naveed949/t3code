@@ -17,7 +17,6 @@ import type {
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   ProjectId,
-  SkillInvocation,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -152,15 +151,6 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
-
-  /**
-   * Read the bounded shell-retained Skill Runs for one active thread: its
-   * latest run plus the latest canonical map and active unpublished draft per
-   * Wayfinder workstream.
-   */
-  readonly getSkillRunsByThreadId: (
-    threadId: ThreadId,
-  ) => Effect.Effect<ReadonlyArray<SkillInvocation>, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail snapshot by id.

@@ -227,9 +227,6 @@ export function useThreadOutboxDrain(): void {
           modelSelection: settings.modelSelection,
           runtimeMode: settings.runtimeMode,
           interactionMode: settings.interactionMode,
-          ...(queuedMessage.skillInvocationRequest
-            ? { skillInvocationRequest: queuedMessage.skillInvocationRequest }
-            : {}),
           createdAt: queuedMessage.createdAt,
         },
       });
@@ -269,9 +266,6 @@ export function useThreadOutboxDrain(): void {
           modelSelection,
           runtimeMode: queuedMessage.runtimeMode ?? DEFAULT_RUNTIME_MODE,
           interactionMode: queuedMessage.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
-          ...(queuedMessage.skillInvocationRequest
-            ? { skillInvocationRequest: queuedMessage.skillInvocationRequest }
-            : {}),
           workspaceMode: creation.workspaceMode,
           branch: creation.branch,
           worktreePath: creation.worktreePath,

@@ -114,11 +114,6 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
-import * as NativeWayfinderPreflightService from "./nativeSkills/NativeWayfinderPreflightService.ts";
-import { dispatchWithNativeWayfinderPreflight } from "./nativeSkills/WayfinderDispatchGate.ts";
-import * as GitHubPreflightInspector from "./nativeSkills/GitHubPreflightInspector.ts";
-import * as IssueTracker from "./nativeSkills/IssueTracker.ts";
-import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -342,7 +337,6 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
-  nativeWayfinderPreflight: NativeWayfinderPreflightService.NativeWayfinderPreflightService["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -533,7 +527,6 @@ const makeWsRpcLayer = (
 
       const toShellStreamEvent = (
         event: OrchestrationEvent,
-        includeSkillRuns: boolean,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> => {
         switch (event.type) {
           case "project.created":
@@ -557,16 +550,12 @@ const makeWsRpcLayer = (
               }),
             );
           case "thread.unarchived":
-            return threadUpsertOrRemove(event.payload.threadId, event.sequence, includeSkillRuns);
+            return threadUpsertOrRemove(event.payload.threadId, event.sequence);
           default:
             if (event.aggregateKind !== "thread") {
               return Effect.succeed(Option.none());
             }
-            return threadUpsertOrRemove(
-              ThreadId.make(event.aggregateId),
-              event.sequence,
-              includeSkillRuns,
-            );
+            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence);
         }
       };
 
@@ -635,38 +624,29 @@ const makeWsRpcLayer = (
       const threadUpsertOrRemove = (
         threadId: ThreadId,
         sequence: number,
-        includeSkillRuns: boolean,
       ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        Effect.all({
-          thread: retryShellProjectionRead(
-            "thread",
-            threadId,
-            projectionSnapshotQuery.getThreadShellById(threadId),
-          ).pipe(Effect.map(Option.flatten)),
-          skillRuns: includeSkillRuns
-            ? retryShellProjectionRead(
-                "thread",
-                threadId,
-                projectionSnapshotQuery.getSkillRunsByThreadId(threadId),
-              )
-            : Effect.succeed(Option.none()),
-        }).pipe(
-          Effect.map(({ thread, skillRuns }) =>
-            Option.match(thread, {
-              onNone: () =>
-                Option.some<OrchestrationShellStreamEvent>({
-                  kind: "thread-removed" as const,
-                  sequence,
-                  threadId,
-                }),
-              onSome: (nextThread) =>
-                Option.some<OrchestrationShellStreamEvent>({
-                  kind: "thread-upserted" as const,
-                  sequence,
-                  thread: nextThread,
-                  ...(Option.isSome(skillRuns) ? { skillRuns: skillRuns.value } : {}),
-                }),
-            }),
+        retryShellProjectionRead(
+          "thread",
+          threadId,
+          projectionSnapshotQuery.getThreadShellById(threadId),
+        ).pipe(
+          Effect.map(
+            Option.flatMap((thread) =>
+              Option.match(thread, {
+                onNone: () =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "thread-removed" as const,
+                    sequence,
+                    threadId,
+                  }),
+                onSome: (nextThread) =>
+                  Option.some<OrchestrationShellStreamEvent>({
+                    kind: "thread-upserted" as const,
+                    sequence,
+                    thread: nextThread,
+                  }),
+              }),
+            ),
           ),
         );
 
@@ -690,27 +670,16 @@ const makeWsRpcLayer = (
           if (events.length === 0) {
             return [];
           }
-          const latestByAggregate = new Map<
-            string,
-            { readonly event: OrchestrationEvent; readonly includeSkillRuns: boolean }
-          >();
+          const latestByAggregate = new Map<string, OrchestrationEvent>();
           for (const event of events) {
-            const key = `${event.aggregateKind}:${event.aggregateId}`;
-            latestByAggregate.set(key, {
-              event,
-              includeSkillRuns:
-                latestByAggregate.get(key)?.includeSkillRuns === true ||
-                event.type === "thread.wayfinder-publication-updated",
-            });
+            latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event);
           }
           const survivors = Array.from(latestByAggregate.values()).sort(
-            (left, right) => left.event.sequence - right.event.sequence,
+            (left, right) => left.sequence - right.sequence,
           );
-          const shellEvents = yield* Effect.forEach(
-            survivors,
-            ({ event, includeSkillRuns }) => toShellStreamEvent(event, includeSkillRuns),
-            { concurrency: SHELL_REFETCH_CONCURRENCY },
-          );
+          const shellEvents = yield* Effect.forEach(survivors, toShellStreamEvent, {
+            concurrency: SHELL_REFETCH_CONCURRENCY,
+          });
           return shellEvents.flatMap((option) => (Option.isSome(option) ? [option.value] : []));
         });
 
@@ -1042,14 +1011,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              const providers =
-                command.type === "thread.turn.start" && command.skillInvocationRequest !== undefined
-                  ? yield* providerRegistry.getProviders
-                  : undefined;
-              const normalizedCommand = yield* normalizeDispatchCommand(
-                command,
-                providers ? { providers } : {},
-              );
+              const normalizedCommand = yield* normalizeDispatchCommand(command);
               const shouldStopSessionAfterArchive =
                 normalizedCommand.type === "thread.archive"
                   ? yield* projectionSnapshotQuery
@@ -1065,37 +1027,7 @@ const makeWsRpcLayer = (
                         Effect.orElseSucceed(() => false),
                       )
                   : false;
-              const result = yield* dispatchWithNativeWayfinderPreflight({
-                command: normalizedCommand,
-                dependencies: {
-                  providers: providers ?? [],
-                  getThread: (threadId) =>
-                    projectionSnapshotQuery
-                      .getThreadShellById(threadId)
-                      .pipe(
-                        Effect.mapError((cause) =>
-                          toDispatchCommandError(cause, "Failed to load Wayfinder thread"),
-                        ),
-                      ),
-                  getProject: (projectId) =>
-                    projectionSnapshotQuery
-                      .getProjectShellById(projectId)
-                      .pipe(
-                        Effect.mapError((cause) =>
-                          toDispatchCommandError(cause, "Failed to load Wayfinder project"),
-                        ),
-                      ),
-                  getSkillRuns: () =>
-                    projectionSnapshotQuery.getShellSnapshot().pipe(
-                      Effect.map((snapshot) => snapshot.skillRuns ?? []),
-                      Effect.mapError((cause) =>
-                        toDispatchCommandError(cause, "Failed to load Wayfinder Workstreams"),
-                      ),
-                    ),
-                  check: nativeWayfinderPreflight.check,
-                },
-                dispatch: dispatchNormalizedCommand,
-              });
+              const result = yield* dispatchNormalizedCommand(normalizedCommand);
               if (normalizedCommand.type === "thread.archive") {
                 if (shouldStopSessionAfterArchive) {
                   yield* Effect.gen(function* () {
@@ -2096,8 +2028,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
-    const nativeWayfinderPreflight =
-      yield* NativeWayfinderPreflightService.NativeWayfinderPreflightService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2117,7 +2047,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker, nativeWayfinderPreflight).pipe(
+            makeWsRpcLayer(session, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
@@ -2157,16 +2087,5 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         }),
       ),
     );
-  }).pipe(
-    Effect.provide(
-      NativeWayfinderPreflightService.layer.pipe(
-        Layer.provide(
-          Layer.merge(IssueTracker.GitHubIssueTrackerLive, GitHubPreflightInspector.layer).pipe(
-            Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
-            Layer.provide(RepositoryIdentityResolver.layer),
-          ),
-        ),
-      ),
-    ),
-  ),
+  }),
 );

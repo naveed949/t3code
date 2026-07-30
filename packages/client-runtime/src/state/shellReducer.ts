@@ -26,56 +26,18 @@ export function applyShellStreamEvent(
       return {
         ...snapshot,
         projects: Arr.filter(snapshot.projects, (p) => p.id !== event.projectId),
-        ...(snapshot.skillRuns
-          ? {
-              skillRuns: Arr.filter(snapshot.skillRuns, (run) => run.projectId !== event.projectId),
-            }
-          : {}),
         snapshotSequence: event.sequence,
       };
     case "thread-upserted": {
       const threads = snapshot.threads.some((t) => t.id === event.thread.id)
         ? Arr.map(snapshot.threads, (t) => (t.id === event.thread.id ? event.thread : t))
         : Arr.append(snapshot.threads, event.thread);
-      const invocation = event.thread.latestTurn?.skillInvocation;
-      const skillRuns =
-        event.skillRuns ??
-        (invocation === undefined
-          ? snapshot.skillRuns
-          : Arr.append(
-              Arr.filter(
-                snapshot.skillRuns ?? [],
-                (run) =>
-                  run.threadId !== event.thread.id ||
-                  (run.wayfinderMap !== undefined &&
-                    (run.workstreamId !== invocation.workstreamId ||
-                      invocation.wayfinderMap === undefined)),
-              ),
-              invocation,
-            ));
-      const mergedSkillRuns =
-        event.skillRuns === undefined
-          ? skillRuns
-          : [
-              ...Arr.filter(snapshot.skillRuns ?? [], (run) => run.threadId !== event.thread.id),
-              ...event.skillRuns,
-            ];
-      return {
-        ...snapshot,
-        threads,
-        ...(mergedSkillRuns ? { skillRuns: mergedSkillRuns } : {}),
-        snapshotSequence: event.sequence,
-      };
+      return { ...snapshot, threads, snapshotSequence: event.sequence };
     }
     case "thread-removed":
       return {
         ...snapshot,
         threads: Arr.filter(snapshot.threads, (t) => t.id !== event.threadId),
-        ...(snapshot.skillRuns
-          ? {
-              skillRuns: Arr.filter(snapshot.skillRuns, (run) => run.threadId !== event.threadId),
-            }
-          : {}),
         snapshotSequence: event.sequence,
       };
     default:

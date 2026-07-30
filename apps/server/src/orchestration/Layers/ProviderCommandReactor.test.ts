@@ -18,7 +18,6 @@ import {
   EventId,
   MessageId,
   ProjectId,
-  SkillRunId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -475,57 +474,6 @@ describe("ProviderCommandReactor", () => {
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
-    expect(thread?.session?.runtimeMode).toBe("approval-required");
-  });
-
-  it("forces native Wayfinder draft sessions to approval-required without changing the thread mode", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.runtime-mode.set",
-        commandId: CommandId.make("cmd-wayfinder-runtime-mode"),
-        threadId: ThreadId.make("thread-1"),
-        runtimeMode: "full-access",
-        createdAt: now,
-      }),
-    );
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.turn.start",
-        commandId: CommandId.make("cmd-wayfinder-turn"),
-        threadId: ThreadId.make("thread-1"),
-        message: {
-          messageId: asMessageId("user-message-wayfinder"),
-          role: "user",
-          text: "Chart the project",
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        skillInvocation: {
-          skill: {
-            name: "wayfinder",
-            path: "/skills/wayfinder/SKILL.md",
-            contentDigest:
-              "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
-          },
-          action: { id: "new-map" },
-          execution: { mode: "native", adapterId: "wayfinder", adapterVersion: 1 },
-        },
-        createdAt: now,
-      }),
-    );
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      runtimeMode: "approval-required",
-    });
-    const thread = (await harness.readModel()).threads.find(
-      (entry) => entry.id === ThreadId.make("thread-1"),
-    );
-    expect(thread?.runtimeMode).toBe("full-access");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
@@ -2225,81 +2173,6 @@ describe("ProviderCommandReactor", () => {
     );
     expect(resolvedActivity).toBeUndefined();
   });
-
-  effectIt.effect("recovers a persisted Wayfinder decision without provider callback state", () =>
-    Effect.gen(function* () {
-      const harness = yield* Effect.promise(() => createHarness());
-      const now = "2026-01-01T00:00:00.000Z";
-      const requestId = asApprovalRequestId("user-input-request-wayfinder-recovered");
-      const skillRunId = SkillRunId.make("skill-run:wayfinder-recovered");
-
-      for (const [index, activity] of [
-        {
-          kind: "wayfinder.draft.started",
-          summary: "Unpublished Wayfinder draft started",
-          payload: { skillRunId, canonical: false },
-        },
-        {
-          kind: "user-input.requested",
-          summary: "User input requested",
-          payload: {
-            requestId,
-            skillRunId,
-            questions: [
-              {
-                id: "destination",
-                header: "Destination",
-                question: "Where should the map lead?",
-                options: [{ label: "Recovery", description: "Survives restart." }],
-              },
-            ],
-          },
-        },
-      ].entries()) {
-        yield* harness.engine.dispatch({
-          type: "thread.activity.append",
-          commandId: CommandId.make(`cmd-wayfinder-recovered-${index}`),
-          threadId: ThreadId.make("thread-1"),
-          activity: {
-            id: EventId.make(`activity-wayfinder-recovered-${index}`),
-            tone: "info",
-            ...activity,
-            turnId: null,
-            createdAt: now,
-          },
-          createdAt: now,
-        });
-      }
-
-      yield* harness.engine.dispatch({
-        type: "thread.user-input.respond",
-        commandId: CommandId.make("cmd-wayfinder-recovered-response"),
-        threadId: ThreadId.make("thread-1"),
-        requestId,
-        answers: { destination: "Recovery" },
-        createdAt: now,
-      });
-
-      yield* Effect.promise(() => harness.drain());
-
-      const thread = (yield* Effect.promise(() => harness.readModel())).threads.find(
-        (entry) => entry.id === ThreadId.make("thread-1"),
-      );
-      expect(
-        thread?.activities.find(
-          (activity) =>
-            activity.kind === "user-input.resolved" &&
-            activity.summary === "Wayfinder decision recovered",
-        )?.payload,
-      ).toMatchObject({
-        requestId,
-        skillRunId,
-        answers: { destination: "Recovery" },
-        recoveredAfterRestart: true,
-      });
-      expect(harness.respondToUserInput).not.toHaveBeenCalled();
-    }),
-  );
 
   it("reacts to thread.session.stop by stopping provider session and clearing thread session state", async () => {
     const harness = await createHarness();

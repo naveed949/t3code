@@ -1,23 +1,15 @@
 import {
   EventId,
-  SkillRunId,
-  WorkstreamId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
-import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
-import {
-  activeWayfinderDraftSkillRunId,
-  approvedWayfinderPublicationSkillRunId,
-  hasActiveWayfinderDraftAuthority,
-} from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -748,33 +740,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
-      const requestedSkillInvocation = command.skillInvocation;
-      const skillInvocationFields = requestedSkillInvocation
-        ? (({ reconnectWorkstreamId: _reconnectWorkstreamId, ...invocation }) => invocation)(
-            requestedSkillInvocation,
-          )
-        : undefined;
-      const skillInvocation = requestedSkillInvocation
-        ? {
-            ...skillInvocationFields,
-            workstreamId:
-              requestedSkillInvocation.reconnectWorkstreamId ??
-              WorkstreamId.make(
-                `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
-              ),
-            skillRunId: SkillRunId.make(
-              `skill-run:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
-            ),
-            projectId: targetThread.projectId,
-            threadId: command.threadId,
-            createdAt: command.createdAt,
-            ...(command.skillInvocation.skill.name === "wayfinder" &&
-            command.skillInvocation.execution.mode === "native" &&
-            command.skillInvocation.action?.id === "new-map"
-              ? { wayfinderDraft: createEmptyWayfinderDraft(command.createdAt) }
-              : {}),
-          }
-        : undefined;
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -814,43 +779,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
-          ...(skillInvocation !== undefined ? { skillInvocation } : {}),
           createdAt: command.createdAt,
         },
       };
-      const draftStartedEvent =
-        skillInvocation?.wayfinderDraft !== undefined
-          ? yield* withEventBase({
-              aggregateKind: "thread",
-              aggregateId: command.threadId,
-              occurredAt: command.createdAt,
-              commandId: command.commandId,
-            }).pipe(
-              Effect.map(
-                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
-                  ...eventBase,
-                  causationEventId: turnStartRequestedEvent.eventId,
-                  type: "thread.activity-appended",
-                  payload: {
-                    threadId: command.threadId,
-                    activity: {
-                      id: eventBase.eventId,
-                      tone: "info",
-                      kind: "wayfinder.draft.started",
-                      summary: "Unpublished Wayfinder draft started",
-                      payload: {
-                        workstreamId: skillInvocation.workstreamId,
-                        skillRunId: skillInvocation.skillRunId,
-                        canonical: false,
-                      },
-                      turnId: null,
-                      createdAt: command.createdAt,
-                    },
-                  },
-                }),
-              ),
-            )
-          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -889,12 +820,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return [
-        ...lifecycleResetEvents,
-        userMessageEvent,
-        turnStartRequestedEvent,
-        ...(draftStartedEvent ? [draftStartedEvent] : []),
-      ];
+      return [...lifecycleResetEvents, userMessageEvent, turnStartRequestedEvent];
     }
 
     case "thread.turn.interrupt": {
@@ -920,20 +846,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.approval.respond": {
-      const thread = yield* requireThread({
+      yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      const acceptsExecutableAction =
-        command.decision === "accept" || command.decision === "acceptForSession";
-      if (acceptsExecutableAction && hasActiveWayfinderDraftAuthority(thread.activities)) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail:
-            "Executable approvals are disabled while the Wayfinder map is an unpublished draft, ensuring GitHub remains unchanged.",
-        });
-      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -975,46 +892,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           requestId: command.requestId,
           answers: command.answers,
-          createdAt: command.createdAt,
-        },
-      };
-    }
-
-    case "thread.wayfinder.publish": {
-      const thread = yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      if (activeWayfinderDraftSkillRunId(thread.activities) !== command.skillRunId) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Wayfinder publication requires the matching active unpublished draft.",
-        });
-      }
-      if (
-        thread.runtimeMode === "approval-required" &&
-        command.confirmed &&
-        approvedWayfinderPublicationSkillRunId(thread.activities) !== command.skillRunId
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Wayfinder publication confirmation requires a pending server approval.",
-        });
-      }
-      return {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.wayfinder-publication-requested",
-        payload: {
-          threadId: command.threadId,
-          skillRunId: command.skillRunId,
-          runtimeMode: thread.runtimeMode,
-          confirmed: command.confirmed,
           createdAt: command.createdAt,
         },
       };
@@ -1289,79 +1166,6 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
-    }
-
-    case "thread.wayfinder.publication.update": {
-      yield* requireThread({
-        readModel,
-        command,
-        threadId: command.threadId,
-      });
-      const updated: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.wayfinder-publication-updated",
-        payload: {
-          threadId: command.threadId,
-          skillRunId: command.skillRunId,
-          publication: command.publication,
-          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
-        },
-      };
-      if (command.publication.status === "awaiting-approval") {
-        const approvalRequested: Omit<OrchestrationEvent, "sequence"> = {
-          ...(yield* withEventBase({
-            aggregateKind: "thread",
-            aggregateId: command.threadId,
-            occurredAt: command.createdAt,
-            commandId: command.commandId,
-          })),
-          type: "thread.activity-appended",
-          payload: {
-            threadId: command.threadId,
-            activity: {
-              id: EventId.make(`wayfinder-publication-approval:${command.commandId}`),
-              tone: "info",
-              kind: "wayfinder.publication.approval-requested",
-              summary: "Wayfinder publication needs confirmation",
-              payload: { skillRunId: command.skillRunId },
-              turnId: null,
-              createdAt: command.createdAt,
-            },
-          },
-        };
-        return [updated, approvalRequested];
-      }
-      if (command.publication.status !== "synchronized") return updated;
-      const published: Omit<OrchestrationEvent, "sequence"> = {
-        ...(yield* withEventBase({
-          aggregateKind: "thread",
-          aggregateId: command.threadId,
-          occurredAt: command.createdAt,
-          commandId: command.commandId,
-        })),
-        type: "thread.activity-appended",
-        payload: {
-          threadId: command.threadId,
-          activity: {
-            id: EventId.make(`wayfinder-publication:${command.commandId}`),
-            tone: "info",
-            kind: "wayfinder.draft.published",
-            summary: "Wayfinder draft published and reconciled",
-            payload: {
-              skillRunId: command.skillRunId,
-              canonicalReference: command.wayfinderMap?.canonicalReference,
-            },
-            turnId: null,
-            createdAt: command.createdAt,
-          },
-        },
-      };
-      return [updated, published];
     }
 
     default: {
