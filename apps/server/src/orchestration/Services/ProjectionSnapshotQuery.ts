@@ -154,7 +154,9 @@ export interface ProjectionSnapshotQueryShape {
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
 
   /**
-   * Read every persisted Skill Run for one active thread.
+   * Read the bounded shell-retained Skill Runs for one active thread: its
+   * latest run plus the latest canonical map and active unpublished draft per
+   * Wayfinder workstream.
    */
   readonly getSkillRunsByThreadId: (
     threadId: ThreadId,

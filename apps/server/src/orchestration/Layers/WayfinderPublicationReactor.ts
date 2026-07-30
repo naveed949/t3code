@@ -26,7 +26,7 @@ type PublicationRequestedEvent = Extract<
   { type: "thread.wayfinder-publication-requested" }
 >;
 
-export const makeWayfinderPublicationReactor = Effect.gen(function* () {
+export const makeWayfinderPublicationProcessor = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
@@ -127,6 +127,12 @@ export const makeWayfinderPublicationReactor = Effect.gen(function* () {
     );
   });
 
+  return processEvent;
+});
+
+export const makeWayfinderPublicationReactor = Effect.gen(function* () {
+  const orchestrationEngine = yield* OrchestrationEngineService;
+  const processEvent = yield* makeWayfinderPublicationProcessor;
   const processEventSafely = Effect.fn("WayfinderPublicationReactor.processEventSafely")(
     function* (event: PublicationRequestedEvent) {
       yield* processEvent(event);

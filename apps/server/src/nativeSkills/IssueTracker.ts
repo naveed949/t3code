@@ -3,6 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SchemaIssue from "effect/SchemaIssue";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import type { WayfinderMapProjection } from "@t3tools/contracts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
@@ -165,9 +167,11 @@ const IssueListProbe = Schema.Array(
   }),
 );
 const decodeIssueListProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueListProbe));
-const decodeIssueUrl = Schema.decodeUnknownOption(Schema.URLFromString);
-const decodeIssueNumber = Schema.decodeUnknownOption(
-  Schema.NumberFromString.check(Schema.isInt(), Schema.isGreaterThan(0)),
+const CreatedIssueProbe = Schema.Struct({
+  number: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+});
+const decodeCreatedIssueProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(CreatedIssueProbe),
 );
 const ChildNumbersProbe = Schema.Struct({
   data: Schema.Struct({
@@ -203,48 +207,59 @@ const noCapabilities: IssueTrackerCapabilities = {
 };
 
 const writePermission = new Set(["ADMIN", "MAINTAIN", "WRITE"]);
+const GitHubIssueNumber = Schema.Int.check(Schema.isGreaterThan(0));
 
 function repositoryReference(repository: IssueTrackerRepository): string {
   return `${repository.owner}/${repository.name}`;
+}
+
+function gitHubIssueReferenceSchema(repository: IssueTrackerRepository) {
+  const invalidReference = (reference: string) =>
+    new SchemaIssue.InvalidValue(Option.some(reference), {
+      message: `Expected an issue number or ${repositoryReference(repository)} GitHub issue URL`,
+    });
+  return Schema.String.pipe(
+    Schema.decodeTo(
+      GitHubIssueNumber,
+      SchemaTransformation.transformOrFail({
+        decode: (reference) => {
+          const trimmed = reference.trim();
+          const numberReference = /^#?(\d+)$/u.exec(trimmed)?.[1];
+          if (numberReference !== undefined) {
+            return Effect.succeed(Number(numberReference));
+          }
+          return Effect.try({
+            try: () => new URL(trimmed),
+            catch: () => invalidReference(reference),
+          }).pipe(
+            Effect.flatMap((url) => {
+              const [, owner, name, kind, issueNumber, trailing] = url.pathname.split("/");
+              return url.hostname === "github.com" &&
+                owner?.toLowerCase() === repository.owner.toLowerCase() &&
+                name?.toLowerCase() === repository.name.toLowerCase() &&
+                kind === "issues" &&
+                issueNumber !== undefined &&
+                (trailing === undefined || trailing === "") &&
+                /^\d+$/u.test(issueNumber)
+                ? Effect.succeed(Number(issueNumber))
+                : Effect.fail(invalidReference(reference));
+            }),
+          );
+        },
+        encode: (number) => Effect.succeed(String(number)),
+      }),
+    ),
+  );
 }
 
 function resolveGitHubIssueReference(
   repository: IssueTrackerRepository,
   reference: string,
 ): string | null {
-  const trimmed = reference.trim();
-  if (/^#?\d+$/u.test(trimmed)) return trimmed.replace(/^#/u, "");
-  try {
-    const url = new URL(trimmed);
-    const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
-    const [, owner, name, issueNumber] = match ?? [];
-    return url.hostname === "github.com" &&
-      owner?.toLowerCase() === repository.owner.toLowerCase() &&
-      name?.toLowerCase() === repository.name.toLowerCase() &&
-      issueNumber
-      ? issueNumber
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-function issueFromCreateOutput(
-  repository: IssueTrackerRepository,
-  output: string,
-): IssueTrackerIssue | null {
-  const decodedUrl = decodeIssueUrl(output.trim());
-  if (Option.isNone(decodedUrl)) return null;
-  const url = decodedUrl.value;
-  const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
-  const [, owner, name, rawNumber] = match ?? [];
-  const number = decodeIssueNumber(rawNumber);
-  return url.hostname === "github.com" &&
-    owner?.toLowerCase() === repository.owner.toLowerCase() &&
-    name?.toLowerCase() === repository.name.toLowerCase() &&
-    Option.isSome(number)
-    ? { number: number.value, url: url.toString() }
-    : null;
+  return Schema.decodeUnknownOption(gitHubIssueReferenceSchema(repository))(reference).pipe(
+    Option.map(String),
+    Option.getOrNull,
+  );
 }
 
 export const GitHubIssueTrackerLive = Layer.effect(
@@ -479,23 +494,29 @@ export const GitHubIssueTrackerLive = Layer.effect(
         const output = yield* github.execute({
           cwd: input.cwd,
           args: [
-            "issue",
-            "create",
-            "--repo",
-            repositoryReference(input.repository),
-            "--title",
-            input.title,
-            "--body",
-            `${input.body}\n\n${marker}`,
-            ...input.labels.flatMap((label) => ["--label", label]),
+            "api",
+            "--method",
+            "POST",
+            `repos/${input.repository.owner}/${input.repository.name}/issues`,
+            "-f",
+            `title=${input.title}`,
+            "-f",
+            `body=${input.body}\n\n${marker}`,
+            ...input.labels.flatMap((label) => ["-f", `labels[]=${label}`]),
           ],
         });
-        const issue = issueFromCreateOutput(input.repository, output.stdout);
-        if (issue) return issue;
+        const created = decodeCreatedIssueProbe(output.stdout);
+        if (Option.isSome(created)) {
+          const number = created.value.number;
+          return {
+            number,
+            url: `https://github.com/${input.repository.owner}/${input.repository.name}/issues/${number}`,
+          };
+        }
         return yield* new GitHubCli.GitHubCliCommandError({
           command: "gh",
           cwd: input.cwd,
-          cause: new Error(`GitHub returned no canonical URL for ${input.key}.`),
+          cause: new Error(`GitHub returned no canonical issue number for ${input.key}.`),
         });
       }),
       addChild: Effect.fn("IssueTracker.addChild")(function* (input) {

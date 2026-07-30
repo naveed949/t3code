@@ -202,16 +202,16 @@ it.effect("creates publication artifacts through GitHub's canonical issue APIs",
         "10",
       ],
       [
-        "issue",
-        "create",
-        "--repo",
-        "t3tools/t3code",
-        "--title",
-        "Choose a release plan",
-        "--body",
-        "## Destination\n\nChoose a release plan\n\n<!-- t3-wayfinder-publication:skill-run%3Apublish%3Amap -->",
-        "--label",
-        "wayfinder:map",
+        "api",
+        "--method",
+        "POST",
+        "repos/t3tools/t3code/issues",
+        "-f",
+        "title=Choose a release plan",
+        "-f",
+        "body=## Destination\n\nChoose a release plan\n\n<!-- t3-wayfinder-publication:skill-run%3Apublish%3Amap -->",
+        "-f",
+        "labels[]=wayfinder:map",
       ],
       ["issue", "view", "42", "--repo", "t3tools/t3code", "--json", "id"],
       ["issue", "view", "43", "--repo", "t3tools/t3code", "--json", "id"],
@@ -262,8 +262,8 @@ it.effect("creates publication artifacts through GitHub's canonical issue APIs",
           if (args[0] === "label" && args[1] === "list") {
             return Effect.succeed(output("[]"));
           }
-          if (args[0] === "issue" && args[1] === "create") {
-            return Effect.succeed(output("https://github.com/t3tools/t3code/issues/42\n"));
+          if (args[0] === "api" && args[1] === "--method") {
+            return Effect.succeed(output(JSON.stringify({ number: 42 })));
           }
           if (args[0] === "issue" && args[1] === "list") {
             return Effect.succeed(output("[]"));
@@ -315,7 +315,7 @@ it.effect("reuses an issue created before its publication receipt was persisted"
               ),
             );
           }
-          if (args[0] === "issue" && args[1] === "create") creates += 1;
+          if (args[0] === "api" && args[1] === "--method") creates += 1;
           return Effect.succeed(output("{}"));
         },
       }),
