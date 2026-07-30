@@ -62,20 +62,22 @@ const answerText = (answer: unknown): string | null => {
 export const findLatestWayfinderDraftInvocation = (
   skillRuns: ReadonlyArray<SkillInvocation>,
   threadId: SkillInvocation["threadId"] | null | undefined,
-): SkillInvocation | null =>
-  threadId === null || threadId === undefined
-    ? null
-    : ([...skillRuns]
-        .filter(
-          (invocation) =>
-            invocation.threadId === threadId && isNativeWayfinderDraftInvocation(invocation),
-        )
-        .sort(
-          (left, right) =>
-            left.createdAt.localeCompare(right.createdAt) ||
-            left.skillRunId.localeCompare(right.skillRunId),
-        )
-        .at(-1) ?? null);
+): SkillInvocation | null => {
+  if (threadId === null || threadId === undefined) return null;
+  let latest: SkillInvocation | null = null;
+  for (const invocation of skillRuns) {
+    if (invocation.threadId !== threadId || !isNativeWayfinderDraftInvocation(invocation)) continue;
+    if (
+      latest === null ||
+      invocation.createdAt.localeCompare(latest.createdAt) > 0 ||
+      (invocation.createdAt === latest.createdAt &&
+        invocation.skillRunId.localeCompare(latest.skillRunId) > 0)
+    ) {
+      latest = invocation;
+    }
+  }
+  return latest;
+};
 
 /**
  * Rebuilds the unpublished map from its durable invocation snapshot and

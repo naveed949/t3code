@@ -799,6 +799,22 @@ function ThreadRouteContent(
     ],
     [navigation],
   );
+  const latestWayfinderInvocation = useMemo(
+    () => findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id),
+    [environmentSkillRuns, selectedThread?.id],
+  );
+  const wayfinderDraft = useMemo(
+    () =>
+      deriveWayfinderDraft(
+        latestWayfinderInvocation ?? selectedThreadDetail?.latestTurn?.skillInvocation,
+        selectedThreadDetail?.activities ?? [],
+      ),
+    [
+      latestWayfinderInvocation,
+      selectedThreadDetail?.activities,
+      selectedThreadDetail?.latestTurn?.skillInvocation,
+    ],
+  );
 
   if (!environmentId || !threadId) {
     return <OpeningThreadLoadingScreen />;
@@ -815,11 +831,6 @@ function ThreadRouteContent(
     connectionState: routeConnectionState,
   });
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
-  const wayfinderDraft = deriveWayfinderDraft(
-    findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id) ??
-      selectedThreadDetail?.latestTurn?.skillInvocation,
-    selectedThreadDetail?.activities ?? [],
-  );
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
