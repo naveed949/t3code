@@ -1060,6 +1060,13 @@ const makeWsRpcLayer = (
                           toDispatchCommandError(cause, "Failed to load Wayfinder project"),
                         ),
                       ),
+                  getSkillRuns: () =>
+                    projectionSnapshotQuery.getShellSnapshot().pipe(
+                      Effect.map((snapshot) => snapshot.skillRuns ?? []),
+                      Effect.mapError((cause) =>
+                        toDispatchCommandError(cause, "Failed to load Wayfinder Workstreams"),
+                      ),
+                    ),
                   check: nativeWayfinderPreflight.check,
                 },
                 dispatch: dispatchNormalizedCommand,

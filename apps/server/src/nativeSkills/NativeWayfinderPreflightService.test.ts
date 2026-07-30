@@ -22,6 +22,7 @@ const tracker = Layer.mock(IssueTracker.IssueTracker)({
       labels: ["wayfinder:map", "wayfinder:decision"],
     }),
   resolveIssue: () => Effect.succeed(null),
+  loadWayfinderMap: () => Effect.succeed(null),
 });
 
 const testLayer = Layer.mergeAll(

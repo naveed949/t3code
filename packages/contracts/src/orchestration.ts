@@ -223,11 +223,60 @@ export type GenericSkillExecution = typeof GenericSkillExecution.Type;
 export const SkillExecution = Schema.Union([NativeSkillExecution, GenericSkillExecution]);
 export type SkillExecution = typeof SkillExecution.Type;
 
+export const WayfinderTicketState = Schema.Literals(["open", "closed"]);
+export type WayfinderTicketState = typeof WayfinderTicketState.Type;
+
+export const WayfinderTicketClassification = Schema.Literals([
+  "research",
+  "prototype",
+  "grilling",
+  "task",
+  "unknown",
+]);
+export type WayfinderTicketClassification = typeof WayfinderTicketClassification.Type;
+
+export const WayfinderMapProjection = Schema.Struct({
+  canonicalReference: Schema.Struct({
+    number: Schema.Int.check(Schema.isGreaterThan(0)),
+    title: TrimmedNonEmptyString,
+    url: TrimmedNonEmptyString,
+    state: WayfinderTicketState,
+  }),
+  destination: Schema.String,
+  notes: Schema.String,
+  decisionsSoFar: Schema.Array(
+    Schema.Struct({
+      title: TrimmedNonEmptyString,
+      url: TrimmedNonEmptyString,
+      summary: Schema.String,
+    }),
+  ),
+  fogOfWar: Schema.Array(TrimmedNonEmptyString),
+  outOfScope: Schema.Array(TrimmedNonEmptyString),
+  tickets: Schema.Array(
+    Schema.Struct({
+      number: Schema.Int.check(Schema.isGreaterThan(0)),
+      title: TrimmedNonEmptyString,
+      url: TrimmedNonEmptyString,
+      state: WayfinderTicketState,
+      classification: WayfinderTicketClassification,
+      claimedBy: Schema.NullOr(TrimmedNonEmptyString),
+      blockedBy: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+      blocks: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+    }),
+  ),
+  frontier: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+  lastSynchronizedAt: IsoDateTime,
+});
+export type WayfinderMapProjection = typeof WayfinderMapProjection.Type;
+
 export const ResolvedSkillInvocation = Schema.Struct({
   skill: PinnedSkillIdentity,
   arguments: Schema.optional(TrimmedNonEmptyString),
   action: Schema.optional(SkillInvocationAction),
   execution: SkillExecution,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  reconnectWorkstreamId: Schema.optional(WorkstreamId),
 });
 export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;
 

@@ -50,3 +50,11 @@ and CLI calls never cross into web, desktop, or mobile clients. The gate resolve
 continuation issue, returns structured blockers with remediation, and only invokes orchestration
 dispatch after every prerequisite succeeds. An explicit generic execution preference bypasses this
 native-only gate while retaining the pinned skill invocation.
+
+For an existing-map continuation, the tracker adapter reads the canonical map and its native
+sub-issue and blocking relationships in one GraphQL projection. The gate attaches that projection
+to the normalized invocation before dispatch, and the existing turn event and projection pipeline
+persist it without introducing a client-owned authority. A matching canonical map reuses its
+project Workstream identity while each explicit continuation receives a new Skill Run identity.
+Client runtime derives active/completed discovery, the open-unblocked-unclaimed frontier, and a
+stable graph layout from the shared projection.

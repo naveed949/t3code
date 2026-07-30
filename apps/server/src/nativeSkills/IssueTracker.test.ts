@@ -126,6 +126,153 @@ it.effect("resolves only an unambiguous GitHub issue number or URL", () =>
   ),
 );
 
+it.effect("loads an existing Wayfinder map with native children and dependencies", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const map = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: project!,
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(map, {
+      canonicalReference: {
+        number: 42,
+        title: "Choose the release shape",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open",
+      },
+      destination: "A release plan that is ready for specification.",
+      notes: "Use the research skill for external API facts.",
+      decisionsSoFar: [
+        {
+          title: "Choose a package format",
+          url: "https://github.com/t3tools/t3code/issues/40",
+          summary: "Use a deterministic archive.",
+        },
+      ],
+      fogOfWar: ["Deployment ownership is not yet clear."],
+      outOfScope: ["Building the release is handled after specification."],
+      tickets: [
+        {
+          number: 43,
+          title: "Research hosting limits",
+          url: "https://github.com/t3tools/t3code/issues/43",
+          state: "open",
+          classification: "research",
+          claimedBy: null,
+          blockedBy: [],
+          blocks: [44],
+        },
+        {
+          number: 44,
+          title: "Choose the deployment target",
+          url: "https://github.com/t3tools/t3code/issues/44",
+          state: "open",
+          classification: "grilling",
+          claimedBy: null,
+          blockedBy: [43],
+          blocks: [],
+        },
+        {
+          number: 45,
+          title: "Record the package decision",
+          url: "https://github.com/t3tools/t3code/issues/45",
+          state: "closed",
+          classification: "task",
+          claimedBy: "maintainer",
+          blockedBy: [],
+          blocks: [],
+        },
+      ],
+      frontier: [43],
+      lastSynchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) =>
+          args[0] === "api"
+            ? Effect.succeed(
+                output(
+                  JSON.stringify({
+                    data: {
+                      repository: {
+                        issue: {
+                          number: 42,
+                          title: "Choose the release shape",
+                          url: "https://github.com/t3tools/t3code/issues/42",
+                          state: "OPEN",
+                          labels: { nodes: [{ name: "wayfinder:map" }] },
+                          body: [
+                            "## Destination",
+                            "",
+                            "A release plan that is ready for specification.",
+                            "",
+                            "## Notes",
+                            "",
+                            "Use the research skill for external API facts.",
+                            "",
+                            "## Decisions so far",
+                            "",
+                            "- [Choose a package format](https://github.com/t3tools/t3code/issues/40) — Use a deterministic archive.",
+                            "",
+                            "## Not yet specified",
+                            "",
+                            "- Deployment ownership is not yet clear.",
+                            "",
+                            "## Out of scope",
+                            "",
+                            "- Building the release is handled after specification.",
+                          ].join("\n"),
+                          subIssues: {
+                            nodes: [
+                              {
+                                number: 43,
+                                title: "Research hosting limits",
+                                url: "https://github.com/t3tools/t3code/issues/43",
+                                state: "OPEN",
+                                assignees: { nodes: [] },
+                                labels: { nodes: [{ name: "wayfinder:research" }] },
+                                blockedBy: { nodes: [] },
+                                blocking: { nodes: [{ number: 44 }] },
+                              },
+                              {
+                                number: 44,
+                                title: "Choose the deployment target",
+                                url: "https://github.com/t3tools/t3code/issues/44",
+                                state: "OPEN",
+                                assignees: { nodes: [] },
+                                labels: { nodes: [{ name: "wayfinder:grilling" }] },
+                                blockedBy: { nodes: [{ number: 43, state: "OPEN" }] },
+                                blocking: { nodes: [] },
+                              },
+                              {
+                                number: 45,
+                                title: "Record the package decision",
+                                url: "https://github.com/t3tools/t3code/issues/45",
+                                state: "CLOSED",
+                                assignees: { nodes: [{ login: "maintainer" }] },
+                                labels: { nodes: [{ name: "wayfinder:task" }] },
+                                blockedBy: { nodes: [] },
+                                blocking: { nodes: [] },
+                              },
+                            ],
+                          },
+                        },
+                      },
+                    },
+                  }),
+                ),
+              )
+            : Effect.succeed(output("")),
+      }),
+    ),
+  ),
+);
+
 it.effect("rejects malformed and cross-repository issue references without invoking gh", () => {
   let executions = 0;
   return Effect.gen(function* () {

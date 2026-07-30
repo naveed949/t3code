@@ -23,7 +23,7 @@ import {
   threadKey,
   threadRefsEqual,
 } from "./entities.ts";
-import { deriveProjectWorkstreams } from "./skillRuns.ts";
+import { deriveEnvironmentWorkstreams, deriveProjectWorkstreams } from "./skillRuns.ts";
 
 const EMPTY_THREADS: ReadonlyArray<OrchestrationThreadShell> = Object.freeze([]);
 const EMPTY_SKILL_RUNS: ReadonlyArray<SkillInvocation> = Object.freeze([]);
@@ -181,6 +181,12 @@ export function createEnvironmentThreadShellAtoms(input: {
     return refs;
   }).pipe(Atom.withLabel("environment-thread-refs"));
 
+  const workstreamsAtom = Atom.make((get) =>
+    [...get(input.catalogValueAtom).entries.keys()].flatMap((environmentId) =>
+      deriveEnvironmentWorkstreams(environmentId, get(environmentSkillRunsAtom(environmentId))),
+    ),
+  ).pipe(Atom.withLabel("environment-project-workstreams"));
+
   let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const threadShellsAtom = Atom.make((get) => {
     const next = get(threadRefsAtom).flatMap((ref) => {
@@ -201,6 +207,7 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentThreadRefsAtom,
     environmentThreadRefsByProjectAtom,
     threadRefsAtom,
+    workstreamsAtom,
     threadShellsAtom,
     threadShellsForProjectRefsAtom: (refs: ReadonlyArray<ScopedProjectRef>) =>
       threadShellsForProjectRefsAtomFamily(projectRefCollectionKey(refs)),

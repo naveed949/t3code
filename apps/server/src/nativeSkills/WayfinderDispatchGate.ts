@@ -2,6 +2,7 @@ import {
   OrchestrationDispatchCommandError,
   type OrchestrationCommand,
   type OrchestrationProjectShell,
+  type SkillInvocation,
   type OrchestrationThreadShell,
   type ProjectId,
   type ServerProvider,
@@ -20,6 +21,10 @@ interface GateDependencies {
   readonly getProject: (
     projectId: ProjectId,
   ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, OrchestrationDispatchCommandError>;
+  readonly getSkillRuns: () => Effect.Effect<
+    ReadonlyArray<SkillInvocation>,
+    OrchestrationDispatchCommandError
+  >;
   readonly check: NativeWayfinderPreflightService["Service"]["check"];
 }
 
@@ -37,7 +42,7 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
     (command.skillInvocation.execution.mode === "generic" &&
       command.skillInvocation.execution.reason === "user-selected-generic")
   ) {
-    return;
+    return command;
   }
 
   const bootstrapProjectId = command.bootstrap?.createThread?.projectId;
@@ -84,6 +89,29 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
       preflightBlockers: result.blockers,
     });
   }
+  if (command.type === "thread.turn.start" && command.skillInvocation && result.wayfinderMap) {
+    const existingRun = (yield* dependencies.getSkillRuns())
+      .filter(
+        (run) =>
+          run.projectId === projectId &&
+          run.skill.name === "wayfinder" &&
+          run.wayfinderMap?.canonicalReference.url === result.wayfinderMap?.canonicalReference.url,
+      )
+      .sort(
+        (left, right) =>
+          right.createdAt.localeCompare(left.createdAt) ||
+          right.skillRunId.localeCompare(left.skillRunId),
+      )[0];
+    return {
+      ...command,
+      skillInvocation: {
+        ...command.skillInvocation,
+        wayfinderMap: result.wayfinderMap,
+        ...(existingRun ? { reconnectWorkstreamId: existingRun.workstreamId } : {}),
+      },
+    } satisfies OrchestrationCommand;
+  }
+  return command;
 });
 
 export const dispatchWithNativeWayfinderPreflight = Effect.fn(
@@ -93,6 +121,6 @@ export const dispatchWithNativeWayfinderPreflight = Effect.fn(
   readonly dependencies: GateDependencies;
   readonly dispatch: (command: OrchestrationCommand) => Effect.Effect<A, E>;
 }) {
-  yield* preflightNativeWayfinderDispatch(input.command, input.dependencies);
-  return yield* input.dispatch(input.command);
+  const command = yield* preflightNativeWayfinderDispatch(input.command, input.dependencies);
+  return yield* input.dispatch(command);
 });

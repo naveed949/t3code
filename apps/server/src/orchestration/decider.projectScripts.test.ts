@@ -6,6 +6,7 @@ import {
   ProjectId,
   ThreadId,
   ProviderInstanceId,
+  WorkstreamId,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect, it } from "@effect/vitest";
@@ -288,6 +289,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
               adapterId: "wayfinder",
               adapterVersion: 1,
             },
+            reconnectWorkstreamId: WorkstreamId.make("workstream:existing-map"),
           },
           createdAt: now,
         },
@@ -328,8 +330,11 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           createdAt: now,
         },
       });
-      expect(turnStartEvent.payload.skillInvocation?.workstreamId).toMatch(/^workstream:/);
+      expect(turnStartEvent.payload.skillInvocation?.workstreamId).toBe(
+        WorkstreamId.make("workstream:existing-map"),
+      );
       expect(turnStartEvent.payload.skillInvocation?.skillRunId).toMatch(/^skill-run:/);
+      expect(turnStartEvent.payload.skillInvocation).not.toHaveProperty("reconnectWorkstreamId");
     }),
   );
 

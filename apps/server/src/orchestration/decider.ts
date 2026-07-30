@@ -742,12 +742,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
-      const skillInvocation = command.skillInvocation
+      const requestedSkillInvocation = command.skillInvocation;
+      const skillInvocationFields = requestedSkillInvocation
+        ? (({ reconnectWorkstreamId: _reconnectWorkstreamId, ...invocation }) => invocation)(
+            requestedSkillInvocation,
+          )
+        : undefined;
+      const skillInvocation = requestedSkillInvocation
         ? {
-            ...command.skillInvocation,
-            workstreamId: WorkstreamId.make(
-              `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
-            ),
+            ...skillInvocationFields,
+            workstreamId:
+              requestedSkillInvocation.reconnectWorkstreamId ??
+              WorkstreamId.make(
+                `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
+              ),
             skillRunId: SkillRunId.make(
               `skill-run:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
             ),

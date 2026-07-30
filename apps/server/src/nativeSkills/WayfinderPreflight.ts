@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind, WayfinderMapProjection } from "@t3tools/contracts";
 
 import {
   VERIFIED_WAYFINDER_CONTENT_DIGEST,
@@ -45,7 +45,7 @@ export interface WayfinderPreflightBlocker {
 }
 
 export type WayfinderPreflightResult =
-  | { readonly kind: "ready" }
+  | { readonly kind: "ready"; readonly wayfinderMap?: WayfinderMapProjection }
   | { readonly kind: "blocked"; readonly blockers: ReadonlyArray<WayfinderPreflightBlocker> };
 
 /**

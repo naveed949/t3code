@@ -93,6 +93,19 @@ One execution of a pinned skill within a Workstream. Its durable invocation reco
 name, installed path, content digest, provider execution mode, owning project and thread, and creation
 time. Native compatibility is decided by [NativeSkillAdapterRegistry.ts][25].
 
+#### Wayfinder map
+
+The canonical GitHub issue map attached to a Wayfinder Workstream. Its read-only synchronized
+projection records the destination, notes, decisions, fog of war, out-of-scope items, child-ticket
+states and dependency relationships, claims, classifications, canonical reference, and last sync
+time. Reconnecting to the same canonical map creates a new Skill Run in the existing Workstream.
+
+#### Wayfinder Workbench
+
+The client view of a synchronized Wayfinder map. Web and desktop expose it as a right-panel surface;
+mobile exposes a full-screen route. Both prioritize the **frontier**: open, unblocked, unclaimed
+child tickets that are ready to advance.
+
 #### Native skill adapter
 
 A verified mapping from a pinned skill identity to a provider-native invocation mechanism. A missing
