@@ -48,7 +48,10 @@ On web and desktop, the Workbench opens in the resizable right panel and support
 maximize control. The dependency graph uses a deterministic, non-animated layout and the ticket list
 puts the frontier first. On mobile, linked threads expose a full-screen Wayfinder route with the same
 frontier-first list and an optional compact graph. Reopening the same canonical GitHub map creates a
-new Skill Run in the existing project Workstream.
+new Skill Run in the existing project Workstream. Before that resumed provider turn starts, native
+preflight reloads GitHub and the project Workstream snapshot; the new run records a healthy
+`resume` synchronization result. Active linked runtime work and synchronization health are included
+when the shared clients recompute whether the Workstream is complete.
 
 A native **New** run starts with a visible unpublished draft. The draft is explicitly non-canonical:
 T3 does not create or change GitHub issues, labels, assignments, comments, or relationships while

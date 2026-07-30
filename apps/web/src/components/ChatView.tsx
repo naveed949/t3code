@@ -35,6 +35,7 @@ import {
 } from "@t3tools/client-runtime/state/wayfinder-draft";
 import {
   findThreadWayfinderWorkstream,
+  findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
 import {
@@ -1645,10 +1646,10 @@ function ChatViewContent(props: ChatViewProps) {
     activeWayfinderWorkstream?.wayfinderMap ??
     activeLatestTurn?.skillInvocation?.wayfinderMap ??
     null;
-  const activeWayfinderInvocation =
-    activeWayfinderWorkstream?.skillRuns.toReversed().find((run) => run.wayfinderMap) ??
-    activeLatestTurn?.skillInvocation ??
-    null;
+  const activeWayfinderInvocation = findWayfinderReconciliationInvocation(
+    activeWayfinderWorkstream,
+    activeLatestTurn?.skillInvocation ?? null,
+  );
   const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
@@ -1727,7 +1728,7 @@ function ChatViewContent(props: ChatViewProps) {
       void reconcileWayfinderMapCommand({
         environmentId: activeThread.environmentId,
         input: {
-          threadId: activeThread.id,
+          threadId: activeWayfinderInvocation.threadId,
           skillRunId: activeWayfinderInvocation.skillRunId,
           reason,
         },

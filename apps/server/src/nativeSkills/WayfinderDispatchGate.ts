@@ -121,7 +121,21 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
         ...command.skillInvocation,
         ...(shouldPersistProjection ? { wayfinderMap: result.wayfinderMap } : {}),
         wayfinderSynchronizedAt: result.wayfinderMap.lastSynchronizedAt,
-        ...(existingRun ? { reconnectWorkstreamId: existingRun.workstreamId } : {}),
+        ...(existingRun
+          ? {
+              reconnectWorkstreamId: existingRun.workstreamId,
+              wayfinderSynchronization: {
+                status: "healthy",
+                reason: "resume",
+                lastAttemptedAt: result.wayfinderMap.lastSynchronizedAt,
+                lastSuccessfulAt: result.wayfinderMap.lastSynchronizedAt,
+                canMutate: true,
+                ...(result.wayfinderMap.revision !== undefined
+                  ? { actualRevision: result.wayfinderMap.revision }
+                  : {}),
+              },
+            }
+          : {}),
       },
     } satisfies OrchestrationCommand;
   }

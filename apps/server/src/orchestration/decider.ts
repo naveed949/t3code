@@ -1169,22 +1169,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.wayfinder.reconcile": {
-      const thread = yield* requireThread({
+      yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      const invocation = thread.latestTurn?.skillInvocation;
-      if (
-        !invocation ||
-        invocation.skillRunId !== command.skillRunId ||
-        invocation.wayfinderMap === undefined
-      ) {
-        return yield* new OrchestrationCommandInvariantError({
-          commandType: command.type,
-          detail: "Wayfinder reconciliation requires the matching published Skill Run.",
-        });
-      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",

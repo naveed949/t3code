@@ -191,6 +191,18 @@ it.effect("reconnects a known canonical map to its project Workstream", () =>
         : null,
       wayfinderMap.lastSynchronizedAt,
     );
+    assert.deepStrictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronization
+        : null,
+      {
+        status: "healthy",
+        reason: "resume",
+        lastAttemptedAt: wayfinderMap.lastSynchronizedAt,
+        lastSuccessfulAt: wayfinderMap.lastSynchronizedAt,
+        canMutate: true,
+      },
+    );
   }),
 );
 

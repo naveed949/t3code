@@ -36,9 +36,12 @@ export interface IssueTrackerIssue {
 
 export type WayfinderMapLoadResult =
   | { readonly kind: "loaded"; readonly map: WayfinderMapProjection }
-  | { readonly kind: "unchanged"; readonly revision: string }
   | { readonly kind: "not-wayfinder-map" }
   | { readonly kind: "truncated" };
+
+export type WayfinderMapReconciliationResult =
+  | WayfinderMapLoadResult
+  | { readonly kind: "unchanged"; readonly revision: string };
 
 export class IssueTracker extends Context.Service<
   IssueTracker,
@@ -67,7 +70,7 @@ export class IssueTracker extends Context.Service<
       readonly issueNumber: number;
       readonly synchronizedAt: string;
       readonly currentRevision?: string;
-    }) => Effect.Effect<WayfinderMapLoadResult, GitHubCli.GitHubCliError>;
+    }) => Effect.Effect<WayfinderMapReconciliationResult, GitHubCli.GitHubCliError>;
     readonly ensureLabel: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;

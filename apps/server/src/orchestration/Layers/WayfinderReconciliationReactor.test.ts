@@ -305,3 +305,50 @@ it.effect("preserves the cached map as read-only when GitHub is unavailable", ()
     }
   }),
 );
+
+it.effect("replaces the projection when external GitHub state changes", () =>
+  Effect.gen(function* () {
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const trackerReads = { value: 0 };
+    const changedMap = {
+      ...map,
+      revision: "revision:changed",
+      tickets: [
+        {
+          number: 43,
+          title: "Reopened decision",
+          url: "https://github.com/t3tools/t3code/issues/43",
+          state: "open" as const,
+          classification: "grilling" as const,
+          claimedBy: "alice",
+          blockedBy: [],
+          blocks: [],
+          commentCount: 3,
+        },
+      ],
+      frontier: [],
+      lastSynchronizedAt: now,
+    };
+    const process = yield* makeWayfinderReconciliationProcessor.pipe(
+      Effect.provide(
+        dependencies({
+          dispatched,
+          receipts,
+          trackerReads,
+          reconcile: () => Effect.succeed({ kind: "loaded", map: changedMap }),
+        }),
+      ),
+    );
+
+    yield* process(event({ reason: "poll" }));
+
+    const terminal = dispatched.at(-1);
+    assert.strictEqual(terminal?.type, "thread.wayfinder.reconciliation.update");
+    if (terminal?.type === "thread.wayfinder.reconciliation.update") {
+      assert.strictEqual(terminal.synchronization.status, "healthy");
+      assert.deepStrictEqual(terminal.wayfinderMap, changedMap);
+    }
+    assert.strictEqual(receipts.at(-1)?.type, "wayfinder.reconciliation.completed");
+  }),
+);

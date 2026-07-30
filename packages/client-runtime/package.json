@@ -143,6 +143,10 @@
       "types": "./src/state/wayfinderWorkbench.ts",
       "default": "./src/state/wayfinderWorkbench.ts"
     },
+    "./state/wayfinder-reconciliation": {
+      "types": "./src/state/wayfinderReconciliation.ts",
+      "default": "./src/state/wayfinderReconciliation.ts"
+    },
     "./state/wayfinder-draft": {
       "types": "./src/state/wayfinderDraft.ts",
       "default": "./src/state/wayfinderDraft.ts"

@@ -8,8 +8,14 @@ import {
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
 import {
   findThreadWayfinderWorkstream,
+  findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import {
+  advanceWayfinderReconciliationLifecycle,
+  WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
+  type WayfinderReconciliationLifecycleEvent,
+} from "@t3tools/client-runtime/state/wayfinder-reconciliation";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   EnvironmentId,
@@ -19,7 +25,7 @@ import {
   type WayfinderMutationAction,
   type WayfinderReconcileReason,
 } from "@t3tools/contracts";
-import type { StaticScreenProps } from "@react-navigation/native";
+import { useFocusEffect, useIsFocused, type StaticScreenProps } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
@@ -218,6 +224,7 @@ function WayfinderWorkbenchContent(props: {
     "reconcile Wayfinder map",
   );
   const { environments } = useEnvironments();
+  const isFocused = useIsFocused();
   const workstreams = useAtomValue(
     environmentThreadShells.projectWorkstreamsAtom(
       scopeProjectRef(props.environmentId, props.projectId),
@@ -227,10 +234,10 @@ function WayfinderWorkbenchContent(props: {
   const thread = useAtomValue(
     environmentThreadDetails.detailAtom(scopeThreadRef(props.environmentId, props.threadId)),
   );
-  const invocation =
-    workstream?.skillRuns.toReversed().find((run) => run.wayfinderMap) ??
-    thread?.latestTurn?.skillInvocation ??
-    null;
+  const invocation = findWayfinderReconciliationInvocation(
+    workstream,
+    thread?.latestTurn?.skillInvocation ?? null,
+  );
   const canonicalMap = workstream?.wayfinderMap ?? invocation?.wayfinderMap ?? null;
   const mutation: WayfinderMutation | null = invocation?.wayfinderMutation ?? null;
   const map = canonicalMap ? applyOptimisticWayfinderMutation(canonicalMap, mutation) : null;
@@ -264,6 +271,7 @@ function WayfinderWorkbenchContent(props: {
       },
     });
   };
+  const invocationSkillRunId = invocation?.skillRunId;
   const connected =
     environments.find((environment) => environment.environmentId === props.environmentId)
       ?.connection.phase === "connected";
@@ -273,35 +281,50 @@ function WayfinderWorkbenchContent(props: {
       void reconcileWayfinderMapCommand({
         environmentId: props.environmentId,
         input: {
-          threadId: props.threadId,
+          threadId: invocation.threadId,
           skillRunId: invocation.skillRunId,
           reason,
         },
       });
     },
-    [invocation, props.environmentId, props.threadId, reconcileWayfinderMapCommand],
+    [invocation, props.environmentId, reconcileWayfinderMapCommand],
   );
   const reconcileRef = useRef(reconcile);
   reconcileRef.current = reconcile;
-  const wasConnected = useRef(connected);
-  useEffect(() => {
-    if (invocation) reconcileRef.current("open");
-  }, [invocation?.skillRunId]);
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") reconcileRef.current("focus");
-    });
-    return () => subscription.remove();
+  const lifecycleRef = useRef({
+    connected,
+    visible: false,
+    hasOpened: false,
+  });
+  const advanceLifecycle = useCallback((event: WayfinderReconciliationLifecycleEvent) => {
+    const transition = advanceWayfinderReconciliationLifecycle(lifecycleRef.current, event);
+    lifecycleRef.current = transition.lifecycle;
+    if (transition.reason) reconcileRef.current(transition.reason);
   }, []);
+  useFocusEffect(
+    useCallback(() => {
+      if (!invocationSkillRunId) return;
+      advanceLifecycle({ type: "visibility", visible: true });
+      const subscription = AppState.addEventListener("change", (state) => {
+        advanceLifecycle({ type: "visibility", visible: state === "active" });
+      });
+      return () => {
+        subscription.remove();
+        advanceLifecycle({ type: "visibility", visible: false });
+      };
+    }, [advanceLifecycle, invocationSkillRunId]),
+  );
   useEffect(() => {
-    if (!wasConnected.current && connected) reconcileRef.current("reconnect");
-    wasConnected.current = connected;
-  }, [connected]);
+    advanceLifecycle({ type: "connection", connected });
+  }, [advanceLifecycle, connected]);
   useEffect(() => {
-    if (!connected) return;
-    const interval = setInterval(() => reconcileRef.current("poll"), 60_000);
+    if (!connected || !invocationSkillRunId || !isFocused) return;
+    const interval = setInterval(
+      () => advanceLifecycle({ type: "poll" }),
+      WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
+    );
     return () => clearInterval(interval);
-  }, [connected]);
+  }, [advanceLifecycle, connected, invocationSkillRunId, isFocused]);
   if (!map) {
     return (
       <View className="flex-1 items-center justify-center bg-background p-6">
@@ -351,7 +374,7 @@ function WayfinderWorkbenchContent(props: {
           accessibilityLabel="Refresh Wayfinder map from GitHub"
           disabled={!connected || synchronizationStatus === "synchronizing"}
           className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-50"
-          onPress={() => reconcile("manual")}
+          onPress={() => advanceLifecycle({ type: "manual" })}
         >
           <Text className="text-xs font-semibold text-foreground">
             {synchronizationStatus === "synchronizing" ? "Refreshing…" : "Refresh"}

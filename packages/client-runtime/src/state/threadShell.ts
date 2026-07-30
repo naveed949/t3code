@@ -57,12 +57,21 @@ export function createEnvironmentThreadShellAtoms(input: {
   const projectWorkstreamsAtomFamily = Atom.family((key: string) => {
     const projectRef = parseProjectKey(key);
     let previousRuns: ReadonlyArray<SkillInvocation> = EMPTY_SKILL_RUNS;
-    let previousWorkstreams = deriveProjectWorkstreams(projectRef.projectId, previousRuns);
+    let previousThreads: ReadonlyArray<OrchestrationThreadShell> = EMPTY_THREADS;
+    let previousWorkstreams = deriveProjectWorkstreams(
+      projectRef.projectId,
+      previousRuns,
+      previousThreads,
+    );
     return Atom.make((get) => {
       const runs = get(environmentSkillRunsAtom(projectRef.environmentId));
-      if (arrayElementsEqual(previousRuns, runs)) return previousWorkstreams;
+      const threads = get(environmentThreadsAtom(projectRef.environmentId));
+      if (arrayElementsEqual(previousRuns, runs) && arrayElementsEqual(previousThreads, threads)) {
+        return previousWorkstreams;
+      }
       previousRuns = runs;
-      previousWorkstreams = deriveProjectWorkstreams(projectRef.projectId, runs);
+      previousThreads = threads;
+      previousWorkstreams = deriveProjectWorkstreams(projectRef.projectId, runs, threads);
       return previousWorkstreams;
     }).pipe(Atom.withLabel(`project-workstreams:${key}`));
   });
@@ -186,12 +195,21 @@ export function createEnvironmentThreadShellAtoms(input: {
 
   let previousWorkstreamEnvironmentIds: ReadonlyArray<EnvironmentId> = [];
   let previousRunsByEnvironment = new Map<EnvironmentId, ReadonlyArray<SkillInvocation>>();
+  let previousThreadsByEnvironment = new Map<
+    EnvironmentId,
+    ReadonlyArray<OrchestrationThreadShell>
+  >();
   let previousWorkstreams: ReturnType<typeof deriveEnvironmentWorkstreams> = [];
   const workstreamsAtom = Atom.make((get) => {
     const environmentIds = [...get(input.catalogValueAtom).entries.keys()];
     const runsByEnvironment = new Map(
       environmentIds.map(
         (environmentId) => [environmentId, get(environmentSkillRunsAtom(environmentId))] as const,
+      ),
+    );
+    const threadsByEnvironment = new Map(
+      environmentIds.map(
+        (environmentId) => [environmentId, get(environmentThreadsAtom(environmentId))] as const,
       ),
     );
     const unchanged =
@@ -201,14 +219,22 @@ export function createEnvironmentThreadShellAtoms(input: {
           previousRunsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
           runsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
         ),
+      ) &&
+      environmentIds.every((environmentId) =>
+        arrayElementsEqual(
+          previousThreadsByEnvironment.get(environmentId) ?? EMPTY_THREADS,
+          threadsByEnvironment.get(environmentId) ?? EMPTY_THREADS,
+        ),
       );
     if (unchanged) return previousWorkstreams;
     previousWorkstreamEnvironmentIds = environmentIds;
     previousRunsByEnvironment = runsByEnvironment;
+    previousThreadsByEnvironment = threadsByEnvironment;
     previousWorkstreams = environmentIds.flatMap((environmentId) =>
       deriveEnvironmentWorkstreams(
         environmentId,
         runsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
+        threadsByEnvironment.get(environmentId) ?? EMPTY_THREADS,
       ),
     );
     return previousWorkstreams;

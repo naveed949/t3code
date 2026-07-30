@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, ProjectId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ProjectId,
+  ProviderInstanceId,
+  SkillRunId,
+  ThreadId,
+  TurnId,
+  WorkstreamId,
+} from "@t3tools/contracts";
 
 import {
   deriveEnvironmentWorkstreams,
   deriveProjectWorkstreams,
   findThreadWayfinderWorkstream,
+  findWayfinderReconciliationInvocation,
 } from "./skillRuns.ts";
 
 const invocation = {
@@ -138,6 +147,45 @@ it("finds the freshest Wayfinder Workstream linked to a thread", () => {
   ).toBe(42);
 });
 
+it("reconciles through the map-owning linked thread after a newer continuation run", () => {
+  const mapOwner = {
+    ...invocation,
+    threadId: ThreadId.make("thread:map-owner"),
+    wayfinderMap: {
+      canonicalReference: {
+        number: 42,
+        title: "Current map",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "Current",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
+    },
+  };
+  const continuation = {
+    ...invocation,
+    skillRunId: SkillRunId.make("skill-run:continuation"),
+    threadId: ThreadId.make("thread:continuation"),
+    createdAt: "2026-01-03T00:00:00.000Z",
+    wayfinderSynchronizedAt: "2026-01-03T00:00:00.000Z",
+  };
+  const [workstream] = deriveProjectWorkstreams(ProjectId.make("project-1"), [
+    mapOwner,
+    continuation,
+  ]);
+
+  expect(findWayfinderReconciliationInvocation(workstream ?? null, continuation)).toMatchObject({
+    skillRunId: mapOwner.skillRunId,
+    threadId: mapOwner.threadId,
+  });
+});
+
 it("does not report completion until reconciliation is healthy and reactivates reopened work", () => {
   const synchronizedAt = "2026-01-04T00:00:00.000Z";
   const baseMap = {
@@ -202,6 +250,80 @@ it("does not report completion until reconciliation is healthy and reactivates r
     },
   ]);
   expect(unavailableWorkstream?.status).toBe("active");
+});
+
+it("recomputes completion only after linked runtime work is no longer active", () => {
+  const synchronizedAt = "2026-01-04T00:00:00.000Z";
+  const completedInvocation = {
+    ...invocation,
+    wayfinderMap: {
+      canonicalReference: {
+        number: 42,
+        title: "Release map",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "closed" as const,
+      },
+      destination: "A release plan.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: synchronizedAt,
+    },
+    wayfinderSynchronization: {
+      status: "healthy" as const,
+      reason: "resume" as const,
+      lastAttemptedAt: synchronizedAt,
+      lastSuccessfulAt: synchronizedAt,
+      canMutate: true,
+    },
+  };
+  const runningThread = {
+    id: invocation.threadId,
+    projectId: invocation.projectId,
+    title: "Linked Wayfinder run",
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5",
+    },
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    branch: null,
+    worktreePath: null,
+    latestTurn: {
+      turnId: TurnId.make("turn:linked"),
+      state: "running" as const,
+      requestedAt: synchronizedAt,
+      startedAt: synchronizedAt,
+      completedAt: null,
+      assistantMessageId: null,
+      skillInvocation: completedInvocation,
+    },
+    createdAt: synchronizedAt,
+    updatedAt: synchronizedAt,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    session: null,
+    latestUserMessageAt: synchronizedAt,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  };
+
+  expect(
+    deriveProjectWorkstreams(invocation.projectId, [completedInvocation], [runningThread])[0]
+      ?.status,
+  ).toBe("active");
+  expect(
+    deriveProjectWorkstreams(
+      invocation.projectId,
+      [completedInvocation],
+      [{ ...runningThread, latestTurn: { ...runningThread.latestTurn, state: "completed" } }],
+    )[0]?.status,
+  ).toBe("completed");
 });
 
 it("scopes project Workstreams to their owning environment", () => {

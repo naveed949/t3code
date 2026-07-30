@@ -6,6 +6,11 @@ import {
   WAYFINDER_TICKET_CLASSIFICATIONS,
   type WayfinderTicketClassification,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
+import {
+  advanceWayfinderReconciliationLifecycle,
+  WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
+  type WayfinderReconciliationLifecycleEvent,
+} from "@t3tools/client-runtime/state/wayfinder-reconciliation";
 import type {
   WayfinderMapProjection,
   WayfinderMutation,
@@ -14,7 +19,7 @@ import type {
   WayfinderSynchronizationState,
 } from "@t3tools/contracts";
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
-import { memo, type ReactNode, useEffect, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -325,26 +330,44 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
 }) {
   const reconcileRef = useRef(props.onReconcile);
   reconcileRef.current = props.onReconcile;
-  const wasConnected = useRef(props.connected);
-  useEffect(() => {
-    reconcileRef.current("open");
+  const lifecycleRef = useRef({
+    connected: props.connected,
+    visible: false,
+    hasOpened: false,
+  });
+  const advanceLifecycle = useCallback((event: WayfinderReconciliationLifecycleEvent) => {
+    const transition = advanceWayfinderReconciliationLifecycle(lifecycleRef.current, event);
+    lifecycleRef.current = transition.lifecycle;
+    if (transition.reason) reconcileRef.current(transition.reason);
   }, []);
   useEffect(() => {
+    advanceLifecycle({ type: "visibility", visible: true });
+    if (document.visibilityState !== "visible") {
+      advanceLifecycle({ type: "visibility", visible: false });
+    }
     const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") reconcileRef.current("focus");
+      advanceLifecycle({
+        type: "visibility",
+        visible: document.visibilityState === "visible",
+      });
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, []);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      advanceLifecycle({ type: "visibility", visible: false });
+    };
+  }, [advanceLifecycle]);
   useEffect(() => {
-    if (!wasConnected.current && props.connected) reconcileRef.current("reconnect");
-    wasConnected.current = props.connected;
-  }, [props.connected]);
+    advanceLifecycle({ type: "connection", connected: props.connected });
+  }, [advanceLifecycle, props.connected]);
   useEffect(() => {
     if (!props.connected) return;
-    const interval = window.setInterval(() => reconcileRef.current("poll"), 60_000);
+    const interval = window.setInterval(
+      () => advanceLifecycle({ type: "poll" }),
+      WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
+    );
     return () => window.clearInterval(interval);
-  }, [props.connected]);
+  }, [advanceLifecycle, props.connected]);
 
   const map = applyOptimisticWayfinderMutation(props.map, props.mutation ?? null);
   const model = deriveWayfinderWorkbenchModel(map);
@@ -397,7 +420,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
               type="button"
               className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!props.connected || synchronizationStatus === "synchronizing"}
-              onClick={() => props.onReconcile("manual")}
+              onClick={() => advanceLifecycle({ type: "manual" })}
             >
               <RefreshCwIcon aria-hidden className="size-3" />
               Refresh

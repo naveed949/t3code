@@ -568,6 +568,7 @@ it.effect("publishes, reconciles, and emits progress receipts through the reacto
     Effect.gen(function* () {
       const firstReceipt = yield* Deferred.make<OrchestrationRuntimeReceipt>();
       const publications: Array<{ readonly status?: string }> = [];
+      const synchronizationStatuses: string[] = [];
       const receiptStatuses: string[] = [];
       const now = "2026-07-30T10:15:00.000Z";
       const threadId = ThreadId.make("thread:successful-publication");
@@ -621,6 +622,11 @@ it.effect("publishes, reconciles, and emits progress receipts through the reacto
             Effect.sync(() => {
               if (command.type === "thread.wayfinder.publication.update") {
                 publications.push(command.publication);
+              }
+              if (command.type === "thread.wayfinder.reconciliation.update") {
+                synchronizationStatuses.push(
+                  `${command.synchronization.reason}:${command.synchronization.status}`,
+                );
               }
               return { sequence: publications.length };
             }),
@@ -760,6 +766,7 @@ it.effect("publishes, reconciles, and emits progress receipts through the reacto
 
       assert.strictEqual(publications[0]?.status, "publishing");
       assert.strictEqual(publications.at(-1)?.status, "synchronized");
+      assert.deepStrictEqual(synchronizationStatuses, ["mutation:healthy"]);
       assert.deepStrictEqual(
         receiptStatuses,
         publications.map((publication) => publication.status),
