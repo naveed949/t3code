@@ -299,6 +299,67 @@ it.effect("marks a known cached map read-only when resume preflight cannot reach
   });
 });
 
+it.effect("preserves cached synchronization health for non-GitHub resume blockers", () => {
+  let updates = 0;
+  const cachedMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Release map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "A release plan.",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [],
+    frontier: [],
+    lastSynchronizedAt: "2026-07-29T00:00:00.000Z",
+  };
+  const continuation = {
+    ...command,
+    skillInvocation: {
+      ...command.skillInvocation!,
+      action: { id: "continue-map" as const, reference: "42" },
+    },
+  };
+  return Effect.gen(function* () {
+    yield* dispatchWithNativeWayfinderPreflight({
+      command: continuation,
+      dependencies: {
+        ...dependencies(() =>
+          Effect.succeed({
+            kind: "blocked",
+            blockers: [
+              {
+                check: "supported-provider",
+                remediation: "Choose a supported native provider.",
+              },
+            ],
+          }),
+        ),
+        getSkillRuns: () =>
+          Effect.succeed([
+            {
+              ...continuation.skillInvocation!,
+              workstreamId: WorkstreamId.make("workstream:cached"),
+              skillRunId: SkillRunId.make("skill-run:cached"),
+              projectId,
+              threadId,
+              createdAt: cachedMap.lastSynchronizedAt,
+              wayfinderMap: cachedMap,
+            },
+          ]),
+        markWayfinderUnavailable: () => Effect.sync(() => updates++).pipe(Effect.asVoid),
+      },
+      dispatch: Effect.succeed,
+    }).pipe(Effect.flip);
+
+    assert.strictEqual(updates, 0);
+  });
+});
+
 it.effect("lets an explicit generic Wayfinder launch bypass native preflight", () => {
   let checks = 0;
   let dispatches = 0;

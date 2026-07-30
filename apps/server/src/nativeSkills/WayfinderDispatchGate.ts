@@ -14,6 +14,17 @@ import * as Option from "effect/Option";
 
 import type { NativeWayfinderPreflightService } from "./NativeWayfinderPreflightService.ts";
 
+const canonicalReadBlockers = new Set([
+  "continuation-issue",
+  "github-repository",
+  "github-cli",
+  "github-authentication",
+  "issue-capability",
+  "required-labels",
+  "native-child-relationships",
+  "native-blocking-relationships",
+]);
+
 function sameWayfinderMapContent(
   left: NonNullable<SkillInvocation["wayfinderMap"]>,
   right: NonNullable<SkillInvocation["wayfinderMap"]>,
@@ -128,7 +139,10 @@ const preflightNativeWayfinderDispatch = Effect.fn("preflightNativeWayfinderDisp
   if (result.kind === "blocked") {
     const cachedRun = continuationRuns[0];
     const cachedMap = continuationRuns.find((run) => run.wayfinderMap)?.wayfinderMap;
-    if (cachedRun && cachedMap) {
+    const canonicalReadFailed = result.blockers.some((blocker) =>
+      canonicalReadBlockers.has(blocker.check),
+    );
+    if (cachedRun && cachedMap && canonicalReadFailed) {
       const lastSuccessfulAt =
         cachedRun.wayfinderSynchronization?.lastSuccessfulAt ??
         cachedRun.wayfinderSynchronizedAt ??
