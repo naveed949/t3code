@@ -15,6 +15,7 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
 import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
+import { deriveWayfinderDraft } from "@t3tools/client-runtime/state/wayfinder-draft";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -799,6 +800,10 @@ function ThreadRouteContent(
     connectionState: routeConnectionState,
   });
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  const wayfinderDraft = deriveWayfinderDraft(
+    selectedThreadDetail?.latestTurn?.skillInvocation,
+    selectedThreadDetail?.activities ?? [],
+  );
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
@@ -820,6 +825,7 @@ function ThreadRouteContent(
           activePendingUserInputDrafts={requests.activePendingUserInputDrafts}
           activePendingUserInputAnswers={requests.activePendingUserInputAnswers}
           respondingUserInputId={requests.respondingUserInputId}
+          wayfinderDraft={wayfinderDraft}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}

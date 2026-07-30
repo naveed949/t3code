@@ -27,6 +27,7 @@ import {
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { deriveWayfinderDraft } from "@t3tools/client-runtime/state/wayfinder-draft";
 import {
   findThreadWayfinderWorkstream,
   type ProjectSkillWorkstream,
@@ -2009,6 +2010,10 @@ function ChatViewContent(props: ChatViewProps) {
   const pendingUserInputs = useMemo(
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
+  );
+  const wayfinderDraft = useMemo(
+    () => deriveWayfinderDraft(activeLatestTurn?.skillInvocation, threadActivities),
+    [activeLatestTurn?.skillInvocation, threadActivities],
   );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
@@ -5912,6 +5917,7 @@ function ChatViewContent(props: ChatViewProps) {
                             activePendingDraftAnswers={activePendingDraftAnswers}
                             activePendingQuestionIndex={activePendingQuestionIndex}
                             respondingRequestIds={respondingRequestIds}
+                            wayfinderDraft={wayfinderDraft}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
                             activePlan={activePlan as { turnId?: TurnId } | null}

@@ -13,6 +13,7 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
   ThreadId,
+  WayfinderDraft,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -34,6 +35,7 @@ import type {
 } from "../../lib/threadActivity";
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
+import { WayfinderDraftCard } from "./WayfinderDraftCard";
 import {
   COMPOSER_COLLAPSED_CHROME,
   COMPOSER_EXPANDED_CHROME,
@@ -56,6 +58,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputDrafts: Record<string, PendingUserInputDraftAnswer>;
   readonly activePendingUserInputAnswers: Record<string, string> | null;
   readonly respondingUserInputId: ApprovalRequestId | null;
+  readonly wayfinderDraft: WayfinderDraft | null;
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
@@ -388,7 +391,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               pushes the resting content floor up by the same amount. */}
           <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
             <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
-              {props.activePendingApproval || props.activePendingUserInput ? (
+              {props.wayfinderDraft ||
+              props.activePendingApproval ||
+              props.activePendingUserInput ? (
                 <Animated.View
                   className="shrink-0 gap-3 px-4 pb-3"
                   entering={FadeInDown.duration(220)}
@@ -401,6 +406,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       onRespond={props.onRespondToApproval}
                     />
                   ) : null}
+                  {props.wayfinderDraft ? (
+                    <WayfinderDraftCard draft={props.wayfinderDraft} />
+                  ) : null}
                   {props.activePendingUserInput ? (
                     <PendingUserInputCard
                       pendingUserInput={props.activePendingUserInput}
@@ -410,6 +418,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       onSelectOption={props.onSelectUserInputOption}
                       onChangeCustomAnswer={props.onChangeUserInputCustomAnswer}
                       onSubmit={props.onSubmitUserInput}
+                      isWayfinderDecision={props.wayfinderDraft !== null}
                     />
                   ) : null}
                 </Animated.View>

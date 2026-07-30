@@ -2,6 +2,7 @@ import {
   EventId,
   SkillRunId,
   WorkstreamId,
+  emptyWayfinderDraft,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -762,6 +763,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             projectId: targetThread.projectId,
             threadId: command.threadId,
             createdAt: command.createdAt,
+            ...(command.skillInvocation.skill.name === "wayfinder" &&
+            command.skillInvocation.execution.mode === "native" &&
+            command.skillInvocation.action?.id === "new-map"
+              ? { wayfinderDraft: emptyWayfinderDraft(command.createdAt) }
+              : {}),
           }
         : undefined;
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {

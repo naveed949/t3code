@@ -21,16 +21,17 @@ export interface PendingUserInputCardProps {
     customAnswer: string,
   ) => void;
   readonly onSubmit: () => Promise<unknown>;
+  readonly isWayfinderDecision?: boolean;
 }
 
 export function PendingUserInputCard(props: PendingUserInputCardProps) {
   return (
     <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
       <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
-        User input needed
+        {props.isWayfinderDecision ? "Decision Card" : "User input needed"}
       </Text>
       <Text className="font-t3-bold text-lg text-neutral-950 dark:text-neutral-50">
-        Fill in the pending answers
+        {props.isWayfinderDecision ? "Confirm one draft decision" : "Fill in the pending answers"}
       </Text>
       {props.pendingUserInput.questions.map((question) => {
         const draft = props.drafts[question.id];
@@ -42,6 +43,11 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
             <Text className="font-sans text-base leading-snug text-neutral-950 dark:text-neutral-50">
               {question.question}
             </Text>
+            {props.isWayfinderDecision ? (
+              <Text className="font-sans text-xs text-neutral-500 dark:text-neutral-400">
+                Agent proposal · your response confirms the draft decision.
+              </Text>
+            ) : null}
             <View className="flex-row flex-wrap gap-2.5">
               {question.options.map((option) => {
                 const selected =

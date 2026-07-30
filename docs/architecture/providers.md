@@ -58,3 +58,11 @@ persist it without introducing a client-owned authority. A matching canonical ma
 project Workstream identity while each explicit continuation receives a new Skill Run identity.
 Client runtime derives active/completed discovery, the open-unblocked-unclaimed frontier, and a
 stable graph layout from the shared projection.
+
+Native new-map dispatch also supplies a versioned unpublished-draft contract to Codex and Claude.
+It requires one structured decision at a time and reserves structured question identifiers for the
+destination, notes, candidate tickets, fog of war, out-of-scope entries, and proposed dependency
+edges. The persisted Skill Run owns the initial non-canonical draft; clients deterministically fold
+durable `user-input.requested` and `user-input.resolved` activities into proposals, decision
+receipts, and confirmed map state. This keeps recovery provider-neutral without a second draft
+database or client-only state.

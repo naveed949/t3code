@@ -283,7 +283,8 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
               contentDigest:
                 "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
             },
-            arguments: "chart a release",
+            arguments: "new-map",
+            action: { id: "new-map" },
             execution: {
               mode: "native",
               adapterId: "wayfinder",
@@ -321,7 +322,8 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
             name: "wayfinder",
             path: "/skills/wayfinder/SKILL.md",
           },
-          arguments: "chart a release",
+          arguments: "new-map",
+          action: { id: "new-map" },
           execution: {
             mode: "native",
             adapterId: "wayfinder",
@@ -335,6 +337,20 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
       );
       expect(turnStartEvent.payload.skillInvocation?.skillRunId).toMatch(/^skill-run:/);
       expect(turnStartEvent.payload.skillInvocation).not.toHaveProperty("reconnectWorkstreamId");
+      expect(turnStartEvent.payload.skillInvocation?.wayfinderDraft).toEqual({
+        authority: "unpublished-draft",
+        canonical: false,
+        destination: null,
+        notes: [],
+        confirmedDecisions: [],
+        proposedDecisions: [],
+        candidateTickets: [],
+        fogOfWar: [],
+        outOfScope: [],
+        proposedDependencyEdges: [],
+        decisionReceipts: [],
+        updatedAt: now,
+      });
     }),
   );
 

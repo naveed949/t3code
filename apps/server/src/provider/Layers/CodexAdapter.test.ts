@@ -401,13 +401,14 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
         },
       });
 
-      NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
-        input: "new-map",
-        skill: {
-          name: "wayfinder",
-          path: "/skills/wayfinder/SKILL.md",
-        },
+      const request = runtime.sendTurnImpl.mock.calls[0]?.[0];
+      NodeAssert.deepStrictEqual(request?.skill, {
+        name: "wayfinder",
+        path: "/skills/wayfinder/SKILL.md",
       });
+      NodeAssert.match(request?.input ?? "", /^new-map/u);
+      NodeAssert.match(request?.input ?? "", /one decision at a time/u);
+      NodeAssert.match(request?.input ?? "", /Do not create or mutate any GitHub/u);
     }),
   );
 
