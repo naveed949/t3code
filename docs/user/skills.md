@@ -21,3 +21,18 @@ available when native preflight cannot succeed. Composer syntax works on every c
 The resulting skill-run identity is part of the shared project snapshot and links back to its
 originating thread, so web, desktop, and mobile clients retain the same run after later turns and
 after reconnecting.
+
+Continuing an existing Wayfinder map synchronizes a read-only projection from GitHub. The Workbench
+shows the destination, notes, decisions, fog of war, out-of-scope entries, native child tickets and
+dependencies, claims, issue states, canonical links, and the last synchronization time. Its frontier
+contains only open, unblocked, unclaimed tickets.
+
+The initial read-only slice supports up to 100 child tickets, labels, assignees, or native
+dependency relationships per GitHub connection. T3 blocks continuation with a specific remediation
+instead of displaying an incomplete map when GitHub reports more results.
+
+On web and desktop, the Workbench opens in the resizable right panel and supports the panel's
+maximize control. The dependency graph uses a deterministic, non-animated layout and the ticket list
+puts the frontier first. On mobile, linked threads expose a full-screen Wayfinder route with the same
+frontier-first list and an optional compact graph. Reopening the same canonical GitHub map creates a
+new Skill Run in the existing project Workstream.

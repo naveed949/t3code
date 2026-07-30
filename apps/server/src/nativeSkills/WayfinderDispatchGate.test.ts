@@ -5,7 +5,9 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  SkillRunId,
   ThreadId,
+  WorkstreamId,
   type OrchestrationCommand,
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
@@ -66,6 +68,7 @@ const dependencies = (check: () => Effect.Effect<WayfinderPreflightResult>) => (
     Effect.succeed(
       Option.some({ workspaceRoot: "/project" } as unknown as OrchestrationProjectShell),
     ),
+  getSkillRuns: () => Effect.succeed([]),
   check,
 });
 
@@ -81,6 +84,113 @@ it.effect("dispatches native Wayfinder for ready Codex and Claude environments",
       });
       assert.strictEqual(dispatches, 1);
     }
+  }),
+);
+
+it.effect("dispatches a continuation with its synchronized read-only map projection", () =>
+  Effect.gen(function* () {
+    const continuation = {
+      ...command,
+      skillInvocation: {
+        ...command.skillInvocation!,
+        action: { id: "continue-map" as const, reference: "42" },
+      },
+    };
+    const wayfinderMap = {
+      canonicalReference: {
+        number: 42,
+        title: "Choose the release shape",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "A release plan ready for specification.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: "2026-07-30T00:00:00.000Z",
+    };
+    const dispatched = yield* dispatchWithNativeWayfinderPreflight({
+      command: continuation,
+      dependencies: dependencies(() => Effect.succeed({ kind: "ready", wayfinderMap })),
+      dispatch: Effect.succeed,
+    });
+    assert.deepStrictEqual(
+      dispatched.type === "thread.turn.start" ? dispatched.skillInvocation?.wayfinderMap : null,
+      wayfinderMap,
+    );
+    assert.strictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronizedAt
+        : null,
+      wayfinderMap.lastSynchronizedAt,
+    );
+  }),
+);
+
+it.effect("reconnects a known canonical map to its project Workstream", () =>
+  Effect.gen(function* () {
+    const wayfinderMap = {
+      canonicalReference: {
+        number: 42,
+        title: "Choose the release shape",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "A release plan.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: "2026-07-30T00:00:00.000Z",
+    };
+    const reconnectWorkstreamId = WorkstreamId.make("workstream:existing");
+    const dispatched = yield* dispatchWithNativeWayfinderPreflight({
+      command: {
+        ...command,
+        skillInvocation: {
+          ...command.skillInvocation!,
+          action: { id: "continue-map", reference: "42" },
+        },
+      },
+      dependencies: {
+        ...dependencies(() => Effect.succeed({ kind: "ready", wayfinderMap })),
+        getSkillRuns: () =>
+          Effect.succeed([
+            {
+              ...command.skillInvocation!,
+              wayfinderMap,
+              workstreamId: reconnectWorkstreamId,
+              skillRunId: SkillRunId.make("skill-run:existing"),
+              projectId,
+              threadId,
+              createdAt: "2026-07-29T00:00:00.000Z",
+            },
+          ]),
+      },
+      dispatch: Effect.succeed,
+    });
+    assert.strictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.reconnectWorkstreamId
+        : null,
+      reconnectWorkstreamId,
+    );
+    assert.isUndefined(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderMap
+        : undefined,
+    );
+    assert.strictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronizedAt
+        : null,
+      wayfinderMap.lastSynchronizedAt,
+    );
   }),
 );
 

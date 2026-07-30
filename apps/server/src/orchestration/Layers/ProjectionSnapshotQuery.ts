@@ -671,7 +671,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ROW_NUMBER() OVER (
               PARTITION BY turns.thread_id
               ORDER BY turns.requested_at DESC, turns.turn_id DESC
-            ) AS run_rank
+            ) AS run_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderMap') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS map_rank
           FROM projection_turns turns
           INNER JOIN projection_threads threads
             ON threads.thread_id = turns.thread_id
@@ -680,6 +687,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             AND threads.archived_at IS NULL
         ) ranked
         WHERE ranked.run_rank = 1
+          OR (
+            ranked.map_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderMap') IS NOT NULL
+          )
         ORDER BY ranked."threadId" ASC
       `,
   });
@@ -699,7 +710,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ROW_NUMBER() OVER (
               PARTITION BY turns.thread_id
               ORDER BY turns.requested_at DESC, turns.turn_id DESC
-            ) AS run_rank
+            ) AS run_rank,
+            ROW_NUMBER() OVER (
+              PARTITION BY json_extract(turns.skill_invocation_json, '$.workstreamId')
+              ORDER BY
+                json_type(turns.skill_invocation_json, '$.wayfinderMap') IS NULL,
+                turns.requested_at DESC,
+                turns.turn_id DESC
+            ) AS map_rank
           FROM projection_turns turns
           INNER JOIN projection_threads threads
             ON threads.thread_id = turns.thread_id
@@ -708,6 +726,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             AND threads.archived_at IS NOT NULL
         ) ranked
         WHERE ranked.run_rank = 1
+          OR (
+            ranked.map_rank = 1
+            AND json_type(ranked."skillInvocation", '$.wayfinderMap') IS NOT NULL
+          )
         ORDER BY ranked."threadId" ASC
       `,
   });

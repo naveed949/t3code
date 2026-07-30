@@ -1294,9 +1294,33 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           adapterId: "wayfinder",
           adapterVersion: 1,
         },
+        wayfinderMap: {
+          canonicalReference: {
+            number: 42,
+            title: "Release map",
+            url: "https://github.com/t3tools/t3code/issues/42",
+            state: "open",
+          },
+          destination: "A release plan.",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: "2026-04-03T00:00:30.000Z",
+        },
         createdAt: "2026-04-03T00:00:30.000Z",
       } satisfies SkillInvocation;
+      const { wayfinderMap: _wayfinderMap, ...compactInvocationFields } = skillInvocation;
+      const compactInvocation = {
+        ...compactInvocationFields,
+        skillRunId: SkillRunId.make("skill-run:reconnect"),
+        wayfinderSynchronizedAt: "2026-04-03T00:00:40.000Z",
+        createdAt: "2026-04-03T00:00:40.000Z",
+      } satisfies SkillInvocation;
       const encodedSkillInvocation = yield* encodeSkillInvocationJson(skillInvocation);
+      const encodedCompactInvocation = yield* encodeSkillInvocationJson(compactInvocation);
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
@@ -1419,6 +1443,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             NULL,
             NULL,
             '[]'
+          ),
+          (
+            'thread-1',
+            'turn-reconnect',
+            'message-user-3',
+            NULL,
+            NULL,
+            ${encodedCompactInvocation},
+            'message-assistant-3',
+            'completed',
+            '2026-04-03T00:00:35.000Z',
+            '2026-04-03T00:00:36.000Z',
+            '2026-04-03T00:00:40.000Z',
+            NULL,
+            NULL,
+            NULL,
+            '[]'
           )
       `;
 
@@ -1440,10 +1481,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(commandReadModel.threads[0]?.latestTurn?.skillInvocation, undefined);
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+      const shellSkillRuns = shellSnapshot.skillRuns ?? [];
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.state, "running");
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
-      assert.deepEqual(shellSnapshot.skillRuns, [skillInvocation]);
+      assert.deepEqual(
+        new Set(shellSkillRuns.map((run) => run.skillRunId)),
+        new Set([skillInvocation.skillRunId, compactInvocation.skillRunId]),
+      );
+      assert.deepEqual(
+        shellSkillRuns.find((run) => run.wayfinderMap)?.wayfinderMap,
+        skillInvocation.wayfinderMap,
+      );
 
       const fullSnapshot = yield* snapshotQuery.getSnapshot();
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));

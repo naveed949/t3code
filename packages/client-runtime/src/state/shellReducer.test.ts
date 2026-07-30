@@ -273,6 +273,86 @@ describe("applyShellStreamEvent", () => {
 
       expect(withLatestRun.skillRuns).toEqual([latestInvocation]);
     });
+
+    it("retains one map-bearing run when a same-thread reconnect is compact", () => {
+      const mapInvocation = {
+        workstreamId: WorkstreamId.make("workstream:map"),
+        skillRunId: SkillRunId.make("skill-run:map"),
+        projectId: ProjectId.make("project-1"),
+        threadId: ThreadId.make("thread-1"),
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:map",
+        },
+        execution: {
+          mode: "native" as const,
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+        wayfinderMap: {
+          canonicalReference: {
+            number: 42,
+            title: "Release map",
+            url: "https://github.com/t3tools/t3code/issues/42",
+            state: "open" as const,
+          },
+          destination: "Ship it.",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: "2026-04-01T00:00:01.000Z",
+        },
+        createdAt: "2026-04-01T00:00:01.000Z",
+      };
+      const { wayfinderMap: _wayfinderMap, ...compactInvocationFields } = mapInvocation;
+      const compactInvocation = {
+        ...compactInvocationFields,
+        skillRunId: SkillRunId.make("skill-run:reconnect"),
+        wayfinderSynchronizedAt: "2026-04-01T00:00:02.000Z",
+        createdAt: "2026-04-01T00:00:02.000Z",
+      };
+      const withMap = applyShellStreamEvent(baseSnapshot, {
+        kind: "thread-upserted",
+        sequence: 1,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-map"),
+            state: "completed",
+            requestedAt: mapInvocation.createdAt,
+            startedAt: mapInvocation.createdAt,
+            completedAt: mapInvocation.createdAt,
+            assistantMessageId: null,
+            skillInvocation: mapInvocation,
+          },
+        },
+      });
+      const reconnected = applyShellStreamEvent(withMap, {
+        kind: "thread-upserted",
+        sequence: 2,
+        thread: {
+          ...stubThread,
+          latestTurn: {
+            turnId: TurnId.make("turn-reconnect"),
+            state: "running",
+            requestedAt: compactInvocation.createdAt,
+            startedAt: compactInvocation.createdAt,
+            completedAt: null,
+            assistantMessageId: null,
+            skillInvocation: compactInvocation,
+          },
+        },
+      });
+
+      expect(reconnected.skillRuns?.map((run) => run.skillRunId)).toEqual([
+        mapInvocation.skillRunId,
+        compactInvocation.skillRunId,
+      ]);
+    });
   });
 
   describe("thread-removed", () => {

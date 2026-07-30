@@ -4,8 +4,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import type { WayfinderMapProjection } from "@t3tools/contracts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import { projectWayfinderMap } from "./WayfinderMapProjection.ts";
 
 export interface IssueTrackerRepository {
   readonly canonicalKey: string;
@@ -26,6 +28,11 @@ export interface IssueTrackerIssue {
   readonly url: string;
 }
 
+export type WayfinderMapLoadResult =
+  | { readonly kind: "loaded"; readonly map: WayfinderMapProjection }
+  | { readonly kind: "not-wayfinder-map" }
+  | { readonly kind: "truncated" };
+
 export class IssueTracker extends Context.Service<
   IssueTracker,
   {
@@ -41,6 +48,12 @@ export class IssueTracker extends Context.Service<
       readonly repository: IssueTrackerRepository;
       readonly reference: string;
     }) => Effect.Effect<IssueTrackerIssue | null>;
+    readonly loadWayfinderMap: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly synchronizedAt: string;
+    }) => Effect.Effect<WayfinderMapLoadResult>;
   }
 >()("t3/nativeSkills/IssueTracker") {}
 
@@ -55,11 +68,66 @@ const IssueTypeFieldsProbe = Schema.Struct({
     __type: Schema.Struct({ fields: Schema.Array(Schema.Struct({ name: Schema.String })) }),
   }),
 });
+const ConnectionPageInfo = Schema.Struct({ hasNextPage: Schema.Boolean });
+const WayfinderMapProbe = Schema.Struct({
+  data: Schema.Struct({
+    repository: Schema.Struct({
+      issue: Schema.NullOr(
+        Schema.Struct({
+          number: Schema.Number,
+          title: Schema.String,
+          url: Schema.String,
+          state: Schema.Literals(["OPEN", "CLOSED"]),
+          labels: Schema.Struct({
+            nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+            pageInfo: ConnectionPageInfo,
+          }),
+          body: Schema.String,
+          subIssues: Schema.Struct({
+            nodes: Schema.Array(
+              Schema.Struct({
+                number: Schema.Number,
+                title: Schema.String,
+                url: Schema.String,
+                state: Schema.Literals(["OPEN", "CLOSED"]),
+                assignees: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ login: Schema.String })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                labels: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ name: Schema.String })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                blockedBy: Schema.Struct({
+                  nodes: Schema.Array(
+                    Schema.Struct({
+                      number: Schema.Number,
+                      state: Schema.Literals(["OPEN", "CLOSED"]),
+                    }),
+                  ),
+                  pageInfo: ConnectionPageInfo,
+                }),
+                blocking: Schema.Struct({
+                  nodes: Schema.Array(Schema.Struct({ number: Schema.Number })),
+                  pageInfo: ConnectionPageInfo,
+                }),
+              }),
+            ),
+            pageInfo: ConnectionPageInfo,
+          }),
+        }),
+      ),
+    }),
+  }),
+});
 const decodeRepositoryProbe = Schema.decodeUnknownOption(Schema.fromJsonString(RepositoryProbe));
 const decodeLabelsProbe = Schema.decodeUnknownOption(Schema.fromJsonString(LabelsProbe));
 const decodeIssueProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueProbe));
 const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(IssueTypeFieldsProbe),
+);
+const decodeWayfinderMapProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(WayfinderMapProbe),
 );
 
 const noCapabilities: IssueTrackerCapabilities = {
@@ -187,6 +255,59 @@ export const GitHubIssueTrackerLive = Layer.effect(
             onSome: (issue) => issue,
           },
         );
+      }),
+      loadWayfinderMap: Effect.fn("IssueTracker.loadWayfinderMap")(function* (input) {
+        const output = yield* github
+          .execute({
+            cwd: input.cwd,
+            args: [
+              "api",
+              "graphql",
+              "-f",
+              `query=query($owner:String!,$name:String!,$number:Int!){
+                repository(owner:$owner,name:$name){
+                  issue(number:$number){
+                    number title url state body
+                    labels(first:100){nodes{name} pageInfo{hasNextPage}}
+                    subIssues(first:100){
+                      nodes{
+                        number title url state
+                        assignees(first:100){nodes{login} pageInfo{hasNextPage}}
+                        labels(first:100){nodes{name} pageInfo{hasNextPage}}
+                        blockedBy(first:100){nodes{number state} pageInfo{hasNextPage}}
+                        blocking(first:100){nodes{number} pageInfo{hasNextPage}}
+                      }
+                      pageInfo{hasNextPage}
+                    }
+                  }
+                }
+              }`,
+              "-F",
+              `owner=${input.repository.owner}`,
+              "-F",
+              `name=${input.repository.name}`,
+              "-F",
+              `number=${input.issueNumber}`,
+            ],
+          })
+          .pipe(Effect.option);
+        if (Option.isNone(output)) return { kind: "not-wayfinder-map" };
+        const probe = decodeWayfinderMapProbe(output.value.stdout);
+        const issue = Option.isSome(probe) ? probe.value.data.repository.issue : null;
+        const isTruncated =
+          issue?.labels.pageInfo.hasNextPage ||
+          issue?.subIssues.pageInfo.hasNextPage ||
+          issue?.subIssues.nodes.some(
+            (ticket) =>
+              ticket.assignees.pageInfo.hasNextPage ||
+              ticket.labels.pageInfo.hasNextPage ||
+              ticket.blockedBy.pageInfo.hasNextPage ||
+              ticket.blocking.pageInfo.hasNextPage,
+          );
+        if (issue && isTruncated) return { kind: "truncated" };
+        return issue?.labels.nodes.some((label) => label.name === "wayfinder:map")
+          ? { kind: "loaded", map: projectWayfinderMap(issue, input.synchronizedAt) }
+          : { kind: "not-wayfinder-map" };
       }),
     });
   }),

@@ -42,7 +42,14 @@ export function applyShellStreamEvent(
         invocation === undefined
           ? snapshot.skillRuns
           : Arr.append(
-              Arr.filter(snapshot.skillRuns ?? [], (run) => run.threadId !== event.thread.id),
+              Arr.filter(
+                snapshot.skillRuns ?? [],
+                (run) =>
+                  run.threadId !== event.thread.id ||
+                  (run.wayfinderMap !== undefined &&
+                    (run.workstreamId !== invocation.workstreamId ||
+                      invocation.wayfinderMap === undefined)),
+              ),
               invocation,
             );
       return {

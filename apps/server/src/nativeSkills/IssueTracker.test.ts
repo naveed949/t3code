@@ -126,6 +126,201 @@ it.effect("resolves only an unambiguous GitHub issue number or URL", () =>
   ),
 );
 
+it.effect("loads an existing Wayfinder map with native children and dependencies", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: project!,
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+
+    assert.strictEqual(result.kind, "loaded");
+    if (result.kind !== "loaded") return;
+    assert.deepStrictEqual(result.map, {
+      canonicalReference: {
+        number: 42,
+        title: "Choose the release shape",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open",
+      },
+      destination: "A release plan that is ready for specification.",
+      notes: "Use the research skill for external API facts.",
+      decisionsSoFar: [
+        {
+          title: "Choose a package format",
+          url: "https://github.com/t3tools/t3code/issues/40",
+          summary: "Use a deterministic archive.",
+        },
+        {
+          title: "Keep the first slice read-only.",
+          url: null,
+          summary: "",
+        },
+      ],
+      fogOfWar: ["Deployment ownership is not yet clear."],
+      outOfScope: ["Building the release is handled after specification."],
+      tickets: [
+        {
+          number: 43,
+          title: "Research hosting limits",
+          url: "https://github.com/t3tools/t3code/issues/43",
+          state: "open",
+          classification: "research",
+          claimedBy: null,
+          blockedBy: [],
+          blocks: [44],
+        },
+        {
+          number: 44,
+          title: "Choose the deployment target",
+          url: "https://github.com/t3tools/t3code/issues/44",
+          state: "open",
+          classification: "grilling",
+          claimedBy: null,
+          blockedBy: [43],
+          blocks: [],
+        },
+        {
+          number: 45,
+          title: "Record the package decision",
+          url: "https://github.com/t3tools/t3code/issues/45",
+          state: "closed",
+          classification: "task",
+          claimedBy: "maintainer",
+          blockedBy: [],
+          blocks: [],
+        },
+      ],
+      frontier: [43],
+      lastSynchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) =>
+          args[0] === "api"
+            ? Effect.succeed(
+                output(
+                  JSON.stringify({
+                    data: {
+                      repository: {
+                        issue: {
+                          number: 42,
+                          title: "Choose the release shape",
+                          url: "https://github.com/t3tools/t3code/issues/42",
+                          state: "OPEN",
+                          labels: {
+                            nodes: [{ name: "wayfinder:map" }],
+                            pageInfo: { hasNextPage: false },
+                          },
+                          body: [
+                            "## Destination",
+                            "",
+                            "A release plan that is ready for specification.",
+                            "",
+                            "## Notes",
+                            "",
+                            "Use the research skill for external API facts.",
+                            "",
+                            "## Decisions so far",
+                            "",
+                            "- [Choose a package format](https://github.com/t3tools/t3code/issues/40) — Use a deterministic archive.",
+                            "- Keep the first slice read-only.",
+                            "",
+                            "## Not yet specified",
+                            "",
+                            "- Deployment ownership is not yet clear.",
+                            "",
+                            "## Out of scope",
+                            "",
+                            "- Building the release is handled after specification.",
+                          ].join("\n"),
+                          subIssues: {
+                            nodes: [
+                              {
+                                number: 43,
+                                title: "Research hosting limits",
+                                url: "https://github.com/t3tools/t3code/issues/43",
+                                state: "OPEN",
+                                assignees: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:research" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [{ number: 44 }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                              {
+                                number: 44,
+                                title: "Choose the deployment target",
+                                url: "https://github.com/t3tools/t3code/issues/44",
+                                state: "OPEN",
+                                assignees: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:grilling" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [{ number: 43, state: "OPEN" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                              {
+                                number: 45,
+                                title: "Record the package decision",
+                                url: "https://github.com/t3tools/t3code/issues/45",
+                                state: "CLOSED",
+                                assignees: {
+                                  nodes: [{ login: "maintainer" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:task" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                            ],
+                            pageInfo: { hasNextPage: false },
+                          },
+                        },
+                      },
+                    },
+                  }),
+                ),
+              )
+            : Effect.succeed(output("")),
+      }),
+    ),
+  ),
+);
+
 it.effect("rejects malformed and cross-repository issue references without invoking gh", () => {
   let executions = 0;
   return Effect.gen(function* () {
@@ -152,3 +347,51 @@ it.effect("rejects malformed and cross-repository issue references without invok
     ),
   );
 });
+
+it.effect("rejects a truncated native relationship projection", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: {
+        canonicalKey: "github.com/t3tools/t3code",
+        owner: "t3tools",
+        name: "t3code",
+      },
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+    assert.strictEqual(result.kind, "truncated");
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () =>
+          Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Large map",
+                      url: "https://github.com/t3tools/t3code/issues/42",
+                      state: "OPEN",
+                      body: "",
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: true },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+      }),
+    ),
+  ),
+);

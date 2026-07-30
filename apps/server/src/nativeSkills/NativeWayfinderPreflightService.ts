@@ -1,5 +1,6 @@
 import type { ProviderDriverKind, SkillInvocationAction } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -79,7 +80,9 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
         check: "launch-selection",
         remediation: "Choose whether to start a new map or continue an existing issue.",
       });
-    } else if (input.action.id === "continue-map") {
+    }
+    let wayfinderMap;
+    if (input.action?.id === "continue-map") {
       const issue = repository
         ? yield* issueTracker.resolveIssue({
             cwd: input.workspaceRoot,
@@ -92,10 +95,32 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
           check: "continuation-issue",
           remediation: "Choose one issue number or GitHub issue URL from this project.",
         });
+      } else if (repository) {
+        const synchronizedAt = DateTime.formatIso(yield* DateTime.now);
+        const mapResult = yield* issueTracker.loadWayfinderMap({
+          cwd: input.workspaceRoot,
+          repository,
+          issueNumber: issue.number,
+          synchronizedAt,
+        });
+        if (mapResult.kind === "loaded") {
+          wayfinderMap = mapResult.map;
+        } else if (mapResult.kind === "truncated") {
+          blockers.unshift({
+            check: "continuation-issue",
+            remediation:
+              "This read-only slice supports up to 100 child tickets, labels, assignees, or dependencies per connection; split the map before continuing it.",
+          });
+        } else {
+          blockers.unshift({
+            check: "continuation-issue",
+            remediation: "Refresh the GitHub map after its native relationships are available.",
+          });
+        }
       }
     }
     return blockers.length === 0
-      ? { kind: "ready" as const }
+      ? { kind: "ready" as const, ...(wayfinderMap ? { wayfinderMap } : {}) }
       : { kind: "blocked" as const, blockers };
   });
 
