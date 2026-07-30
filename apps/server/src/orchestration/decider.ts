@@ -1020,6 +1020,59 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.wayfinder.mutate": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const actionId = command.actionId ?? command.commandId;
+      const published = thread.activities.some(
+        (activity) =>
+          activity.kind === "wayfinder.draft.published" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "skillRunId" in activity.payload &&
+          activity.payload.skillRunId === command.skillRunId,
+      );
+      if (!published) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder editing requires a published canonical map.",
+        });
+      }
+      const approved = thread.activities.some(
+        (activity) =>
+          activity.kind === "wayfinder.mutation.approval-requested" &&
+          typeof activity.payload === "object" &&
+          activity.payload !== null &&
+          "actionId" in activity.payload &&
+          activity.payload.actionId === actionId &&
+          "action" in activity.payload &&
+          JSON.stringify(activity.payload.action) === JSON.stringify(command.action),
+      );
+      if (thread.runtimeMode === "approval-required" && command.confirmed && !approved) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder mutation confirmation requires a pending server approval.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-mutation-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          actionId,
+          action: command.action,
+          runtimeMode: thread.runtimeMode,
+          confirmed: command.confirmed,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.checkpoint.revert": {
       yield* requireThread({
         readModel,
@@ -1362,6 +1415,54 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [updated, published];
+    }
+
+    case "thread.wayfinder.mutation.update": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-mutation-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          mutation: command.mutation,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+      if (command.mutation.status !== "awaiting-approval") return updated;
+      return [
+        updated,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-mutation-approval:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.mutation.approval-requested",
+              summary: "Wayfinder change needs confirmation",
+              payload: {
+                skillRunId: command.skillRunId,
+                actionId: command.mutation.actionId,
+                action: command.mutation.action,
+              },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
     }
 
     default: {

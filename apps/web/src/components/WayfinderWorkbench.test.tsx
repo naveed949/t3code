@@ -51,4 +51,27 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain('data-wayfinder-edge="43:44"');
     expect(markup).not.toMatch(/animate-|transition-/u);
   });
+
+  it("exposes Wayfinder-specific actions and the active approval state", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        mutation={{
+          actionId: "action:close",
+          action: { kind: "close-ticket", ticketNumber: 43 },
+          status: "awaiting-approval",
+          error: null,
+          updatedAt: "2026-01-02T00:01:00.000Z",
+        }}
+        onMutate={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Structured actions");
+    expect(markup).toContain("Confirm GitHub change");
+    expect(markup).toContain('aria-label="Wayfinder destination"');
+    expect(markup).toContain('aria-label="New ticket title"');
+    expect(markup).toContain('aria-label="Blocker ticket"');
+    expect(markup).toContain('href="https://github.com/t3tools/t3code/issues/42"');
+  });
 });

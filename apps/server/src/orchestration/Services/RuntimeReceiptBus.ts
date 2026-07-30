@@ -66,11 +66,22 @@ export const WayfinderPublicationProgressReceipt = Schema.Struct({
 });
 export type WayfinderPublicationProgressReceipt = typeof WayfinderPublicationProgressReceipt.Type;
 
+export const WayfinderMutationProgressReceipt = Schema.Struct({
+  type: Schema.Literal("wayfinder.mutation.progress"),
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  actionId: Schema.String,
+  status: Schema.Literals(["awaiting-approval", "mutating", "failed", "synchronized"]),
+  createdAt: IsoDateTime,
+});
+export type WayfinderMutationProgressReceipt = typeof WayfinderMutationProgressReceipt.Type;
+
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
   CheckpointDiffFinalizedReceipt,
   TurnProcessingQuiescedReceipt,
   WayfinderPublicationProgressReceipt,
+  WayfinderMutationProgressReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 

@@ -22,7 +22,7 @@ The resulting skill-run identity is part of the shared project snapshot and link
 originating thread, so web, desktop, and mobile clients retain the same run after later turns and
 after reconnecting.
 
-Continuing an existing Wayfinder map synchronizes a read-only projection from GitHub. The Workbench
+Continuing an existing Wayfinder map synchronizes a projection from GitHub. The Workbench
 shows the destination, notes, decisions, fog of war, out-of-scope entries, native child tickets and
 dependencies, claims, issue states, canonical links, and the last synchronization time. Its frontier
 contains only open, unblocked, unclaimed tickets.
@@ -52,3 +52,11 @@ the publish action. Web, desktop, and mobile show the exact current step until G
 canonical graph reconciliation complete. A failed step keeps every verified issue and relationship
 identity and offers an idempotent resume instead of starting over. Only successful reconciliation
 removes draft authority and switches the Workbench to the synchronized GitHub graph.
+
+After publication, the Workbench offers structured controls for its Wayfinder fields, decision
+tickets, ticket classifications and states, resolutions, and dependency relationships. These are
+not general GitHub issue controls; the canonical issue link remains available for exceptional
+administration. Each action follows the thread's runtime permission mode, shows its own pending or
+in-flight state, and applies optimism only to that action. The server performs the write with the
+environment's GitHub credentials, then confirms or corrects the client from a mutation receipt and
+a fresh canonical reconciliation. The same actions are available in web, desktop, and mobile.

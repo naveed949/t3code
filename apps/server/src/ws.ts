@@ -700,7 +700,8 @@ const makeWsRpcLayer = (
               event,
               includeSkillRuns:
                 latestByAggregate.get(key)?.includeSkillRuns === true ||
-                event.type === "thread.wayfinder-publication-updated",
+                event.type === "thread.wayfinder-publication-updated" ||
+                event.type === "thread.wayfinder-mutation-updated",
             });
           }
           const survivors = Array.from(latestByAggregate.values()).sort(

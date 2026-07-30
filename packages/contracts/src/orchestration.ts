@@ -25,7 +25,10 @@ import {
 import { ProviderInstanceId } from "./providerInstance.ts";
 import {
   OptionalWayfinderDraft,
+  OptionalWayfinderMutation,
   OptionalWayfinderPublication,
+  WayfinderMutation,
+  WayfinderMutationAction,
   WayfinderPublication,
 } from "./nativeSkills.ts";
 
@@ -295,6 +298,7 @@ export const SkillInvocation = Schema.Struct({
   createdAt: IsoDateTime,
   wayfinderDraft: OptionalWayfinderDraft,
   wayfinderPublication: OptionalWayfinderPublication,
+  wayfinderMutation: OptionalWayfinderMutation,
 });
 export type SkillInvocation = typeof SkillInvocation.Type;
 
@@ -864,6 +868,17 @@ const ThreadWayfinderPublishCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWayfinderMutateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.mutate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  actionId: Schema.optional(TrimmedNonEmptyString),
+  action: WayfinderMutationAction,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -899,6 +914,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadWayfinderPublishCommand,
+  ThreadWayfinderMutateCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -925,6 +941,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
   ThreadWayfinderPublishCommand,
+  ThreadWayfinderMutateCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1005,6 +1022,16 @@ const ThreadWayfinderPublicationUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWayfinderMutationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.mutation.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  mutation: WayfinderMutation,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1014,6 +1041,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
   ThreadWayfinderPublicationUpdateCommand,
+  ThreadWayfinderMutationUpdateCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1045,6 +1073,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.user-input-response-requested",
   "thread.wayfinder-publication-requested",
   "thread.wayfinder-publication-updated",
+  "thread.wayfinder-mutation-requested",
+  "thread.wayfinder-mutation-updated",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1229,6 +1259,23 @@ export const ThreadWayfinderPublicationUpdatedPayload = Schema.Struct({
   wayfinderMap: Schema.optional(WayfinderMapProjection),
 });
 
+export const ThreadWayfinderMutationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  actionId: TrimmedNonEmptyString,
+  action: WayfinderMutationAction,
+  runtimeMode: RuntimeMode,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderMutationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  mutation: WayfinderMutation,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -1397,6 +1444,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.wayfinder-publication-updated"),
     payload: ThreadWayfinderPublicationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-mutation-requested"),
+    payload: ThreadWayfinderMutationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-mutation-updated"),
+    payload: ThreadWayfinderMutationUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
