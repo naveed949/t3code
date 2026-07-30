@@ -110,6 +110,22 @@ describe("thread outbox", () => {
     });
   });
 
+  it("persists an explicit skill invocation request for offline delivery", () => {
+    const message = {
+      ...queuedMessage({
+        messageId: "message-skill",
+        createdAt: "2026-06-08T10:00:01.000Z",
+      }),
+      skillInvocationRequest: {
+        skillName: "wayfinder",
+        skillPath: "/skills/wayfinder/SKILL.md",
+        arguments: "chart a release",
+      },
+    } satisfies QueuedThreadMessage;
+
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(message))).toEqual(message);
+  });
+
   it("compares model options as part of the queued settings change", () => {
     const base = {
       instanceId: ProviderInstanceId.make("codex"),

@@ -270,6 +270,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveChatSkillInvocationRequest,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -4642,6 +4643,14 @@ function ChatViewContent(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
+    const selectedProviderSkills =
+      providerStatuses.find(
+        (provider) => provider.instanceId === ctxSelectedModelSelection.instanceId,
+      )?.skills ?? EMPTY_PROVIDER_SKILLS;
+    const skillInvocationRequest = resolveChatSkillInvocationRequest(
+      messageTextForSend,
+      selectedProviderSkills,
+    );
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
@@ -4813,6 +4822,7 @@ function ChatViewContent(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode,
+          ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },

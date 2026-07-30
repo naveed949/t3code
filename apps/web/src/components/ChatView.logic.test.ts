@@ -25,6 +25,7 @@ import {
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveThreadMetadataUpdateForNextTurn,
+  resolveChatSkillInvocationRequest,
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
@@ -35,6 +36,30 @@ const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");
 const threadId = ThreadId.make("thread-1");
 const now = "2026-03-29T00:00:00.000Z";
+
+describe("resolveChatSkillInvocationRequest", () => {
+  const skills = [
+    {
+      name: "wayfinder",
+      path: "/skills/wayfinder/SKILL.md",
+      enabled: true,
+    },
+  ];
+
+  it("uses the same typed identity for picker text and a leading skill command", () => {
+    expect(resolveChatSkillInvocationRequest("$wayfinder chart a release", skills)).toEqual({
+      skillName: "wayfinder",
+      skillPath: "/skills/wayfinder/SKILL.md",
+      arguments: "chart a release",
+    });
+  });
+
+  it("leaves ordinary prose as an ordinary turn", () => {
+    expect(
+      resolveChatSkillInvocationRequest("Tell me whether Wayfinder would help here", skills),
+    ).toBeNull();
+  });
+});
 
 function makeThread(overrides: Partial<Thread> = {}): Thread {
   return {

@@ -28,3 +28,15 @@ Provider runtime events flow through queue-based workers:
 3. **CheckpointReactor** — captures git checkpoints on turn start/complete, publishes runtime receipts
 
 All three use `DrainableWorker` internally and expose `drain()` for deterministic test synchronization.
+
+## Native skill invocation
+
+Clients may attach a typed skill invocation request to `thread.turn.start`. The server validates that
+the exact named path is enabled on the selected provider instance, hashes the installed `SKILL.md`,
+and records the pinned identity before dispatch. The native adapter registry recognizes only
+verified name-and-digest pairs.
+
+Codex receives a native skill input item and Claude receives its native slash-command form. Providers
+without a registered native adapter, unknown skills, and digest mismatches preserve the original
+prompt as a generic turn. The orchestration event owns the Workstream and Skill Run identifiers, and
+the projected turn stores the complete invocation record for restart and reconnect hydration.

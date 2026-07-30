@@ -1544,9 +1544,23 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getCodexServiceTierOptionValue(input.modelSelection)
         : undefined;
+    const nativeSkillInvocation =
+      input.skillInvocation?.execution.mode === "native" ? input.skillInvocation : undefined;
     return yield* session.runtime
       .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(nativeSkillInvocation?.arguments !== undefined
+          ? { input: nativeSkillInvocation.arguments }
+          : nativeSkillInvocation === undefined && input.input !== undefined
+            ? { input: input.input }
+            : {}),
+        ...(nativeSkillInvocation
+          ? {
+              skill: {
+                name: nativeSkillInvocation.skill.name,
+                path: nativeSkillInvocation.skill.path,
+              },
+            }
+          : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

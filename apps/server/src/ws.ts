@@ -1011,7 +1011,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
-              const normalizedCommand = yield* normalizeDispatchCommand(command);
+              const providers =
+                command.type === "thread.turn.start" && command.skillInvocationRequest !== undefined
+                  ? yield* providerRegistry.getProviders
+                  : undefined;
+              const normalizedCommand = yield* normalizeDispatchCommand(
+                command,
+                providers ? { providers } : {},
+              );
               const shouldStopSessionAfterArchive =
                 normalizedCommand.type === "thread.archive"
                   ? yield* projectionSnapshotQuery

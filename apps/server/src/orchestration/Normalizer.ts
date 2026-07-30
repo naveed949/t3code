@@ -8,12 +8,14 @@ import {
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ServerProvider,
 } from "@t3tools/contracts";
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import { resolveSkillInvocationRequest } from "../nativeSkills/NativeSkillAdapterRegistry.ts";
 
 export const canonicalizeClientCommandTimestamps = (
   command: ClientOrchestrationCommand,
@@ -43,7 +45,10 @@ export const canonicalizeClientCommandTimestamps = (
   };
 };
 
-export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
+export const normalizeDispatchCommand = (
+  command: ClientOrchestrationCommand,
+  options: { readonly providers?: ReadonlyArray<ServerProvider> } = {},
+) =>
   Effect.gen(function* () {
     const receivedAt = DateTime.formatIso(yield* DateTime.now);
     const canonicalCommand = canonicalizeClientCommandTimestamps(command, receivedAt);
@@ -103,6 +108,36 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
     if (canonicalCommand.type !== "thread.turn.start") {
       return canonicalCommand as OrchestrationCommand;
     }
+
+    const skillInvocationRequest = canonicalCommand.skillInvocationRequest;
+    const skillInvocation = skillInvocationRequest
+      ? yield* Effect.gen(function* () {
+          const providers = options.providers ?? [];
+          const requestedInstanceId =
+            canonicalCommand.modelSelection?.instanceId ??
+            canonicalCommand.bootstrap?.createThread?.modelSelection.instanceId;
+          const providerInstanceId =
+            requestedInstanceId ??
+            providers.find((provider) =>
+              provider.skills.some(
+                (skill) =>
+                  skill.enabled &&
+                  skill.name === skillInvocationRequest.skillName &&
+                  skill.path === skillInvocationRequest.skillPath,
+              ),
+            )?.instanceId;
+          if (!providerInstanceId) {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `Unable to resolve a provider instance for skill '${skillInvocationRequest.skillName}'.`,
+            });
+          }
+          return yield* resolveSkillInvocationRequest({
+            request: skillInvocationRequest,
+            providerInstanceId,
+            providers,
+          });
+        })
+      : undefined;
 
     const normalizedAttachments = yield* Effect.forEach(
       canonicalCommand.message.attachments,
@@ -169,11 +204,14 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       { concurrency: 1 },
     );
 
+    const { skillInvocationRequest: _skillInvocationRequest, ...normalizedCommand } =
+      canonicalCommand;
     return {
-      ...canonicalCommand,
+      ...normalizedCommand,
       message: {
         ...canonicalCommand.message,
         attachments: normalizedAttachments,
       },
+      ...(skillInvocation ? { skillInvocation } : {}),
     } satisfies OrchestrationCommand;
   });

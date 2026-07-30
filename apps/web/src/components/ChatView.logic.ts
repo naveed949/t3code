@@ -5,11 +5,14 @@ import {
   type ModelSelection,
   type ProviderDriverKind,
   type ServerProvider,
+  type ServerProviderSkill,
+  type SkillInvocationRequest,
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -27,6 +30,13 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+
+export function resolveChatSkillInvocationRequest(
+  text: string,
+  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "path" | "enabled">>,
+): SkillInvocationRequest | null {
+  return resolveLeadingSkillInvocationRequest(text, skills);
+}
 
 export function startNewThreadForProject(
   projectRef: ScopedProjectRef | null,

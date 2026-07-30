@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
+import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
@@ -40,6 +41,7 @@ import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { useEnvironmentServerConfig } from "./entities";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -75,6 +77,7 @@ export function useThreadDraftForThread(input: {
 export function useThreadComposerState() {
   const { selectedThread: selectedThreadShell } = useThreadSelection();
   const selectedThreadDetail = useSelectedThreadDetail();
+  const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null);
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
 
@@ -148,6 +151,12 @@ export function useThreadComposerState() {
 
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
+    const selectedModelSelection = draft.modelSelection ?? thread.modelSelection;
+    const skills =
+      serverConfig?.providers.find(
+        (provider) => provider.instanceId === selectedModelSelection.instanceId,
+      )?.skills ?? [];
+    const skillInvocationRequest = resolveLeadingSkillInvocationRequest(text, skills);
     try {
       await enqueueThreadOutboxMessage({
         environmentId: selectedThreadShell.environmentId,
@@ -156,9 +165,10 @@ export function useThreadComposerState() {
         commandId: CommandId.make(metadata.commandId),
         text,
         attachments,
-        modelSelection: draft.modelSelection ?? thread.modelSelection,
+        modelSelection: selectedModelSelection,
         runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
         interactionMode: draft.interactionMode ?? thread.interactionMode,
+        ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
         createdAt: metadata.createdAt,
       });
       clearComposerDraftContent(threadKey);
@@ -169,7 +179,7 @@ export function useThreadComposerState() {
       );
       return null;
     }
-  }, [selectedThreadDetail, selectedThreadShell]);
+  }, [selectedThreadDetail, selectedThreadShell, serverConfig]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {

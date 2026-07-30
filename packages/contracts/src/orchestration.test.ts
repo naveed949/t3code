@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -33,6 +34,7 @@ const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateComma
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
@@ -248,6 +250,87 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("decodes an explicit client skill invocation request without inferring from prose", () =>
+  Effect.gen(function* () {
+    const explicit = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-client",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-client",
+        role: "user",
+        text: "$wayfinder chart a release",
+        attachments: [],
+      },
+      skillInvocationRequest: {
+        skillName: "wayfinder",
+        skillPath: "/skills/wayfinder/SKILL.md",
+        arguments: "chart a release",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(explicit.type, "thread.turn.start");
+    if (explicit.type !== "thread.turn.start") return;
+    assert.deepStrictEqual(explicit.skillInvocationRequest, {
+      skillName: "wayfinder",
+      skillPath: "/skills/wayfinder/SKILL.md",
+      arguments: "chart a release",
+    });
+
+    const prose = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-prose",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-prose",
+        role: "user",
+        text: "Tell me whether Wayfinder would help here",
+        attachments: [],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(prose.type, "thread.turn.start");
+    if (prose.type !== "thread.turn.start") return;
+    assert.strictEqual(prose.skillInvocationRequest, undefined);
+  }),
+);
+
+it.effect("decodes a pinned server skill invocation", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-server",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-server",
+        role: "user",
+        text: "$wayfinder chart a release",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        arguments: "chart a release",
+        execution: {
+          mode: "native",
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.skillInvocation?.skill.name, "wayfinder");
+    assert.strictEqual(parsed.skillInvocation?.execution.mode, "native");
   }),
 );
 

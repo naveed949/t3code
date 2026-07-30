@@ -1,5 +1,7 @@
 import {
   EventId,
+  SkillRunId,
+  WorkstreamId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -740,6 +742,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      const skillInvocation = command.skillInvocation
+        ? {
+            ...command.skillInvocation,
+            workstreamId: WorkstreamId.make(
+              `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
+            ),
+            skillRunId: SkillRunId.make(
+              `skill-run:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
+            ),
+            projectId: targetThread.projectId,
+            threadId: command.threadId,
+            createdAt: command.createdAt,
+          }
+        : undefined;
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -779,6 +795,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(skillInvocation !== undefined ? { skillInvocation } : {}),
           createdAt: command.createdAt,
         },
       };
