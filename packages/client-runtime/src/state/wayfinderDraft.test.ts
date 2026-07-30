@@ -248,6 +248,23 @@ describe("deriveWayfinderDraft", () => {
     expect(draft?.decisionReceipts).toEqual([]);
   });
 
+  it("removes draft-write authority after canonical reconciliation", () => {
+    expect(
+      deriveWayfinderDraft(
+        {
+          ...invocation,
+          wayfinderPublication: {
+            status: "synchronized",
+            artifacts: [],
+            nextStep: null,
+            updatedAt: "2026-01-01T00:05:00.000Z",
+          },
+        },
+        [],
+      ),
+    ).toBeNull();
+  });
+
   it("recovers the latest unpublished run independently of the thread's latest turn", () => {
     const newer = {
       ...invocation,

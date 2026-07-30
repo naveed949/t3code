@@ -40,7 +40,9 @@ describe("ComposerWayfinderDraftPanel", () => {
       ],
     };
 
-    const markup = renderToStaticMarkup(<ComposerWayfinderDraftPanel draft={draft} />);
+    const markup = renderToStaticMarkup(
+      <ComposerWayfinderDraftPanel draft={draft} publication={null} onPublish={() => {}} />,
+    );
 
     expect(markup).toContain("Unpublished Wayfinder draft");
     expect(markup).toContain("Non-canonical");
@@ -105,7 +107,9 @@ describe("ComposerWayfinderDraftPanel", () => {
 
     expect(draft?.decisionReceipts).toHaveLength(1);
     if (draft === null) throw new Error("Expected a recovered Wayfinder draft.");
-    const markup = renderToStaticMarkup(<ComposerWayfinderDraftPanel draft={draft} />);
+    const markup = renderToStaticMarkup(
+      <ComposerWayfinderDraftPanel draft={draft} publication={null} onPublish={() => {}} />,
+    );
     expect(markup).toContain("1 confirmed");
     expect(markup).toContain("Remote ready");
   });

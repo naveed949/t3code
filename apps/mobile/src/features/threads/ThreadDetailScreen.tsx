@@ -59,6 +59,7 @@ export interface ThreadDetailScreenProps {
   readonly activePendingUserInputAnswers: Record<string, string> | null;
   readonly respondingUserInputId: ApprovalRequestId | null;
   readonly wayfinderDraft: WayfinderDraft | null;
+  readonly wayfinderPublication: import("@t3tools/contracts").WayfinderPublication | null;
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
@@ -99,6 +100,7 @@ export interface ThreadDetailScreenProps {
     customAnswer: string,
   ) => void;
   readonly onSubmitUserInput: () => Promise<unknown>;
+  readonly onPublishWayfinderDraft: () => void;
   readonly showContent?: boolean;
 }
 
@@ -407,7 +409,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     />
                   ) : null}
                   {props.wayfinderDraft ? (
-                    <WayfinderDraftCard draft={props.wayfinderDraft} />
+                    <WayfinderDraftCard
+                      draft={props.wayfinderDraft}
+                      publication={props.wayfinderPublication}
+                      onPublish={props.onPublishWayfinderDraft}
+                    />
                   ) : null}
                   {props.activePendingUserInput ? (
                     <PendingUserInputCard

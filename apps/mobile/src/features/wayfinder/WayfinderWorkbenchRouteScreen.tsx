@@ -12,7 +12,7 @@ import { Atom } from "effect/unstable/reactivity";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { environmentThreadShells } from "../../state/threads";
+import { environmentThreadDetails, environmentThreadShells } from "../../state/threads";
 import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
 
 const EMPTY_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
@@ -101,7 +101,10 @@ function WayfinderWorkbenchContent(props: {
     ) ?? EMPTY_WORKSTREAMS_ATOM,
   );
   const workstream = findThreadWayfinderWorkstream(props.threadId, workstreams);
-  const map = workstream?.wayfinderMap ?? null;
+  const thread = useAtomValue(
+    environmentThreadDetails.detailAtom(scopeThreadRef(props.environmentId, props.threadId)),
+  );
+  const map = workstream?.wayfinderMap ?? thread?.latestTurn?.skillInvocation?.wayfinderMap ?? null;
   if (!map) {
     return (
       <View className="flex-1 items-center justify-center bg-background p-6">

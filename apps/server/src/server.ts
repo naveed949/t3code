@@ -53,6 +53,8 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
+import { WayfinderPublicationReactorLive } from "./orchestration/Layers/WayfinderPublicationReactor.ts";
+import * as IssueTracker from "./nativeSkills/IssueTracker.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
@@ -207,12 +209,19 @@ const PlatformServicesLive = Layer.unwrap(
   }),
 );
 
+const WayfinderIssueTrackerLayerLive = IssueTracker.GitHubIssueTrackerLive.pipe(
+  Layer.provideMerge(GitHubCli.layer),
+  Layer.provideMerge(RepositoryIdentityResolver.layer),
+);
+
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(WayfinderPublicationReactorLive),
+  Layer.provideMerge(WayfinderIssueTrackerLayerLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );

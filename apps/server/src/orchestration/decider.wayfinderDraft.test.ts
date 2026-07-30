@@ -4,8 +4,10 @@ import {
   EventId,
   ProjectId,
   ProviderInstanceId,
+  SkillRunId,
   ThreadId,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
@@ -130,6 +132,109 @@ it.layer(NodeServices.layer)("Wayfinder draft command safety", (it) => {
       });
       expect(failure).toMatchObject({
         detail: expect.stringContaining("unpublished draft"),
+      });
+    }),
+  );
+
+  it.effect("records publication against the thread's existing runtime permission mode", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-wayfinder-publish");
+      const threadId = ThreadId.make("thread-wayfinder-publish");
+      const skillRunId = SkillRunId.make("skill-run:publish");
+      let readModel = yield* projectEvent(createEmptyReadModel(now), {
+        sequence: 1,
+        eventId: EventId.make("event-publish-project"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        type: "project.created",
+        occurredAt: now,
+        commandId: CommandId.make("command-publish-project"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-publish-project"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Wayfinder",
+          workspaceRoot: "/tmp/wayfinder",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      readModel = yield* projectEvent(readModel, {
+        sequence: 2,
+        eventId: EventId.make("event-publish-thread"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.created",
+        occurredAt: now,
+        commandId: CommandId.make("command-publish-thread"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-publish-thread"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Wayfinder",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.3-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      readModel = yield* projectEvent(readModel, {
+        sequence: 3,
+        eventId: EventId.make("event-publish-draft"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.activity-appended",
+        occurredAt: now,
+        commandId: CommandId.make("command-publish-draft"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-publish-draft"),
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make("activity-publish-draft"),
+            tone: "info",
+            kind: "wayfinder.draft.started",
+            summary: "Unpublished Wayfinder draft started",
+            payload: { skillRunId },
+            turnId: null,
+            createdAt: now,
+          },
+        },
+      });
+
+      const event = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.publish",
+          commandId: CommandId.make("command-publish"),
+          threadId,
+          skillRunId,
+          confirmed: false,
+          createdAt: now,
+        },
+      });
+
+      expect(event).toMatchObject({
+        type: "thread.wayfinder-publication-requested",
+        payload: {
+          threadId,
+          skillRunId,
+          runtimeMode: "approval-required",
+          confirmed: false,
+        },
       });
     }),
   );

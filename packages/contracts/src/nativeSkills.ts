@@ -71,3 +71,40 @@ export const WayfinderDraft = Schema.Struct({
 export type WayfinderDraft = typeof WayfinderDraft.Type;
 
 export const OptionalWayfinderDraft = Schema.optional(WayfinderDraft);
+
+export const WayfinderPublicationArtifact = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("label"),
+    name: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("issue"),
+    key: TrimmedNonEmptyString,
+    number: Schema.Int.check(Schema.isGreaterThan(0)),
+    url: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("child"),
+    key: TrimmedNonEmptyString,
+    parentNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+    childNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("blocked-by"),
+    key: TrimmedNonEmptyString,
+    blockedNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+    blockerNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+]);
+export type WayfinderPublicationArtifact = typeof WayfinderPublicationArtifact.Type;
+
+export const WayfinderPublication = Schema.Struct({
+  status: Schema.Literals(["awaiting-approval", "publishing", "failed", "synchronized"]),
+  artifacts: Schema.Array(WayfinderPublicationArtifact),
+  nextStep: Schema.NullOr(TrimmedNonEmptyString),
+  error: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type WayfinderPublication = typeof WayfinderPublication.Type;
+
+export const OptionalWayfinderPublication = Schema.optional(WayfinderPublication);

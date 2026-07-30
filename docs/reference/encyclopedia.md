@@ -130,6 +130,13 @@ The structured record of the user's answer to a Decision Card. A matching
 `user-input.requested`/`user-input.resolved` pair produces the receipt and moves the proposal into
 confirmed draft state. See [wayfinderDraft.ts][27].
 
+#### Wayfinder publication
+
+The permission-aware server reactor that turns one confirmed unpublished draft into a canonical
+GitHub map. Its persisted progress records verified labels, issues, child relationships, blocking
+relationships, and the exact next step. Publication can resume those receipts idempotently; only a
+successful canonical reconciliation transfers authority to the synchronized Workbench projection.
+
 #### Receipt
 
 A lightweight typed runtime signal emitted when an async milestone completes. See [RuntimeReceiptBus.ts][13].

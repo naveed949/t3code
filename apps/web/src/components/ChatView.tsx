@@ -1191,6 +1191,9 @@ function ChatViewContent(props: ChatViewProps) {
   const respondToThreadUserInput = useAtomCommand(threadEnvironment.respondToUserInput, {
     reportFailure: false,
   });
+  const publishWayfinderDraftCommand = useAtomCommand(threadEnvironment.publishWayfinderDraft, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1630,7 +1633,10 @@ function ChatViewContent(props: ChatViewProps) {
   const activeWayfinderWorkstream = activeThread
     ? findThreadWayfinderWorkstream(activeThread.id, activeProjectWorkstreams)
     : null;
-  const activeWayfinderMap = activeWayfinderWorkstream?.wayfinderMap ?? null;
+  const activeWayfinderMap =
+    activeWayfinderWorkstream?.wayfinderMap ??
+    activeLatestTurn?.skillInvocation?.wayfinderMap ??
+    null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -2017,15 +2023,14 @@ function ChatViewContent(props: ChatViewProps) {
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
   );
+  const latestWayfinderDraftInvocation =
+    activeLatestTurn?.skillInvocation ??
+    findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id);
   const wayfinderDraft = useMemo(
-    () =>
-      deriveWayfinderDraft(
-        findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id) ??
-          activeLatestTurn?.skillInvocation,
-        threadActivities,
-      ),
-    [activeLatestTurn?.skillInvocation, activeThread?.id, environmentSkillRuns, threadActivities],
+    () => deriveWayfinderDraft(latestWayfinderDraftInvocation, threadActivities),
+    [latestWayfinderDraftInvocation, threadActivities],
   );
+  const wayfinderPublication = latestWayfinderDraftInvocation?.wayfinderPublication ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
     () =>
@@ -5009,6 +5014,33 @@ function ChatViewContent(props: ChatViewProps) {
     [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
   );
 
+  const onPublishWayfinderDraft = useCallback(async () => {
+    if (!activeThreadId || !wayfinderDraft || !latestWayfinderDraftInvocation) return;
+    const result = await publishWayfinderDraftCommand({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        skillRunId: latestWayfinderDraftInvocation.skillRunId,
+        confirmed: wayfinderPublication?.status === "awaiting-approval",
+      },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setThreadError(
+        activeThreadId,
+        error instanceof Error ? error.message : "Failed to start Wayfinder publication.",
+      );
+    }
+  }, [
+    activeThreadId,
+    environmentId,
+    latestWayfinderDraftInvocation,
+    publishWayfinderDraftCommand,
+    setThreadError,
+    wayfinderDraft,
+    wayfinderPublication?.status,
+  ]);
+
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
       if (!activePendingUserInput) {
@@ -5929,6 +5961,8 @@ function ChatViewContent(props: ChatViewProps) {
                             activePendingQuestionIndex={activePendingQuestionIndex}
                             respondingRequestIds={respondingRequestIds}
                             wayfinderDraft={wayfinderDraft}
+                            wayfinderPublication={wayfinderPublication}
+                            onPublishWayfinderDraft={onPublishWayfinderDraft}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
                             activePlan={activePlan as { turnId?: TurnId } | null}

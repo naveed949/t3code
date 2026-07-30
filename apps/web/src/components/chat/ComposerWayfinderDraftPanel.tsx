@@ -1,10 +1,16 @@
-import type { WayfinderDraft } from "@t3tools/contracts";
+import type { WayfinderDraft, WayfinderPublication } from "@t3tools/contracts";
 import { memo } from "react";
 
 export const ComposerWayfinderDraftPanel = memo(function ComposerWayfinderDraftPanel(props: {
   readonly draft: WayfinderDraft;
+  readonly publication: WayfinderPublication | null;
+  readonly onPublish: () => void;
 }) {
   const pending = props.draft.proposedDecisions[0];
+  const canPublish =
+    !pending && props.draft.destination !== null && props.draft.candidateTickets.length > 0;
+  const isWorking = props.publication?.status === "publishing";
+  const needsApproval = props.publication?.status === "awaiting-approval";
   return (
     <section
       aria-label="Unpublished Wayfinder draft"
@@ -42,6 +48,31 @@ export const ComposerWayfinderDraftPanel = memo(function ComposerWayfinderDraftP
           ) : null}
         </div>
       ) : null}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          {props.publication?.status === "failed"
+            ? `Publication paused · ${props.publication.nextStep}`
+            : props.publication?.status === "publishing"
+              ? `Publishing · ${props.publication.nextStep}`
+              : needsApproval
+                ? "GitHub publication needs confirmation"
+                : "Ready to publish as canonical GitHub issues"}
+        </p>
+        <button
+          type="button"
+          disabled={!canPublish || isWorking}
+          onClick={props.onPublish}
+          className="rounded-md border border-amber-600/30 bg-background px-3 py-1.5 text-xs font-medium text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {needsApproval
+            ? "Confirm publication"
+            : props.publication?.status === "failed"
+              ? "Resume publication"
+              : isWorking
+                ? "Publishing…"
+                : "Publish to GitHub"}
+        </button>
+      </div>
     </section>
   );
 });
