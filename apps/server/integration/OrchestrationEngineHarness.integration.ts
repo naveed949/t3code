@@ -60,6 +60,7 @@ import {
 } from "../src/orchestration/Services/OrchestrationEngine.ts";
 import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDeletionReactor.ts";
 import { WayfinderPublicationReactor } from "../src/orchestration/Services/WayfinderPublicationReactor.ts";
+import { WayfinderMutationReactor } from "../src/orchestration/Services/WayfinderMutationReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -369,6 +370,12 @@ export const makeOrchestrationIntegrationHarness = (
       ),
       Layer.provideMerge(
         Layer.succeed(WayfinderPublicationReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(WayfinderMutationReactor, {
           start: () => Effect.void,
           drain: Effect.void,
         }),

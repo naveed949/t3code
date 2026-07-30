@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   EventId,
+  type OrchestrationCommand,
   type OrchestrationEvent,
   ProjectId,
   ProviderInstanceId,
@@ -25,11 +26,11 @@ import {
   RuntimeReceiptBus,
   type OrchestrationRuntimeReceipt,
 } from "../Services/RuntimeReceiptBus.ts";
+import { makeWayfinderPublicationReactor } from "./WayfinderPublicationReactor.ts";
 import {
   makeWayfinderPublicationProcessor,
-  makeWayfinderPublicationReactor,
   makeWayfinderMutationProcessor,
-} from "./WayfinderPublicationReactor.ts";
+} from "./WayfinderProcessors.ts";
 
 const unusedMutationTrackerMethods = {
   updateWayfinderMapField: () => Effect.die("unexpected tracker write"),
@@ -42,7 +43,7 @@ const unusedMutationTrackerMethods = {
   setIssueState: () => Effect.die("unexpected tracker write"),
 };
 
-it.effect("applies a structured mutation and publishes only the reconciled GitHub projection", () =>
+it.effect("corrects optimistic state from GitHub when the initial reconciliation fails", () =>
   Effect.gen(function* () {
     const now = "2026-07-30T10:05:00.000Z";
     const threadId = ThreadId.make("thread:mutation");
@@ -89,9 +90,10 @@ it.effect("applies a structured mutation and publishes only the reconciled GitHu
       createdAt: now,
       wayfinderMap: map,
     };
-    const dispatched: Array<{ readonly type: string; readonly mutation?: unknown }> = [];
+    const dispatched: OrchestrationCommand[] = [];
     const receipts: OrchestrationRuntimeReceipt[] = [];
     const writes: string[] = [];
+    let reconciliationReads = 0;
     const dependencies = Layer.mergeAll(
       NodeServices.layer,
       Layer.succeed(OrchestrationEngineService, {
@@ -160,12 +162,17 @@ it.effect("applies a structured mutation and publishes only the reconciled GitHu
           inspectCapabilities: () => Effect.die("unexpected tracker read"),
           resolveIssue: () => Effect.die("unexpected tracker read"),
           loadWayfinderMap: () =>
-            Effect.succeed({
-              kind: "loaded" as const,
-              map: {
-                ...map,
-                tickets: [{ ...map.tickets[0]!, title: "New title" }],
-              },
+            Effect.sync(() => {
+              reconciliationReads += 1;
+              return reconciliationReads === 1
+                ? ({ kind: "truncated" } as const)
+                : ({
+                    kind: "loaded",
+                    map: {
+                      ...map,
+                      tickets: [{ ...map.tickets[0]!, title: "New title" }],
+                    },
+                  } as const);
             }),
           ensureLabel: () => Effect.die("unexpected tracker write"),
           createIssue: () => Effect.die("unexpected tracker write"),
@@ -216,6 +223,10 @@ it.effect("applies a structured mutation and publishes only the reconciled GitHu
       receipts.map((receipt) => receipt.type),
       ["wayfinder.mutation.progress", "wayfinder.mutation.progress"],
     );
+    const correction = dispatched.at(-1);
+    assert(correction?.type === "thread.wayfinder.mutation.update");
+    assert.strictEqual(correction.mutation.status, "failed");
+    assert.strictEqual(correction.wayfinderMap?.tickets[0]?.title, "New title");
   }),
 );
 

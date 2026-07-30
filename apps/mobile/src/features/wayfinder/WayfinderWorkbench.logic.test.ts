@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
+import {
+  createWayfinderTicketAction,
+  WAYFINDER_TICKET_CLASSIFICATIONS,
+} from "@t3tools/client-runtime/state/wayfinder-workbench";
 
 const map = {
   canonicalReference: {
@@ -51,5 +55,14 @@ describe("buildMobileWayfinderPresentation", () => {
     expect(presentation.graphAccessibilityLabel).toContain(
       "Research hosting enables Choose deployment",
     );
+  });
+
+  it("offers every ticket classification and builds the selected create action", () => {
+    expect(WAYFINDER_TICKET_CLASSIFICATIONS).toEqual(["research", "prototype", "grilling", "task"]);
+    expect(createWayfinderTicketAction("Prototype sync", "prototype")).toEqual({
+      kind: "create-ticket",
+      title: "Prototype sync",
+      classification: "prototype",
+    });
   });
 });

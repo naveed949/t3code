@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOptimisticWayfinderMutation,
+  createWayfinderTicketAction,
   deriveWayfinderWorkbenchModel,
+  isWayfinderMutationInFlight,
 } from "./wayfinderWorkbench.ts";
 
 const map = {
@@ -95,5 +97,32 @@ describe("applyOptimisticWayfinderMutation", () => {
         (ticket) => ticket.number === 43,
       )?.title,
     ).toBe("Research hosting");
+  });
+
+  it("keeps approval and mutation in flight, then clears on a GitHub receipt", () => {
+    const mutation = {
+      actionId: "action:close",
+      action: { kind: "close-ticket" as const, ticketNumber: 43 },
+      status: "awaiting-approval" as const,
+      error: null,
+      updatedAt: "2026-01-02T00:01:00.000Z",
+    };
+    expect(isWayfinderMutationInFlight(mutation)).toBe(true);
+    expect(
+      applyOptimisticWayfinderMutation(map, mutation).tickets.find((ticket) => ticket.number === 43)
+        ?.state,
+    ).toBe("closed");
+    expect(isWayfinderMutationInFlight({ ...mutation, status: "synchronized" })).toBe(false);
+  });
+});
+
+describe("createWayfinderTicketAction", () => {
+  it("trims the title and preserves the selected client classification", () => {
+    expect(createWayfinderTicketAction("  Research hosting  ", "research")).toEqual({
+      kind: "create-ticket",
+      title: "Research hosting",
+      classification: "research",
+    });
+    expect(createWayfinderTicketAction("  ", "task")).toBeNull();
   });
 });

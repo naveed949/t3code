@@ -380,6 +380,45 @@ export const GitHubIssueTrackerLive = Layer.effect(
         cause: new Error(`GitHub returned no node id for issue #${input.issueNumber}.`),
       });
     });
+    const updateIssueBody = Effect.fn("IssueTracker.updateIssueBody")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly transform: (body: string) => string;
+    }) {
+      const current = yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "view",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--json",
+          "body",
+        ],
+      });
+      const decoded = decodeIssueBodyProbe(current.stdout);
+      if (Option.isNone(decoded)) {
+        return yield* new GitHubCli.GitHubCliCommandError({
+          command: "gh",
+          cwd: input.cwd,
+          cause: new Error(`GitHub returned no body for map #${input.issueNumber}.`),
+        });
+      }
+      yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "edit",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--body",
+          input.transform(decoded.value.body),
+        ],
+      });
+    });
 
     return IssueTracker.of({
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
@@ -702,72 +741,20 @@ export const GitHubIssueTrackerLive = Layer.effect(
         });
       }),
       updateWayfinderMapField: Effect.fn("IssueTracker.updateWayfinderMapField")(function* (input) {
-        const current = yield* github.execute({
+        yield* updateIssueBody({
           cwd: input.cwd,
-          args: [
-            "issue",
-            "view",
-            String(input.issueNumber),
-            "--repo",
-            repositoryReference(input.repository),
-            "--json",
-            "body",
-          ],
-        });
-        const decoded = decodeIssueBodyProbe(current.stdout);
-        if (Option.isNone(decoded)) {
-          return yield* new GitHubCli.GitHubCliCommandError({
-            command: "gh",
-            cwd: input.cwd,
-            cause: new Error(`GitHub returned no body for map #${input.issueNumber}.`),
-          });
-        }
-        yield* github.execute({
-          cwd: input.cwd,
-          args: [
-            "issue",
-            "edit",
-            String(input.issueNumber),
-            "--repo",
-            repositoryReference(input.repository),
-            "--body",
-            replaceWayfinderMapSection(decoded.value.body, input.field, input.value),
-          ],
+          repository: input.repository,
+          issueNumber: input.issueNumber,
+          transform: (body) => replaceWayfinderMapSection(body, input.field, input.value),
         });
       }),
       updateWayfinderDecisions: Effect.fn("IssueTracker.updateWayfinderDecisions")(
         function* (input) {
-          const current = yield* github.execute({
+          yield* updateIssueBody({
             cwd: input.cwd,
-            args: [
-              "issue",
-              "view",
-              String(input.issueNumber),
-              "--repo",
-              repositoryReference(input.repository),
-              "--json",
-              "body",
-            ],
-          });
-          const decoded = decodeIssueBodyProbe(current.stdout);
-          if (Option.isNone(decoded)) {
-            return yield* new GitHubCli.GitHubCliCommandError({
-              command: "gh",
-              cwd: input.cwd,
-              cause: new Error(`GitHub returned no body for map #${input.issueNumber}.`),
-            });
-          }
-          yield* github.execute({
-            cwd: input.cwd,
-            args: [
-              "issue",
-              "edit",
-              String(input.issueNumber),
-              "--repo",
-              repositoryReference(input.repository),
-              "--body",
-              replaceMapSection(decoded.value.body, "Decisions So Far", input.value),
-            ],
+            repository: input.repository,
+            issueNumber: input.issueNumber,
+            transform: (body) => replaceMapSection(body, "Decisions So Far", input.value),
           });
         },
       ),

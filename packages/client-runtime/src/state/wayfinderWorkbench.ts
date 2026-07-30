@@ -1,8 +1,32 @@
 import type {
   WayfinderMapProjection,
   WayfinderMutation,
+  WayfinderMutationAction,
   WayfinderTicketState,
 } from "@t3tools/contracts";
+
+export const WAYFINDER_TICKET_CLASSIFICATIONS = [
+  "research",
+  "prototype",
+  "grilling",
+  "task",
+] as const;
+
+export type WayfinderTicketClassification = (typeof WAYFINDER_TICKET_CLASSIFICATIONS)[number];
+
+export function isWayfinderMutationInFlight(mutation: WayfinderMutation | null): boolean {
+  return mutation?.status === "awaiting-approval" || mutation?.status === "mutating";
+}
+
+export function createWayfinderTicketAction(
+  title: string,
+  classification: WayfinderTicketClassification,
+): WayfinderMutationAction | null {
+  const trimmedTitle = title.trim();
+  return trimmedTitle === ""
+    ? null
+    : { kind: "create-ticket", title: trimmedTitle, classification };
+}
 
 export interface WayfinderWorkbenchNode {
   readonly ticketNumber: number;
@@ -28,7 +52,7 @@ export function applyOptimisticWayfinderMutation(
   map: WayfinderMapProjection,
   mutation: WayfinderMutation | null,
 ): WayfinderMapProjection {
-  if (!mutation || (mutation.status !== "awaiting-approval" && mutation.status !== "mutating")) {
+  if (!mutation || !isWayfinderMutationInFlight(mutation)) {
     return map;
   }
   const action = mutation.action;

@@ -1,5 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
-import { applyOptimisticWayfinderMutation } from "@t3tools/client-runtime/state/wayfinder-workbench";
+import {
+  applyOptimisticWayfinderMutation,
+  createWayfinderTicketAction,
+  isWayfinderMutationInFlight,
+  WAYFINDER_TICKET_CLASSIFICATIONS,
+  type WayfinderTicketClassification,
+} from "@t3tools/client-runtime/state/wayfinder-workbench";
 import {
   findThreadWayfinderWorkstream,
   type ProjectSkillWorkstream,
@@ -13,7 +19,7 @@ import {
   type WayfinderMutationAction,
 } from "@t3tools/contracts";
 import type { StaticScreenProps } from "@react-navigation/native";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -31,8 +37,6 @@ type WayfinderWorkbenchRouteParams = {
   threadId: string;
 };
 
-const classifications = ["research", "prototype", "grilling", "task"] as const;
-
 function TicketActions(props: {
   readonly ticket: WayfinderMapProjection["tickets"][number];
   readonly disabled: boolean;
@@ -41,8 +45,12 @@ function TicketActions(props: {
   const [value, setValue] = useState(props.ticket.title);
   const [resolution, setResolution] = useState("");
   const nextClassification =
-    classifications[
-      (classifications.indexOf(props.ticket.classification as never) + 1) % classifications.length
+    WAYFINDER_TICKET_CLASSIFICATIONS[
+      (WAYFINDER_TICKET_CLASSIFICATIONS.indexOf(
+        props.ticket.classification as WayfinderTicketClassification,
+      ) +
+        1) %
+        WAYFINDER_TICKET_CLASSIFICATIONS.length
     ] ?? "research";
   return (
     <View className="mt-3 gap-2 border-t border-border pt-3">
@@ -60,13 +68,13 @@ function TicketActions(props: {
       />
       <View className="flex-row flex-wrap gap-2">
         <Pressable
-          disabled={props.disabled}
+          disabled={props.disabled || !value.trim()}
           className="rounded-lg border border-border px-3 py-2"
           onPress={() =>
             props.onMutate({
               kind: "rename-ticket",
               ticketNumber: props.ticket.number,
-              title: value,
+              title: value.trim(),
             })
           }
         >
@@ -212,24 +220,23 @@ function WayfinderWorkbenchContent(props: {
   const canonicalMap = workstream?.wayfinderMap ?? invocation?.wayfinderMap ?? null;
   const mutation: WayfinderMutation | null = invocation?.wayfinderMutation ?? null;
   const map = canonicalMap ? applyOptimisticWayfinderMutation(canonicalMap, mutation) : null;
-  if (!map) {
-    return (
-      <View className="flex-1 items-center justify-center bg-background p-6">
-        <Text className="text-center text-sm text-foreground-muted">
-          No synchronized Wayfinder map is linked to this thread.
-        </Text>
-      </View>
-    );
-  }
-  const presentation = buildMobileWayfinderPresentation(map);
-  const [destination, setDestination] = useState(map.destination);
-  const [notes, setNotes] = useState(map.notes);
-  const [fog, setFog] = useState(map.fogOfWar.join("\n"));
-  const [outOfScope, setOutOfScope] = useState(map.outOfScope.join("\n"));
+  const [destination, setDestination] = useState(canonicalMap?.destination ?? "");
+  const [notes, setNotes] = useState(canonicalMap?.notes ?? "");
+  const [fog, setFog] = useState(canonicalMap?.fogOfWar.join("\n") ?? "");
+  const [outOfScope, setOutOfScope] = useState(canonicalMap?.outOfScope.join("\n") ?? "");
   const [newTicketTitle, setNewTicketTitle] = useState("");
+  const [newTicketClassification, setNewTicketClassification] =
+    useState<WayfinderTicketClassification>("grilling");
   const [blocker, setBlocker] = useState("");
   const [blocked, setBlocked] = useState("");
-  const working = mutation?.status === "mutating" || mutation?.status === "awaiting-approval";
+  useEffect(() => {
+    if (!canonicalMap) return;
+    setDestination(canonicalMap.destination);
+    setNotes(canonicalMap.notes);
+    setFog(canonicalMap.fogOfWar.join("\n"));
+    setOutOfScope(canonicalMap.outOfScope.join("\n"));
+  }, [canonicalMap?.lastSynchronizedAt]);
+  const working = isWayfinderMutationInFlight(mutation);
   const onMutate = (action: WayfinderMutationAction, confirmed = false) => {
     if (!invocation) return;
     void mutateWayfinder({
@@ -243,6 +250,16 @@ function WayfinderWorkbenchContent(props: {
       },
     });
   };
+  if (!map) {
+    return (
+      <View className="flex-1 items-center justify-center bg-background p-6">
+        <Text className="text-center text-sm text-foreground-muted">
+          No synchronized Wayfinder map is linked to this thread.
+        </Text>
+      </View>
+    );
+  }
+  const presentation = buildMobileWayfinderPresentation(map);
 
   return (
     <ScrollView
@@ -355,19 +372,33 @@ function WayfinderWorkbenchContent(props: {
           value={newTicketTitle}
           onChangeText={setNewTicketTitle}
         />
+        <View
+          accessibilityLabel={`New ticket classification: ${newTicketClassification}`}
+          className="flex-row flex-wrap gap-2"
+        >
+          {WAYFINDER_TICKET_CLASSIFICATIONS.map((classification) => (
+            <Pressable
+              key={classification}
+              accessibilityRole="button"
+              accessibilityState={{ selected: classification === newTicketClassification }}
+              disabled={working}
+              className="rounded-lg border border-border px-3 py-2"
+              onPress={() => setNewTicketClassification(classification)}
+            >
+              <Text className="text-xs font-semibold">{classification}</Text>
+            </Pressable>
+          ))}
+        </View>
         <Pressable
           accessibilityRole="button"
           disabled={working || !newTicketTitle.trim()}
           className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            onMutate({
-              kind: "create-ticket",
-              title: newTicketTitle.trim(),
-              classification: "grilling",
-            })
-          }
+          onPress={() => {
+            const action = createWayfinderTicketAction(newTicketTitle, newTicketClassification);
+            if (action) onMutate(action);
+          }}
         >
-          <Text className="text-xs font-semibold">Create grilling ticket</Text>
+          <Text className="text-xs font-semibold">Create {newTicketClassification} ticket</Text>
         </Pressable>
         <View className="flex-row gap-2">
           <TextInput

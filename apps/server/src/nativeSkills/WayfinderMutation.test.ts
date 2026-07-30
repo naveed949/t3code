@@ -3,6 +3,7 @@ import { it } from "@effect/vitest";
 import { describe, expect } from "vite-plus/test";
 
 import { applyWayfinderMutation, type WayfinderMutationTracker } from "./WayfinderMutation.ts";
+import type { WayfinderMutationAction } from "@t3tools/contracts";
 
 const map = {
   canonicalReference: {
@@ -81,4 +82,38 @@ describe("applyWayfinderMutation", () => {
       expect(log).toEqual(["remove:8->9"]);
     }),
   );
+
+  const actionCases: ReadonlyArray<readonly [WayfinderMutationAction, string]> = [
+    [
+      { kind: "update-map-field", field: "destination", value: "Ship confidently" },
+      "map:destination:Ship confidently",
+    ],
+    [
+      { kind: "create-ticket", title: "Choose a host", classification: "research" },
+      "create:Choose a host",
+    ],
+    [{ kind: "classify-ticket", ticketNumber: 8, classification: "prototype" }, "classify:8"],
+    [{ kind: "add-dependency", blockerNumber: 8, blockedNumber: 9 }, "add:8->9"],
+    [{ kind: "resolve-ticket", ticketNumber: 8, resolution: "Use Fly" }, "resolve:8"],
+    [{ kind: "close-ticket", ticketNumber: 8 }, "closed:8"],
+    [{ kind: "reopen-ticket", ticketNumber: 8 }, "open:8"],
+  ];
+
+  for (const [action, expectedWrite] of actionCases) {
+    it.effect(`dispatches only the ${action.kind} tracker operation`, () =>
+      Effect.gen(function* () {
+        const log: string[] = [];
+        yield* applyWayfinderMutation(
+          {
+            actionId: `action:${action.kind}`,
+            action,
+            synchronizedAt: "2026-07-30T10:05:00.000Z",
+          },
+          tracker(log),
+        );
+
+        expect(log).toEqual([expectedWrite]);
+      }),
+    );
+  }
 });

@@ -1,6 +1,10 @@
 import {
   applyOptimisticWayfinderMutation,
+  createWayfinderTicketAction,
   deriveWayfinderWorkbenchModel,
+  isWayfinderMutationInFlight,
+  WAYFINDER_TICKET_CLASSIFICATIONS,
+  type WayfinderTicketClassification,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
 import type {
   WayfinderMapProjection,
@@ -40,8 +44,6 @@ function TextList(props: { readonly items: ReadonlyArray<string>; readonly empty
   );
 }
 
-const classifications = ["research", "prototype", "grilling", "task"] as const;
-
 function EditingControls(props: {
   readonly map: WayfinderMapProjection;
   readonly mutation: WayfinderMutation | null;
@@ -62,8 +64,7 @@ function EditingControls(props: {
   const [value, setValue] = useState(fieldValue);
   useEffect(() => setValue(fieldValue), [fieldValue]);
   const [title, setTitle] = useState("");
-  const [classification, setClassification] =
-    useState<(typeof classifications)[number]>("grilling");
+  const [classification, setClassification] = useState<WayfinderTicketClassification>("grilling");
   const [ticketNumber, setTicketNumber] = useState(props.map.tickets[0]?.number ?? 0);
   const [ticketAction, setTicketAction] = useState<
     "rename" | "classify" | "resolve" | "close" | "reopen"
@@ -71,8 +72,7 @@ function EditingControls(props: {
   const [ticketValue, setTicketValue] = useState("");
   const [blockerNumber, setBlockerNumber] = useState(props.map.tickets[0]?.number ?? 0);
   const [blockedNumber, setBlockedNumber] = useState(props.map.tickets[1]?.number ?? 0);
-  const working =
-    props.mutation?.status === "mutating" || props.mutation?.status === "awaiting-approval";
+  const working = isWayfinderMutationInFlight(props.mutation);
   const inputClass = "rounded-md border border-border bg-background px-2 py-1.5 text-xs";
 
   const submitTicketAction = () => {
@@ -176,7 +176,7 @@ function EditingControls(props: {
             value={classification}
             onChange={(event) => setClassification(event.target.value as typeof classification)}
           >
-            {classifications.map((item) => (
+            {WAYFINDER_TICKET_CLASSIFICATIONS.map((item) => (
               <option key={item} value={item}>
                 {item}
               </option>
@@ -186,9 +186,10 @@ function EditingControls(props: {
             type="button"
             disabled={working || !title.trim()}
             className="rounded-md border px-2 py-1 text-xs"
-            onClick={() =>
-              props.onMutate({ kind: "create-ticket", title: title.trim(), classification })
-            }
+            onClick={() => {
+              const action = createWayfinderTicketAction(title, classification);
+              if (action) props.onMutate(action);
+            }}
           >
             Create ticket
           </button>
@@ -229,7 +230,7 @@ function EditingControls(props: {
                 value={classification}
                 onChange={(event) => setClassification(event.target.value as typeof classification)}
               >
-                {classifications.map((item) => (
+                {WAYFINDER_TICKET_CLASSIFICATIONS.map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
