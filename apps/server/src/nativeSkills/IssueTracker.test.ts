@@ -69,25 +69,65 @@ it.effect("resolves a GitHub project and reads its native issue capabilities", (
                   JSON.stringify({
                     hasIssuesEnabled: true,
                     viewerPermission: "WRITE",
-                    labels: [{ name: "wayfinder:map" }, { name: "wayfinder:decision" }],
                   }),
                 ),
               )
-            : Effect.succeed(
-                output(
-                  JSON.stringify({
-                    data: {
-                      __type: {
-                        fields: [
-                          { name: "subIssues" },
-                          { name: "blockedBy" },
-                          { name: "blocking" },
-                        ],
+            : args[0] === "label"
+              ? Effect.succeed(
+                  output(
+                    JSON.stringify([{ name: "wayfinder:map" }, { name: "wayfinder:decision" }]),
+                  ),
+                )
+              : Effect.succeed(
+                  output(
+                    JSON.stringify({
+                      data: {
+                        __type: {
+                          fields: [
+                            { name: "addSubIssue" },
+                            { name: "removeSubIssue" },
+                            { name: "addBlockedBy" },
+                            { name: "removeBlockedBy" },
+                          ],
+                        },
                       },
+                    }),
+                  ),
+                ),
+      }),
+    ),
+  ),
+);
+
+it.effect("requires a parsed authenticated GitHub CLI account", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    assert.deepStrictEqual(yield* tracker.inspectGitHubCli("/project"), {
+      available: true,
+      authenticated: false,
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) =>
+          Effect.succeed(
+            output(
+              args[0] === "--version"
+                ? "gh version 2"
+                : JSON.stringify({
+                    hosts: {
+                      "github.com": [
+                        {
+                          state: "failed",
+                          active: true,
+                          host: "github.com",
+                          login: "octocat",
+                        },
+                      ],
                     },
                   }),
-                ),
-              ),
+            ),
+          ),
       }),
     ),
   ),
@@ -119,3 +159,30 @@ it.effect("resolves only an unambiguous GitHub issue number or URL", () =>
     ),
   ),
 );
+
+it.effect("rejects malformed and cross-repository issue references without invoking gh", () => {
+  let executions = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    for (const reference of [
+      "42 and 43",
+      "https://github.com/other/repository/issues/42",
+      "https://example.com/t3tools/t3code/issues/42",
+    ]) {
+      assert.isNull(
+        yield* tracker.resolveIssue({ cwd: "/project", repository: project!, reference }),
+      );
+    }
+    assert.strictEqual(executions, 0);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () => {
+          executions += 1;
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});

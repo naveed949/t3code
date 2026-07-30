@@ -11,16 +11,22 @@ import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 
-export const VERIFIED_WAYFINDER_CONTENT_DIGEST =
-  "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434";
+import {
+  VERIFIED_WAYFINDER_CONTENT_DIGEST,
+  supportsNativeWayfinderProvider,
+} from "./WayfinderCompatibility.ts";
 
-const NATIVE_WAYFINDER_PROVIDERS: ReadonlySet<string> = new Set(["codex", "claudeAgent"]);
+export { VERIFIED_WAYFINDER_CONTENT_DIGEST } from "./WayfinderCompatibility.ts";
 
 export function resolveNativeSkillExecution(input: {
   readonly provider: ProviderDriverKind;
   readonly skillName: string;
   readonly contentDigest: string;
+  readonly executionPreference?: "generic";
 }): SkillExecution {
+  if (input.executionPreference === "generic") {
+    return { mode: "generic", reason: "user-selected-generic" };
+  }
   if (input.skillName !== "wayfinder") {
     return {
       mode: "generic",
@@ -33,7 +39,7 @@ export function resolveNativeSkillExecution(input: {
       reason: "unsupported-digest",
     };
   }
-  if (!NATIVE_WAYFINDER_PROVIDERS.has(input.provider)) {
+  if (!supportsNativeWayfinderProvider(input.provider)) {
     return {
       mode: "generic",
       reason: "unsupported-provider",
@@ -108,10 +114,14 @@ export const resolveSkillInvocationRequest = Effect.fn("resolveSkillInvocationRe
         contentDigest,
       },
       ...(input.request.arguments ? { arguments: input.request.arguments } : {}),
+      ...(input.request.action ? { action: input.request.action } : {}),
       execution: resolveNativeSkillExecution({
         provider: provider.driver,
         skillName: installedSkill.name,
         contentDigest,
+        ...(input.request.executionPreference
+          ? { executionPreference: input.request.executionPreference }
+          : {}),
       }),
     };
   },

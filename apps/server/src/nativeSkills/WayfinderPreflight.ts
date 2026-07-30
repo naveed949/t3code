@@ -1,11 +1,13 @@
 import type { ProviderDriverKind } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
 
-export const VERIFIED_WAYFINDER_CONTENT_DIGEST =
-  "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434";
+import {
+  VERIFIED_WAYFINDER_CONTENT_DIGEST,
+  supportsNativeWayfinderProvider,
+} from "./WayfinderCompatibility.ts";
+
+export { VERIFIED_WAYFINDER_CONTENT_DIGEST } from "./WayfinderCompatibility.ts";
 
 const REQUIRED_WAYFINDER_LABELS = ["wayfinder:map", "wayfinder:decision"] as const;
-const NATIVE_WAYFINDER_PROVIDERS = new Set(["codex", "claudeAgent"]);
 
 export type WayfinderLaunchIntent =
   | { readonly kind: "new-map" }
@@ -31,21 +33,9 @@ export interface WayfinderPreflightSnapshot {
   readonly repositoryInstructions: { readonly applicable: boolean; readonly loaded: boolean };
 }
 
-/**
- * Provider-neutral read model for issue trackers. It deliberately has no
- * change-request methods: Wayfinder maps are made of Issues and their native
- * relationships, not pull requests.
- */
-export interface WayfinderIssueTracker {
-  readonly resolveProjectRepository: (
-    cwd: string,
-  ) => Effect.Effect<WayfinderPreflightSnapshot["repository"], never>;
-  readonly inspectPreflight: (
-    repository: NonNullable<WayfinderPreflightSnapshot["repository"]>,
-  ) => Effect.Effect<WayfinderPreflightSnapshot["tracker"], never>;
-}
-
 export type WayfinderPreflightCheck =
+  | "launch-selection"
+  | "continuation-issue"
   | "compatible-skill-digest"
   | "supported-provider"
   | "github-repository"
@@ -105,7 +95,7 @@ export function preflightWayfinderLaunch(
         "Install the verified Wayfinder skill version or continue with generic execution.",
     });
   }
-  if (!NATIVE_WAYFINDER_PROVIDERS.has(snapshot.provider)) {
+  if (!supportsNativeWayfinderProvider(snapshot.provider)) {
     blockers.push({
       check: "supported-provider",
       remediation: "Choose a Codex or Claude provider, or continue with generic execution.",
@@ -170,44 +160,4 @@ export function preflightWayfinderLaunch(
     });
   }
   return blockers.length === 0 ? { kind: "ready" } : { kind: "blocked", blockers };
-}
-
-/**
- * Server-side preflight boundary. The injected tracker intentionally exposes
- * only read operations, making it impossible for a failed preflight to create
- * canonical GitHub state through this seam.
- */
-export const runWayfinderPreflight = Effect.fn("runWayfinderPreflight")(function* (input: {
-  readonly cwd: string;
-  readonly skillDigest: string;
-  readonly provider: ProviderDriverKind;
-  readonly githubCli: WayfinderPreflightSnapshot["githubCli"];
-  readonly repositoryInstructions: WayfinderPreflightSnapshot["repositoryInstructions"];
-  readonly issueTracker: WayfinderIssueTracker;
-}) {
-  const repository = yield* input.issueTracker.resolveProjectRepository(input.cwd);
-  const tracker = repository
-    ? yield* input.issueTracker.inspectPreflight(repository)
-    : {
-        supportsIssues: false,
-        canWriteIssues: false,
-        supportsChildRelationships: false,
-        supportsBlockingRelationships: false,
-        labels: [],
-      };
-  return preflightWayfinderLaunch({
-    skillDigest: input.skillDigest,
-    provider: input.provider,
-    repository,
-    githubCli: input.githubCli,
-    tracker,
-    repositoryInstructions: input.repositoryInstructions,
-  });
-});
-
-export function createGenericWayfinderFallback() {
-  return {
-    execution: "generic" as const,
-    message: "Continue with generic Wayfinder execution",
-  };
 }

@@ -88,7 +88,11 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
-import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import {
+  type ComposerCommandItem,
+  ComposerCommandMenu,
+  type NativeSkillMenuAction,
+} from "./ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -1779,22 +1783,42 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const onNativeSkillAction = useCallback(
-    (item: Extract<ComposerCommandItem, { type: "skill" }>) => {
+    (item: Extract<ComposerCommandItem, { type: "skill" }>, action: NativeSkillMenuAction) => {
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
       const request = resolveNativeSkillRunInvocation({
         kind: "native-action",
         skill: item.skill,
+        ...(action === "new-map" || action === "generic"
+          ? { action: { id: "new-map" } }
+          : action === "continue-map"
+            ? { action: { id: "continue-map" } }
+            : {}),
+        ...(action === "generic" ? { executionPreference: "generic" } : {}),
       });
-      if (
-        request &&
-        applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)
-      ) {
+      if (request && "kind" in request && request.kind === "chooser") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `$${item.skill.name} continue-map `,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      if (!request || !("skillName" in request)) return;
+      if (applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)) {
         onExplicitSkillInvocation(request);
         onSend();
       }
     },
-    [applySkillPromptReplacement, onExplicitSkillInvocation, onSend, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      applySkillPromptReplacement,
+      onExplicitSkillInvocation,
+      onSend,
+      resolveActiveComposerTrigger,
+    ],
   );
 
   const onComposerMenuItemHighlighted = useCallback(

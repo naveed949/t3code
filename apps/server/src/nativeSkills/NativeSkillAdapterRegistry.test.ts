@@ -71,6 +71,17 @@ describe("resolveNativeSkillExecution", () => {
       reason: "unregistered-skill",
     });
   });
+
+  it("honors an explicit generic Wayfinder launch on a native-capable provider", () => {
+    expect(
+      resolveNativeSkillExecution({
+        provider: ProviderDriverKind.make("codex"),
+        skillName: "wayfinder",
+        contentDigest: VERIFIED_WAYFINDER_CONTENT_DIGEST,
+        executionPreference: "generic",
+      }),
+    ).toEqual({ mode: "generic", reason: "user-selected-generic" });
+  });
 });
 
 effectIt.layer(NodeServices.layer)("resolveSkillInvocationRequest", (it) => {

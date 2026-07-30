@@ -1,7 +1,9 @@
+import * as NodePath from "@effect/platform-node/NodePath";
 import { assert, it } from "@effect/vitest";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as FileSystem from "effect/FileSystem";
 
 import * as IssueTracker from "./IssueTracker.ts";
 import * as NativeWayfinderPreflightService from "./NativeWayfinderPreflightService.ts";
@@ -22,6 +24,12 @@ const tracker = Layer.mock(IssueTracker.IssueTracker)({
   resolveIssue: () => Effect.succeed(null),
 });
 
+const testLayer = Layer.mergeAll(
+  tracker,
+  FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+  NodePath.layer,
+);
+
 it.effect("returns a ready native preflight from server-owned tracker observations", () =>
   Effect.gen(function* () {
     const preflight = yield* NativeWayfinderPreflightService.make();
@@ -29,8 +37,32 @@ it.effect("returns a ready native preflight from server-owned tracker observatio
       workspaceRoot: "/project",
       provider: ProviderDriverKind.make("codex"),
       skillDigest: VERIFIED_WAYFINDER_CONTENT_DIGEST,
-      repositoryInstructionsLoaded: true,
+      action: { id: "new-map" },
     });
     assert.deepStrictEqual(result, { kind: "ready" });
-  }).pipe(Effect.provide(tracker)),
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("requires an explicit launch choice and a resolvable continuation issue", () =>
+  Effect.gen(function* () {
+    const preflight = yield* NativeWayfinderPreflightService.make();
+    const base = {
+      workspaceRoot: "/project",
+      provider: ProviderDriverKind.make("codex"),
+      skillDigest: VERIFIED_WAYFINDER_CONTENT_DIGEST,
+    };
+    const missingChoice = yield* preflight.check(base);
+    assert.strictEqual(missingChoice.kind, "blocked");
+    if (missingChoice.kind === "blocked") {
+      assert.strictEqual(missingChoice.blockers[0]?.check, "launch-selection");
+    }
+    const missingIssue = yield* preflight.check({
+      ...base,
+      action: { id: "continue-map", reference: "42" },
+    });
+    assert.strictEqual(missingIssue.kind, "blocked");
+    if (missingIssue.kind === "blocked") {
+      assert.strictEqual(missingIssue.blockers[0]?.check, "continuation-issue");
+    }
+  }).pipe(Effect.provide(testLayer)),
 );

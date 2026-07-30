@@ -53,6 +53,8 @@ export type ComposerCommandItem =
       description: string;
     };
 
+export type NativeSkillMenuAction = "run" | "new-map" | "continue-map" | "generic";
+
 type ComposerCommandGroup = {
   id: string;
   label: string | null;
@@ -113,7 +115,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   activeItemId: string | null;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
-  onNativeSkillAction: (item: Extract<ComposerCommandItem, { type: "skill" }>) => void;
+  onNativeSkillAction: (
+    item: Extract<ComposerCommandItem, { type: "skill" }>,
+    action: NativeSkillMenuAction,
+  ) => void;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const groups = useMemo(
@@ -207,7 +212,10 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   isActive: boolean;
   onHighlight: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
-  onNativeSkillAction: (item: Extract<ComposerCommandItem, { type: "skill" }>) => void;
+  onNativeSkillAction: (
+    item: Extract<ComposerCommandItem, { type: "skill" }>,
+    action: NativeSkillMenuAction,
+  ) => void;
 }) {
   const skillSourceLabel =
     props.item.type === "skill" ? formatProviderSkillInstallSource(props.item.skill) : null;
@@ -260,24 +268,36 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       {skillSourceLabel ? (
         <span className="shrink-0 pl-2 text-muted-foreground/70 text-xs">{skillSourceLabel}</span>
       ) : null}
-      {props.item.type === "skill" ? (
-        <button
-          type="button"
-          className="shrink-0 rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-background/70 hover:text-foreground"
-          aria-label={`Run ${props.item.label} as a native skill action`}
-          onMouseDown={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onClick={(event) => {
-            event.stopPropagation();
-            if (skillItem) {
-              props.onNativeSkillAction(skillItem);
-            }
-          }}
-        >
-          Run
-        </button>
+      {skillItem ? (
+        <span className="flex shrink-0 gap-1">
+          {(skillItem.skill.name === "wayfinder"
+            ? (["new-map", "continue-map", "generic"] as const)
+            : (["run"] as const)
+          ).map((action) => (
+            <button
+              key={action}
+              type="button"
+              className="shrink-0 rounded-md border border-border/70 px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-background/70 hover:text-foreground"
+              aria-label={`${action} ${props.item.label}`}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={(event) => {
+                event.stopPropagation();
+                props.onNativeSkillAction(skillItem, action);
+              }}
+            >
+              {action === "new-map"
+                ? "New"
+                : action === "continue-map"
+                  ? "Continue"
+                  : action === "generic"
+                    ? "Generic"
+                    : "Run"}
+            </button>
+          ))}
+        </span>
       ) : null}
     </CommandItem>
   );

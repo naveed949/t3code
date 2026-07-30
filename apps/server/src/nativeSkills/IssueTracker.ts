@@ -6,6 +6,10 @@ import * as Schema from "effect/Schema";
 
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import {
+  findAuthenticatedGitHubAccount,
+  parseGitHubAuthStatus,
+} from "../sourceControl/gitHubAuthStatus.ts";
 
 export interface IssueTrackerRepository {
   readonly canonicalKey: string;
@@ -51,8 +55,8 @@ export class IssueTracker extends Context.Service<
 const RepositoryProbe = Schema.Struct({
   hasIssuesEnabled: Schema.Boolean,
   viewerPermission: Schema.String,
-  labels: Schema.Array(Schema.Struct({ name: Schema.String })),
 });
+const LabelsProbe = Schema.Array(Schema.Struct({ name: Schema.String }));
 const IssueProbe = Schema.Struct({ number: Schema.Number, url: Schema.String });
 const IssueTypeFieldsProbe = Schema.Struct({
   data: Schema.Struct({
@@ -60,6 +64,7 @@ const IssueTypeFieldsProbe = Schema.Struct({
   }),
 });
 const decodeRepositoryProbe = Schema.decodeUnknownOption(Schema.fromJsonString(RepositoryProbe));
+const decodeLabelsProbe = Schema.decodeUnknownOption(Schema.fromJsonString(LabelsProbe));
 const decodeIssueProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueProbe));
 const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(IssueTypeFieldsProbe),
@@ -79,13 +84,22 @@ function repositoryReference(repository: IssueTrackerRepository): string {
   return `${repository.owner}/${repository.name}`;
 }
 
-function resolveGitHubIssueReference(reference: string): string | null {
+function resolveGitHubIssueReference(
+  repository: IssueTrackerRepository,
+  reference: string,
+): string | null {
   const trimmed = reference.trim();
   if (/^#?\d+$/u.test(trimmed)) return trimmed.replace(/^#/u, "");
   try {
     const url = new URL(trimmed);
-    const match = /^\/[^/]+\/[^/]+\/issues\/(\d+)\/?$/u.exec(url.pathname);
-    return url.hostname === "github.com" && match?.[1] ? match[1] : null;
+    const match = /^\/([^/]+)\/([^/]+)\/issues\/(\d+)\/?$/u.exec(url.pathname);
+    const [, owner, name, issueNumber] = match ?? [];
+    return url.hostname === "github.com" &&
+      owner?.toLowerCase() === repository.owner.toLowerCase() &&
+      name?.toLowerCase() === repository.name.toLowerCase() &&
+      issueNumber
+      ? issueNumber
+      : null;
   } catch {
     return null;
   }
@@ -104,7 +118,13 @@ export const GitHubIssueTrackerLive = Layer.effect(
         const authentication = yield* github
           .execute({ cwd, args: ["auth", "status", "--json", "hosts"] })
           .pipe(Effect.option);
-        return { available: true, authenticated: Option.isSome(authentication) };
+        const authenticated = Option.match(authentication, {
+          onNone: () => false,
+          onSome: (result) =>
+            findAuthenticatedGitHubAccount(parseGitHubAuthStatus(result.stdout).accounts) !==
+            undefined,
+        });
+        return { available: true, authenticated };
       }),
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
         const identity = yield* repositories.resolve(cwd);
@@ -121,23 +141,28 @@ export const GitHubIssueTrackerLive = Layer.effect(
         const repositoryOutput = yield* github
           .execute({
             cwd: input.cwd,
-            args: [
-              "repo",
-              "view",
-              repository,
-              "--json",
-              "hasIssuesEnabled,viewerPermission,labels",
-            ],
+            args: ["repo", "view", repository, "--json", "hasIssuesEnabled,viewerPermission"],
           })
           .pipe(Effect.option);
         if (Option.isNone(repositoryOutput)) return noCapabilities;
         const parsedRepository = decodeRepositoryProbe(repositoryOutput.value.stdout);
         if (Option.isNone(parsedRepository)) return noCapabilities;
 
+        const labelsOutput = yield* github
+          .execute({
+            cwd: input.cwd,
+            args: ["label", "list", "--repo", repository, "--json", "name", "--limit", "1000"],
+          })
+          .pipe(Effect.option);
+        const labels = labelsOutput.pipe(
+          Option.flatMap((result) => decodeLabelsProbe(result.stdout)),
+          Option.getOrElse(() => []),
+        );
+
         const relationshipOutput = yield* github
           .execute({
             cwd: input.cwd,
-            args: ["api", "graphql", "-f", 'query={__type(name:"Issue"){fields{name}}}'],
+            args: ["api", "graphql", "-f", 'query={__type(name:"Mutation"){fields{name}}}'],
           })
           .pipe(Effect.option);
         const fields = Option.match(
@@ -153,14 +178,15 @@ export const GitHubIssueTrackerLive = Layer.effect(
         return {
           supportsIssues: parsedRepository.value.hasIssuesEnabled,
           canWriteIssues,
-          supportsChildRelationships: canWriteIssues && fields.has("subIssues"),
+          supportsChildRelationships:
+            canWriteIssues && fields.has("addSubIssue") && fields.has("removeSubIssue"),
           supportsBlockingRelationships:
-            canWriteIssues && fields.has("blockedBy") && fields.has("blocking"),
-          labels: parsedRepository.value.labels.map((label) => label.name),
+            canWriteIssues && fields.has("addBlockedBy") && fields.has("removeBlockedBy"),
+          labels: labels.map((label) => label.name),
         };
       }),
       resolveIssue: Effect.fn("IssueTracker.resolveIssue")(function* (input) {
-        const reference = resolveGitHubIssueReference(input.reference);
+        const reference = resolveGitHubIssueReference(input.repository, input.reference);
         if (reference === null) return null;
         const output = yield* github
           .execute({
