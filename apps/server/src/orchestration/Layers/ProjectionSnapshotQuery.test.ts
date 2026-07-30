@@ -10,6 +10,7 @@ import {
   SkillRunId,
   WorkstreamId,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
@@ -1319,8 +1320,16 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         wayfinderSynchronizedAt: "2026-04-03T00:00:40.000Z",
         createdAt: "2026-04-03T00:00:40.000Z",
       } satisfies SkillInvocation;
+      const draftInvocation = {
+        ...compactInvocationFields,
+        workstreamId: WorkstreamId.make("workstream:draft"),
+        skillRunId: SkillRunId.make("skill-run:draft"),
+        wayfinderDraft: createEmptyWayfinderDraft("2026-04-03T00:00:25.000Z"),
+        createdAt: "2026-04-03T00:00:25.000Z",
+      } satisfies SkillInvocation;
       const encodedSkillInvocation = yield* encodeSkillInvocationJson(skillInvocation);
       const encodedCompactInvocation = yield* encodeSkillInvocationJson(compactInvocation);
+      const encodedDraftInvocation = yield* encodeSkillInvocationJson(draftInvocation);
 
       yield* sql`DELETE FROM projection_projects`;
       yield* sql`DELETE FROM projection_threads`;
@@ -1446,6 +1455,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           ),
           (
             'thread-1',
+            'turn-draft',
+            'message-user-draft',
+            NULL,
+            NULL,
+            ${encodedDraftInvocation},
+            'message-assistant-draft',
+            'completed',
+            '2026-04-03T00:00:25.000Z',
+            '2026-04-03T00:00:26.000Z',
+            '2026-04-03T00:00:27.000Z',
+            NULL,
+            NULL,
+            NULL,
+            '[]'
+          ),
+          (
+            'thread-1',
             'turn-reconnect',
             'message-user-3',
             NULL,
@@ -1487,11 +1513,27 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
       assert.deepEqual(
         new Set(shellSkillRuns.map((run) => run.skillRunId)),
-        new Set([skillInvocation.skillRunId, compactInvocation.skillRunId]),
+        new Set([
+          skillInvocation.skillRunId,
+          compactInvocation.skillRunId,
+          draftInvocation.skillRunId,
+        ]),
       );
       assert.deepEqual(
         shellSkillRuns.find((run) => run.wayfinderMap)?.wayfinderMap,
         skillInvocation.wayfinderMap,
+      );
+      assert.deepEqual(
+        new Set(
+          (yield* snapshotQuery.getSkillRunsByThreadId(ThreadId.make("thread-1"))).map(
+            (run) => run.skillRunId,
+          ),
+        ),
+        new Set([
+          skillInvocation.skillRunId,
+          compactInvocation.skillRunId,
+          draftInvocation.skillRunId,
+        ]),
       );
 
       const fullSnapshot = yield* snapshotQuery.getSnapshot();

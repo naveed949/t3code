@@ -17,6 +17,7 @@ import type {
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
   ProjectId,
+  SkillInvocation,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -151,6 +152,13 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+
+  /**
+   * Read every persisted Skill Run for one active thread.
+   */
+  readonly getSkillRunsByThreadId: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<SkillInvocation>, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail snapshot by id.

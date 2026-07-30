@@ -1,32 +1,54 @@
+import { SkillRunId } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+
 export interface DraftGuardActivity {
   readonly kind: string;
   readonly payload: unknown;
 }
 
-export const hasActiveWayfinderDraftAuthority = (
+const DraftActivityPayload = Schema.Struct({ skillRunId: SkillRunId });
+const decodeDraftActivityPayload = Schema.decodeUnknownOption(DraftActivityPayload);
+
+interface DraftAuthorityState {
+  readonly active: boolean;
+  readonly skillRunId: string | null;
+  readonly approvalSkillRunId: string | null;
+}
+
+const projectDraftAuthority = (
   activities: ReadonlyArray<DraftGuardActivity>,
-): boolean => {
+): DraftAuthorityState => {
+  let skillRunId: string | null = null;
+  let approvalSkillRunId: string | null = null;
   let active = false;
   for (const activity of activities) {
-    if (activity.kind === "wayfinder.draft.started") active = true;
-    if (activity.kind === "wayfinder.draft.published") active = false;
+    const payload = decodeDraftActivityPayload(activity.payload);
+    if (activity.kind === "wayfinder.draft.started") {
+      active = true;
+      skillRunId = Option.isSome(payload) ? payload.value.skillRunId : null;
+      approvalSkillRunId = null;
+    }
+    if (activity.kind === "wayfinder.publication.approval-requested") {
+      approvalSkillRunId = Option.isSome(payload) ? payload.value.skillRunId : null;
+    }
+    if (activity.kind === "wayfinder.draft.published") {
+      active = false;
+      skillRunId = null;
+      approvalSkillRunId = null;
+    }
   }
-  return active;
+  return { active, skillRunId, approvalSkillRunId };
 };
+
+export const hasActiveWayfinderDraftAuthority = (
+  activities: ReadonlyArray<DraftGuardActivity>,
+): boolean => projectDraftAuthority(activities).active;
 
 export const activeWayfinderDraftSkillRunId = (
   activities: ReadonlyArray<DraftGuardActivity>,
-): string | null => {
-  let active: string | null = null;
-  for (const activity of activities) {
-    if (activity.kind === "wayfinder.draft.started") {
-      const payload =
-        typeof activity.payload === "object" && activity.payload !== null
-          ? (activity.payload as { readonly skillRunId?: unknown })
-          : null;
-      active = typeof payload?.skillRunId === "string" ? payload.skillRunId : null;
-    }
-    if (activity.kind === "wayfinder.draft.published") active = null;
-  }
-  return active;
-};
+): string | null => projectDraftAuthority(activities).skillRunId;
+
+export const approvedWayfinderPublicationSkillRunId = (
+  activities: ReadonlyArray<DraftGuardActivity>,
+): string | null => projectDraftAuthority(activities).approvalSkillRunId;

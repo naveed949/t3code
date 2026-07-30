@@ -58,7 +58,16 @@ export function parseWayfinderDecisionTarget(id: string): WayfinderDecisionTarge
     ["out-of-scope:", "out-of-scope"],
   ] as const) {
     if (id.startsWith(prefix) && id.length > prefix.length) {
-      const target = { kind, id: id.slice(prefix.length) };
+      const targetId = id.slice(prefix.length);
+      const classification =
+        kind === "candidate-ticket"
+          ? /^(research|prototype|grilling|task)(?::|-)/u.exec(targetId)?.[1]
+          : undefined;
+      const target = {
+        kind,
+        id: targetId,
+        ...(classification !== undefined ? { classification } : {}),
+      };
       return isWayfinderDecisionTarget(target) ? target : null;
     }
   }
@@ -201,7 +210,13 @@ export const deriveWayfinderDraft = (
           notes.push(answer);
           break;
         case "candidate-ticket":
-          candidateTickets.push({ id: target.id, title: answer });
+          candidateTickets.push({
+            id: target.id,
+            title: answer,
+            ...(target.classification !== undefined
+              ? { classification: target.classification }
+              : {}),
+          });
           break;
         case "fog-of-war":
           fogOfWar.push({ id: target.id, title: answer });

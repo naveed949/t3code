@@ -20,7 +20,11 @@ const draft = {
   confirmedDecisions: [],
   proposedDecisions: [],
   candidateTickets: [
-    { id: "research-hosting", title: "Research hosting limits" },
+    {
+      id: "research-hosting",
+      title: "Research hosting limits",
+      classification: "research" as const,
+    },
     { id: "choose-target", title: "Choose the deployment target" },
   ],
   fogOfWar: [{ id: "owners", title: "Deployment ownership is unclear" }],
@@ -127,6 +131,7 @@ it.effect("publishes labels, issues, children, and blockers in dependency-safe o
     assert.strictEqual(result.status, "synchronized");
     assert.deepStrictEqual(writes, [
       "label:wayfinder:map",
+      "label:wayfinder:decision",
       "label:wayfinder:research",
       "label:wayfinder:task",
       "issue:map",
@@ -231,5 +236,98 @@ it.effect("rejects a cyclic dependency graph before the first tracker write", ()
     assert.strictEqual(result.status, "failed");
     assert.strictEqual(result.nextStep, "validate draft dependency graph");
     assert.deepStrictEqual(writes, []);
+  }),
+);
+
+it.effect("resumes idempotently from every tracker write boundary", () =>
+  Effect.gen(function* () {
+    const writeCount = 10;
+    for (let failureIndex = 0; failureIndex < writeCount; failureIndex += 1) {
+      const writes: string[] = [];
+      const tracker = successfulTracker(writes);
+      let currentWrite = 0;
+      const failAtBoundary = <A>(
+        description: string,
+        effect: Effect.Effect<A, TrackerFailure>,
+      ): Effect.Effect<A, TrackerFailure> =>
+        currentWrite++ === failureIndex
+          ? Effect.fail(new TrackerFailure({ message: `${description} unavailable` }))
+          : effect;
+      const failingTracker: WayfinderPublicationTracker<TrackerFailure> = {
+        ensureLabel: (input) => failAtBoundary(`label ${input.name}`, tracker.ensureLabel(input)),
+        createIssue: (input) => failAtBoundary(`issue ${input.key}`, tracker.createIssue(input)),
+        addChild: (input) => failAtBoundary(`child ${input.childNumber}`, tracker.addChild(input)),
+        addBlockedBy: (input) =>
+          failAtBoundary(`blocker ${input.blockerNumber}`, tracker.addBlockedBy(input)),
+        loadWayfinderMap: tracker.loadWayfinderMap,
+      };
+
+      const failed = yield* publishWayfinderDraft(
+        {
+          cwd: "/project",
+          repository,
+          draft,
+          synchronizedAt: IsoDateTime.make("2026-07-30T10:05:00.000Z"),
+        },
+        { tracker: failingTracker, onProgress: () => Effect.void },
+      );
+      assert.strictEqual(failed.status, "failed");
+      assert.strictEqual(failed.artifacts.length, failureIndex);
+      assert.isNotNull(failed.nextStep);
+      const verifiedWrites = [...writes];
+
+      const resumed = yield* publishWayfinderDraft(
+        {
+          cwd: "/project",
+          repository,
+          draft,
+          synchronizedAt: IsoDateTime.make("2026-07-30T10:06:00.000Z"),
+          previous: failed,
+        },
+        { tracker, onProgress: () => Effect.void },
+      );
+      assert.strictEqual(resumed.status, "synchronized");
+      assert.deepStrictEqual(writes.slice(0, verifiedWrites.length), verifiedWrites);
+      assert.strictEqual(writes.length, writeCount);
+    }
+  }),
+);
+
+it.effect("keeps all artifacts when reconciliation fails and retries only reconciliation", () =>
+  Effect.gen(function* () {
+    const writes: string[] = [];
+    const tracker = successfulTracker(writes);
+    const failed = yield* publishWayfinderDraft(
+      {
+        cwd: "/project",
+        repository,
+        draft,
+        synchronizedAt: IsoDateTime.make("2026-07-30T10:05:00.000Z"),
+      },
+      {
+        tracker: {
+          ...tracker,
+          loadWayfinderMap: () => Effect.succeed({ kind: "not-wayfinder-map" as const }),
+        },
+        onProgress: () => Effect.void,
+      },
+    );
+    assert.strictEqual(failed.status, "failed");
+    assert.strictEqual(failed.artifacts.length, 10);
+    assert.strictEqual(failed.nextStep, "reconcile canonical map");
+
+    const writesBeforeResume = [...writes];
+    const resumed = yield* publishWayfinderDraft(
+      {
+        cwd: "/project",
+        repository,
+        draft,
+        synchronizedAt: IsoDateTime.make("2026-07-30T10:06:00.000Z"),
+        previous: failed,
+      },
+      { tracker, onProgress: () => Effect.void },
+    );
+    assert.strictEqual(resumed.status, "synchronized");
+    assert.deepStrictEqual(writes, writesBeforeResume);
   }),
 );

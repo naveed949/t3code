@@ -215,6 +215,19 @@ it.layer(NodeServices.layer)("Wayfinder draft command safety", (it) => {
         },
       });
 
+      const bypass = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.publish",
+          commandId: CommandId.make("command-publish-bypass"),
+          threadId,
+          skillRunId,
+          confirmed: true,
+          createdAt: now,
+        },
+      }).pipe(Effect.flip);
+      expect(bypass).toMatchObject({ detail: expect.stringContaining("pending server approval") });
+
       const event = yield* decideOrchestrationCommand({
         readModel,
         command: {
@@ -235,6 +248,46 @@ it.layer(NodeServices.layer)("Wayfinder draft command safety", (it) => {
           runtimeMode: "approval-required",
           confirmed: false,
         },
+      });
+
+      const approvalEvents = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.publication.update",
+          commandId: CommandId.make("command-publication-awaiting"),
+          threadId,
+          skillRunId,
+          publication: {
+            status: "awaiting-approval",
+            artifacts: [],
+            nextStep: "confirm GitHub publication",
+            updatedAt: now,
+          },
+          createdAt: now,
+        },
+      });
+      expect(Array.isArray(approvalEvents)).toBe(true);
+      let sequence = 4;
+      for (const approvalEvent of Array.isArray(approvalEvents)
+        ? approvalEvents
+        : [approvalEvents]) {
+        readModel = yield* projectEvent(readModel, { ...approvalEvent, sequence: sequence++ });
+      }
+
+      const confirmed = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.publish",
+          commandId: CommandId.make("command-publish-confirmed"),
+          threadId,
+          skillRunId,
+          confirmed: true,
+          createdAt: now,
+        },
+      });
+      expect(confirmed).toMatchObject({
+        type: "thread.wayfinder-publication-requested",
+        payload: { threadId, skillRunId, confirmed: true },
       });
     }),
   );

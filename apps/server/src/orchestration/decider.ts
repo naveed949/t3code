@@ -15,6 +15,7 @@ import type * as PlatformError from "effect/PlatformError";
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   activeWayfinderDraftSkillRunId,
+  approvedWayfinderPublicationSkillRunId,
   hasActiveWayfinderDraftAuthority,
 } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
@@ -991,6 +992,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Wayfinder publication requires the matching active unpublished draft.",
         });
       }
+      if (
+        thread.runtimeMode === "approval-required" &&
+        command.confirmed &&
+        approvedWayfinderPublicationSkillRunId(thread.activities) !== command.skillRunId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder publication confirmation requires a pending server approval.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1301,6 +1312,30 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
         },
       };
+      if (command.publication.status === "awaiting-approval") {
+        const approvalRequested: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-publication-approval:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.publication.approval-requested",
+              summary: "Wayfinder publication needs confirmation",
+              payload: { skillRunId: command.skillRunId },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        };
+        return [updated, approvalRequested];
+      }
       if (command.publication.status !== "synchronized") return updated;
       const published: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
