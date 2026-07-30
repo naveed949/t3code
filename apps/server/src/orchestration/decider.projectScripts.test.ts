@@ -299,7 +299,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
 
       expect(Array.isArray(result)).toBe(true);
       const events = Array.isArray(result) ? result : [result];
-      expect(events).toHaveLength(2);
+      expect(events).toHaveLength(3);
       expect(events[0]?.type).toBe("thread.message-sent");
       const turnStartEvent = events[1];
       expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
@@ -350,6 +350,19 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
         proposedDependencyEdges: [],
         decisionReceipts: [],
         updatedAt: now,
+      });
+      expect(events[2]).toMatchObject({
+        type: "thread.activity-appended",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          activity: {
+            kind: "wayfinder.draft.started",
+            summary: "Unpublished Wayfinder draft started",
+            payload: {
+              canonical: false,
+            },
+          },
+        },
       });
     }),
   );

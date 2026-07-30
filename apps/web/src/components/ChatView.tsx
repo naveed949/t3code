@@ -27,7 +27,10 @@ import {
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
-import { deriveWayfinderDraft } from "@t3tools/client-runtime/state/wayfinder-draft";
+import {
+  deriveWayfinderDraft,
+  findLatestWayfinderDraftInvocation,
+} from "@t3tools/client-runtime/state/wayfinder-draft";
 import {
   findThreadWayfinderWorkstream,
   type ProjectSkillWorkstream,
@@ -1156,6 +1159,9 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const environmentSkillRuns = useAtomValue(
+    environmentThreadShells.environmentSkillRunsAtom(environmentId),
+  );
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
@@ -2012,8 +2018,13 @@ function ChatViewContent(props: ChatViewProps) {
     [threadActivities],
   );
   const wayfinderDraft = useMemo(
-    () => deriveWayfinderDraft(activeLatestTurn?.skillInvocation, threadActivities),
-    [activeLatestTurn?.skillInvocation, threadActivities],
+    () =>
+      deriveWayfinderDraft(
+        findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id) ??
+          activeLatestTurn?.skillInvocation,
+        threadActivities,
+      ),
+    [activeLatestTurn?.skillInvocation, activeThread?.id, environmentSkillRuns, threadActivities],
   );
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(

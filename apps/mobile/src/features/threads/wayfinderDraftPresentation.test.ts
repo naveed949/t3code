@@ -1,7 +1,8 @@
-import { ApprovalRequestId, emptyWayfinderDraft } from "@t3tools/contracts";
+import { ApprovalRequestId } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { describe, expect, it } from "vite-plus/test";
 
-import { wayfinderDraftPresentation } from "./wayfinderDraftPresentation";
+import { wayfinderDecisionStep, wayfinderDraftPresentation } from "./wayfinderDraftPresentation";
 
 describe("wayfinderDraftPresentation", () => {
   it("labels the mobile draft as non-canonical and shows only one proposal", () => {
@@ -13,7 +14,7 @@ describe("wayfinderDraftPresentation", () => {
       multiSelect: false,
     };
     const draft = {
-      ...emptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
+      ...createEmptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
       proposedDecisions: ["1", "2"].map((suffix) => ({
         requestId: ApprovalRequestId.make(`request:${suffix}`),
         question,
@@ -26,6 +27,26 @@ describe("wayfinderDraftPresentation", () => {
       safetyLabel: "Non-canonical · nothing has been written to GitHub",
       progressLabel: "0 confirmed · 1 agent proposal",
       pendingProposal: { requestId: ApprovalRequestId.make("request:1") },
+    });
+  });
+
+  it("exposes one Decision Card question at a time", () => {
+    const questions = [{ id: "destination" }, { id: "ticket:one" }];
+
+    expect(wayfinderDecisionStep(questions, {}, 0)).toMatchObject({
+      activeQuestion: { id: "destination" },
+      visibleQuestions: [{ id: "destination" }],
+      canAdvance: false,
+    });
+    expect(
+      wayfinderDecisionStep(questions, { destination: { selectedOptionLabel: "Ship it" } }, 0),
+    ).toMatchObject({
+      visibleQuestions: [{ id: "destination" }],
+      canAdvance: true,
+    });
+    expect(wayfinderDecisionStep(questions, {}, 1)).toMatchObject({
+      visibleQuestions: [{ id: "ticket:one" }],
+      canAdvance: false,
     });
   });
 });

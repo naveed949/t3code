@@ -1,9 +1,11 @@
 import type { ApprovalRequestId } from "@t3tools/contracts";
+import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
 import { cn } from "../../lib/cn";
 import type { PendingUserInput, PendingUserInputDraftAnswer } from "../../lib/threadActivity";
+import { wayfinderDecisionStep } from "./wayfinderDraftPresentation";
 
 export interface PendingUserInputCardProps {
   readonly pendingUserInput: PendingUserInput;
@@ -25,6 +27,20 @@ export interface PendingUserInputCardProps {
 }
 
 export function PendingUserInputCard(props: PendingUserInputCardProps) {
+  const [questionIndex, setQuestionIndex] = useState(0);
+  useEffect(() => {
+    setQuestionIndex(0);
+  }, [props.pendingUserInput.requestId]);
+  const decisionStep = wayfinderDecisionStep(
+    props.pendingUserInput.questions,
+    props.drafts,
+    questionIndex,
+  );
+  const visibleQuestions = props.isWayfinderDecision
+    ? decisionStep.visibleQuestions
+    : props.pendingUserInput.questions;
+  const canAdvance = props.isWayfinderDecision && decisionStep.canAdvance;
+
   return (
     <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
       <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
@@ -33,7 +49,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       <Text className="font-t3-bold text-lg text-neutral-950 dark:text-neutral-50">
         {props.isWayfinderDecision ? "Confirm one draft decision" : "Fill in the pending answers"}
       </Text>
-      {props.pendingUserInput.questions.map((question) => {
+      {visibleQuestions.map((question) => {
         const draft = props.drafts[question.id];
         return (
           <View key={question.id} className="gap-2 pt-1">
@@ -97,14 +113,27 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       <Pressable
         className={cn(
           "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
+          canAdvance || props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
         )}
         disabled={
-          props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
+          (!canAdvance && props.answers === null) ||
+          props.respondingUserInputId === props.pendingUserInput.requestId
         }
-        onPress={() => void props.onSubmit()}
+        onPress={() => {
+          if (canAdvance) {
+            setQuestionIndex((current) => current + 1);
+            return;
+          }
+          void props.onSubmit();
+        }}
       >
-        <Text className="font-t3-extrabold text-sm text-white">Submit answers</Text>
+        <Text className="font-t3-extrabold text-sm text-white">
+          {canAdvance
+            ? "Next decision"
+            : props.isWayfinderDecision
+              ? "Confirm decision"
+              : "Submit answers"}
+        </Text>
       </Pressable>
     </View>
   );

@@ -5,7 +5,7 @@ import { renderNativeWayfinderArguments } from "./WayfinderCompatibility.ts";
 describe("renderNativeWayfinderArguments", () => {
   it("keeps new-map execution unpublished and one decision at a time", () => {
     const rendered = renderNativeWayfinderArguments({
-      skillName: "wayfinder",
+      skill: { name: "wayfinder" },
       action: { id: "new-map" },
       arguments: "new-map",
     });
@@ -19,14 +19,14 @@ describe("renderNativeWayfinderArguments", () => {
   it("does not instrument continuation or another native skill", () => {
     expect(
       renderNativeWayfinderArguments({
-        skillName: "wayfinder",
+        skill: { name: "wayfinder" },
         action: { id: "continue-map", reference: "5" },
         arguments: "continue-map 5",
       }),
     ).toBe("continue-map 5");
     expect(
       renderNativeWayfinderArguments({
-        skillName: "research",
+        skill: { name: "research" },
         arguments: "topic",
       }),
     ).toBe("topic");

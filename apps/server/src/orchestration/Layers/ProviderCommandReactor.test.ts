@@ -477,6 +477,57 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("forces native Wayfinder draft sessions to approval-required without changing the thread mode", async () => {
+    const harness = await createHarness();
+    const now = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("cmd-wayfinder-runtime-mode"),
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-wayfinder-turn"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-wayfinder"),
+          role: "user",
+          text: "Chart the project",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "full-access",
+        skillInvocation: {
+          skill: {
+            name: "wayfinder",
+            path: "/skills/wayfinder/SKILL.md",
+            contentDigest:
+              "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+          },
+          action: { id: "new-map" },
+          execution: { mode: "native", adapterId: "wayfinder", adapterVersion: 1 },
+        },
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      runtimeMode: "approval-required",
+    });
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(thread?.runtimeMode).toBe("full-access");
+    expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
   effectIt.effect("projects starting before a slow provider session finishes", () =>
     Effect.gen(function* () {
       const releaseStart = yield* Deferred.make<void>();

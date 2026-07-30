@@ -65,4 +65,6 @@ destination, notes, candidate tickets, fog of war, out-of-scope entries, and pro
 edges. The persisted Skill Run owns the initial non-canonical draft; clients deterministically fold
 durable `user-input.requested` and `user-input.resolved` activities into proposals, decision
 receipts, and confirmed map state. This keeps recovery provider-neutral without a second draft
-database or client-only state.
+database or client-only state. The server forces these draft sessions into `approval-required`
+mode, records an active-draft activity, and rejects approved GitHub issue mutation commands until
+publication clears that marker. The thread's configured runtime mode is not changed.

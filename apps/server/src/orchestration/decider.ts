@@ -2,17 +2,18 @@ import {
   EventId,
   SkillRunId,
   WorkstreamId,
-  emptyWayfinderDraft,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { blockedGitHubMutationDetail } from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -766,7 +767,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ...(command.skillInvocation.skill.name === "wayfinder" &&
             command.skillInvocation.execution.mode === "native" &&
             command.skillInvocation.action?.id === "new-map"
-              ? { wayfinderDraft: emptyWayfinderDraft(command.createdAt) }
+              ? { wayfinderDraft: createEmptyWayfinderDraft(command.createdAt) }
               : {}),
           }
         : undefined;
@@ -813,6 +814,39 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+      const draftStartedEvent =
+        skillInvocation?.wayfinderDraft !== undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  causationEventId: turnStartRequestedEvent.eventId,
+                  type: "thread.activity-appended",
+                  payload: {
+                    threadId: command.threadId,
+                    activity: {
+                      id: eventBase.eventId,
+                      tone: "info",
+                      kind: "wayfinder.draft.started",
+                      summary: "Unpublished Wayfinder draft started",
+                      payload: {
+                        workstreamId: skillInvocation.workstreamId,
+                        skillRunId: skillInvocation.skillRunId,
+                        canonical: false,
+                      },
+                      turnId: null,
+                      createdAt: command.createdAt,
+                    },
+                  },
+                }),
+              ),
+            )
+          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -851,7 +885,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return [...lifecycleResetEvents, userMessageEvent, turnStartRequestedEvent];
+      return [
+        ...lifecycleResetEvents,
+        userMessageEvent,
+        turnStartRequestedEvent,
+        ...(draftStartedEvent ? [draftStartedEvent] : []),
+      ];
     }
 
     case "thread.turn.interrupt": {
@@ -877,11 +916,22 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.approval.respond": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const blockedMutation =
+        command.decision === "accept" || command.decision === "acceptForSession"
+          ? blockedGitHubMutationDetail(thread.activities, command.requestId)
+          : null;
+      if (blockedMutation !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "GitHub issue mutations are disabled while the Wayfinder map is an unpublished draft.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",

@@ -903,13 +903,7 @@ export function buildPromptText(
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort);
   const nativeSkillArguments =
     input.skillInvocation?.execution.mode === "native"
-      ? renderNativeWayfinderArguments({
-          skillName: input.skillInvocation.skill.name,
-          ...(input.skillInvocation.action ? { action: input.skillInvocation.action } : {}),
-          ...(input.skillInvocation.arguments
-            ? { arguments: input.skillInvocation.arguments }
-            : {}),
-        })
+      ? renderNativeWayfinderArguments(input.skillInvocation)
       : undefined;
   const prompt =
     input.skillInvocation?.execution.mode === "native"

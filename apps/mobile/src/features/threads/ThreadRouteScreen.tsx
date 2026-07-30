@@ -14,8 +14,16 @@ import {
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
-import { EnvironmentId, ThreadId, type ProjectScript } from "@t3tools/contracts";
-import { deriveWayfinderDraft } from "@t3tools/client-runtime/state/wayfinder-draft";
+import {
+  EnvironmentId,
+  ThreadId,
+  type ProjectScript,
+  type SkillInvocation,
+} from "@t3tools/contracts";
+import {
+  deriveWayfinderDraft,
+  findLatestWayfinderDraftInvocation,
+} from "@t3tools/client-runtime/state/wayfinder-draft";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -87,6 +95,8 @@ interface ThreadInspectorSelection {
 
 type NativeHeaderItems = ReadonlyArray<Record<string, unknown>>;
 const EMPTY_PROJECT_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
+const EMPTY_SKILL_RUNS: ReadonlyArray<SkillInvocation> = [];
+const EMPTY_SKILL_RUNS_ATOM = Atom.make(EMPTY_SKILL_RUNS);
 
 function InspectorPaneRoleActivation() {
   useAdaptiveWorkspacePaneRole("inspector");
@@ -209,6 +219,11 @@ function ThreadRouteContent(
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
   const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
+  const environmentSkillRuns = useAtomValue(
+    environmentId
+      ? environmentThreadShells.environmentSkillRunsAtom(environmentId)
+      : EMPTY_SKILL_RUNS_ATOM,
+  );
   const threadId = firstRouteParam(params.threadId);
   const projectWorkstreams = useAtomValue(
     selectedThread
@@ -801,7 +816,8 @@ function ThreadRouteContent(
   });
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
   const wayfinderDraft = deriveWayfinderDraft(
-    selectedThreadDetail?.latestTurn?.skillInvocation,
+    findLatestWayfinderDraftInvocation(environmentSkillRuns, selectedThread?.id) ??
+      selectedThreadDetail?.latestTurn?.skillInvocation,
     selectedThreadDetail?.activities ?? [],
   );
   const renderThreadRouteBody = (showActionControls: boolean) => (

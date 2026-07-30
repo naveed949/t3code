@@ -6,12 +6,12 @@ import {
   SkillRunId,
   ThreadId,
   WorkstreamId,
-  emptyWayfinderDraft,
   type OrchestrationThreadActivity,
   type SkillInvocation,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 
-import { deriveWayfinderDraft } from "./wayfinderDraft.ts";
+import { deriveWayfinderDraft, findLatestWayfinderDraftInvocation } from "./wayfinderDraft.ts";
 
 const invocation: SkillInvocation = {
   workstreamId: WorkstreamId.make("workstream:1"),
@@ -26,7 +26,7 @@ const invocation: SkillInvocation = {
   action: { id: "new-map" },
   execution: { mode: "native", adapterId: "wayfinder", adapterVersion: 1 },
   createdAt: "2026-01-01T00:00:00.000Z",
-  wayfinderDraft: emptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
+  wayfinderDraft: createEmptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
 };
 
 const activity = (
@@ -203,5 +203,29 @@ describe("deriveWayfinderDraft", () => {
     expect(
       deriveWayfinderDraft({ ...invocation, action: { id: "continue-map", reference: "5" } }, []),
     ).toBeNull();
+  });
+
+  it("recovers the latest unpublished run independently of the thread's latest turn", () => {
+    const newer = {
+      ...invocation,
+      skillRunId: SkillRunId.make("skill-run:2"),
+      createdAt: "2026-01-01T00:03:00.000Z",
+    };
+
+    expect(
+      findLatestWayfinderDraftInvocation(
+        [
+          newer,
+          invocation,
+          { ...invocation, threadId: ThreadId.make("thread:other") },
+          {
+            ...invocation,
+            skillRunId: SkillRunId.make("skill-run:generic"),
+            execution: { mode: "generic", reason: "user-selected-generic" },
+          },
+        ],
+        invocation.threadId,
+      ),
+    ).toEqual(newer);
   });
 });

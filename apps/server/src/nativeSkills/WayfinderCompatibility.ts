@@ -1,4 +1,4 @@
-import type { ProviderDriverKind, SkillInvocationAction } from "@t3tools/contracts";
+import type { ProviderDriverKind, SkillInvocation } from "@t3tools/contracts";
 
 export const VERIFIED_WAYFINDER_CONTENT_DIGEST =
   "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434";
@@ -19,11 +19,11 @@ const NEW_MAP_NATIVE_CONTRACT = [
 ].join("\n");
 
 export function renderNativeWayfinderArguments(input: {
-  readonly skillName: string;
-  readonly action?: SkillInvocationAction;
-  readonly arguments?: string;
+  readonly skill: Pick<SkillInvocation["skill"], "name">;
+  readonly action?: SkillInvocation["action"] | undefined;
+  readonly arguments?: SkillInvocation["arguments"] | undefined;
 }): string | undefined {
-  if (input.skillName !== "wayfinder" || input.action?.id !== "new-map") {
+  if (input.skill.name !== "wayfinder" || input.action?.id !== "new-map") {
     return input.arguments;
   }
   return [input.arguments ?? "new-map", NEW_MAP_NATIVE_CONTRACT].join("\n\n");

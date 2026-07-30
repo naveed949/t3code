@@ -1,4 +1,5 @@
-import { emptyWayfinderDraft, ApprovalRequestId } from "@t3tools/contracts";
+import { ApprovalRequestId } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -7,7 +8,7 @@ import { ComposerWayfinderDraftPanel } from "./ComposerWayfinderDraftPanel";
 describe("ComposerWayfinderDraftPanel", () => {
   it("keeps the unpublished map and agent recommendation visually distinct", () => {
     const draft = {
-      ...emptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
+      ...createEmptyWayfinderDraft("2026-01-01T00:00:00.000Z"),
       proposedDecisions: [
         {
           requestId: ApprovalRequestId.make("request:1"),

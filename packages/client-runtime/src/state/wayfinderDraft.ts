@@ -1,53 +1,35 @@
 import {
   ApprovalRequestId,
+  TrimmedNonEmptyString,
+  UserInputQuestion,
   type OrchestrationThreadActivity,
   type SkillInvocation,
-  type UserInputQuestion,
   type WayfinderDecisionProposal,
   type WayfinderDraft,
 } from "@t3tools/contracts";
+import {
+  isNativeWayfinderDraftInvocation,
+  parseWayfinderDecisionTarget,
+} from "@t3tools/shared/wayfinderDraft";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 const RECOMMENDED_SUFFIX = /\s*\(Recommended\)\s*$/iu;
-
-const activityPayload = (
-  activity: OrchestrationThreadActivity,
-): Readonly<Record<string, unknown>> | null =>
-  activity.payload !== null && typeof activity.payload === "object"
-    ? (activity.payload as Readonly<Record<string, unknown>>)
-    : null;
-
-const parseQuestions = (value: unknown): ReadonlyArray<UserInputQuestion> => {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((entry): ReadonlyArray<UserInputQuestion> => {
-    if (entry === null || typeof entry !== "object") return [];
-    const question = entry as Readonly<Record<string, unknown>>;
-    if (
-      typeof question.id !== "string" ||
-      typeof question.header !== "string" ||
-      typeof question.question !== "string" ||
-      !Array.isArray(question.options)
-    ) {
-      return [];
-    }
-    const options = question.options.flatMap((option) => {
-      if (option === null || typeof option !== "object") return [];
-      const record = option as Readonly<Record<string, unknown>>;
-      return typeof record.label === "string" && typeof record.description === "string"
-        ? [{ label: record.label, description: record.description }]
-        : [];
-    });
-    if (options.length === 0) return [];
-    return [
-      {
-        id: question.id,
-        header: question.header,
-        question: question.question,
-        options,
-        multiSelect: question.multiSelect === true,
-      },
-    ];
-  });
-};
+const RequestedDecisionPayload = Schema.Struct({
+  requestId: ApprovalRequestId,
+  questions: Schema.Array(UserInputQuestion).check(Schema.isMinLength(1)),
+});
+const ResolvedDecisionPayload = Schema.Struct({
+  requestId: ApprovalRequestId,
+  answers: Schema.Record(Schema.String, Schema.Unknown),
+});
+const DecisionAnswer = Schema.Union([
+  TrimmedNonEmptyString,
+  Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+]);
+const decodeRequestedDecision = Schema.decodeUnknownOption(RequestedDecisionPayload);
+const decodeResolvedDecision = Schema.decodeUnknownOption(ResolvedDecisionPayload);
+const decodeDecisionAnswer = Schema.decodeUnknownOption(DecisionAnswer);
 
 const proposalFor = (
   requestId: ApprovalRequestId,
@@ -69,13 +51,31 @@ const proposalFor = (
 };
 
 const answerText = (answer: unknown): string | null => {
-  if (typeof answer === "string" && answer.trim().length > 0) return answer.trim();
-  if (Array.isArray(answer)) {
-    const values = answer.filter((entry): entry is string => typeof entry === "string");
-    return values.length > 0 ? values.join(", ") : null;
-  }
-  return null;
+  const decoded = decodeDecisionAnswer(answer);
+  return Option.isNone(decoded)
+    ? null
+    : typeof decoded.value === "string"
+      ? decoded.value
+      : decoded.value.join(", ");
 };
+
+export const findLatestWayfinderDraftInvocation = (
+  skillRuns: ReadonlyArray<SkillInvocation>,
+  threadId: SkillInvocation["threadId"] | null | undefined,
+): SkillInvocation | null =>
+  threadId === null || threadId === undefined
+    ? null
+    : ([...skillRuns]
+        .filter(
+          (invocation) =>
+            invocation.threadId === threadId && isNativeWayfinderDraftInvocation(invocation),
+        )
+        .sort(
+          (left, right) =>
+            left.createdAt.localeCompare(right.createdAt) ||
+            left.skillRunId.localeCompare(right.skillRunId),
+        )
+        .at(-1) ?? null);
 
 /**
  * Rebuilds the unpublished map from its durable invocation snapshot and
@@ -86,12 +86,7 @@ export const deriveWayfinderDraft = (
   invocation: SkillInvocation | null | undefined,
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WayfinderDraft | null => {
-  if (
-    invocation?.skill.name !== "wayfinder" ||
-    invocation.execution.mode !== "native" ||
-    invocation.action?.id !== "new-map" ||
-    invocation.wayfinderDraft === undefined
-  ) {
+  if (!isNativeWayfinderDraftInvocation(invocation)) {
     return null;
   }
 
@@ -109,26 +104,23 @@ export const deriveWayfinderDraft = (
       (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER) ||
       left.createdAt.localeCompare(right.createdAt),
   )) {
-    const payload = activityPayload(activity);
-    if (payload === null || typeof payload.requestId !== "string") continue;
-    const requestId = ApprovalRequestId.make(payload.requestId);
-
     if (activity.kind === "user-input.requested") {
-      const questions = parseQuestions(payload.questions);
-      if (questions.length > 0) {
-        requested.set(requestId, { questions, createdAt: activity.createdAt });
+      const payload = decodeRequestedDecision(activity.payload);
+      if (Option.isSome(payload)) {
+        requested.set(payload.value.requestId, {
+          questions: payload.value.questions,
+          createdAt: activity.createdAt,
+        });
       }
     }
-    if (
-      activity.kind === "user-input.resolved" &&
-      payload.answers !== null &&
-      typeof payload.answers === "object" &&
-      !Array.isArray(payload.answers)
-    ) {
-      resolved.set(requestId, {
-        answers: payload.answers as Readonly<Record<string, unknown>>,
-        createdAt: activity.createdAt,
-      });
+    if (activity.kind === "user-input.resolved") {
+      const payload = decodeResolvedDecision(activity.payload);
+      if (Option.isSome(payload)) {
+        resolved.set(payload.value.requestId, {
+          answers: payload.value.answers,
+          createdAt: activity.createdAt,
+        });
+      }
     }
   }
 
@@ -168,24 +160,26 @@ export const deriveWayfinderDraft = (
         answer,
         confirmedAt: receipt.createdAt,
       });
-      if (question.id === "destination") {
-        destination = answer;
-      } else if (question.id.startsWith("note:")) {
-        notes.push(answer);
-      } else if (question.id.startsWith("ticket:")) {
-        candidateTickets.push({ id: question.id.slice("ticket:".length), title: answer });
-      } else if (question.id.startsWith("fog:")) {
-        fogOfWar.push({ id: question.id.slice("fog:".length), title: answer });
-      } else if (question.id.startsWith("out-of-scope:")) {
-        outOfScope.push({
-          id: question.id.slice("out-of-scope:".length),
-          title: answer,
-        });
-      } else {
-        const dependency = /^dependency:(.+)->(.+)$/u.exec(question.id);
-        if (dependency?.[1] && dependency[2]) {
-          proposedDependencyEdges.push({ from: dependency[1], to: dependency[2] });
-        }
+      const target = parseWayfinderDecisionTarget(question.id);
+      switch (target?.kind) {
+        case "destination":
+          destination = answer;
+          break;
+        case "note":
+          notes.push(answer);
+          break;
+        case "candidate-ticket":
+          candidateTickets.push({ id: target.id, title: answer });
+          break;
+        case "fog-of-war":
+          fogOfWar.push({ id: target.id, title: answer });
+          break;
+        case "out-of-scope":
+          outOfScope.push({ id: target.id, title: answer });
+          break;
+        case "proposed-dependency":
+          proposedDependencyEdges.push({ from: target.from, to: target.to });
+          break;
       }
     }
     updatedAt = receipt.createdAt;

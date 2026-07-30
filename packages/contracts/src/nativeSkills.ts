@@ -40,6 +40,20 @@ export const WayfinderDecisionReceipt = Schema.Struct({
 });
 export type WayfinderDecisionReceipt = typeof WayfinderDecisionReceipt.Type;
 
+export const WayfinderDecisionTarget = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("destination") }),
+  Schema.Struct({ kind: Schema.Literal("note"), id: TrimmedNonEmptyString }),
+  Schema.Struct({ kind: Schema.Literal("candidate-ticket"), id: TrimmedNonEmptyString }),
+  Schema.Struct({ kind: Schema.Literal("fog-of-war"), id: TrimmedNonEmptyString }),
+  Schema.Struct({ kind: Schema.Literal("out-of-scope"), id: TrimmedNonEmptyString }),
+  Schema.Struct({
+    kind: Schema.Literal("proposed-dependency"),
+    from: TrimmedNonEmptyString,
+    to: TrimmedNonEmptyString,
+  }),
+]);
+export type WayfinderDecisionTarget = typeof WayfinderDecisionTarget.Type;
+
 export const WayfinderDraft = Schema.Struct({
   authority: Schema.Literal("unpublished-draft"),
   canonical: Schema.Literal(false),
@@ -55,20 +69,5 @@ export const WayfinderDraft = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type WayfinderDraft = typeof WayfinderDraft.Type;
-
-export const emptyWayfinderDraft = (createdAt: string): WayfinderDraft => ({
-  authority: "unpublished-draft",
-  canonical: false,
-  destination: null,
-  notes: [],
-  confirmedDecisions: [],
-  proposedDecisions: [],
-  candidateTickets: [],
-  fogOfWar: [],
-  outOfScope: [],
-  proposedDependencyEdges: [],
-  decisionReceipts: [],
-  updatedAt: IsoDateTime.make(createdAt),
-});
 
 export const OptionalWayfinderDraft = Schema.optional(WayfinderDraft);

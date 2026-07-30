@@ -11,8 +11,8 @@ import {
   SkillRunId,
   SkillInvocation,
   WorkstreamId,
-  emptyWayfinderDraft,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -2578,7 +2578,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
         adapterVersion: 1,
       },
       createdAt: turnStartedAt,
-      wayfinderDraft: emptyWayfinderDraft(turnStartedAt),
+      wayfinderDraft: createEmptyWayfinderDraft(turnStartedAt),
     };
 
     yield* Effect.gen(function* () {

@@ -1548,13 +1548,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     const nativeSkillInvocation =
       input.skillInvocation?.execution.mode === "native" ? input.skillInvocation : undefined;
     const nativeSkillArguments = nativeSkillInvocation
-      ? renderNativeWayfinderArguments({
-          skillName: nativeSkillInvocation.skill.name,
-          ...(nativeSkillInvocation.action ? { action: nativeSkillInvocation.action } : {}),
-          ...(nativeSkillInvocation.arguments
-            ? { arguments: nativeSkillInvocation.arguments }
-            : {}),
-        })
+      ? renderNativeWayfinderArguments(nativeSkillInvocation)
       : undefined;
     return yield* session.runtime
       .sendTurn({
