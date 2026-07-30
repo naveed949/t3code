@@ -271,6 +271,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  nativeSkillChooserMessage,
   resolveChatSkillInvocationRequest,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
@@ -4604,6 +4605,17 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    const skillInvocationResolution = resolveChatSkillInvocationRequest({
+      text: promptForSend,
+      providerInstanceId: ctxSelectedModelSelection.instanceId,
+      providers: providerStatuses,
+      explicitRequest: explicitSkillInvocationRequestRef.current,
+    });
+    if (skillInvocationResolution && "kind" in skillInvocationResolution) {
+      setThreadError(threadIdForSend, nativeSkillChooserMessage(skillInvocationResolution.reason));
+      return;
+    }
+
     sendInFlightRef.current = true;
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
@@ -4648,12 +4660,7 @@ function ChatViewContent(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
-    const skillInvocationRequest = resolveChatSkillInvocationRequest({
-      text: messageTextForSend,
-      providerInstanceId: ctxSelectedModelSelection.instanceId,
-      providers: providerStatuses,
-      explicitRequest: explicitSkillInvocationRequestRef.current,
-    });
+    const skillInvocationRequest = skillInvocationResolution;
     explicitSkillInvocationRequestRef.current = null;
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({

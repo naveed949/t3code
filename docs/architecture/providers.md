@@ -44,3 +44,9 @@ the projected turn stores the complete invocation record. Shared shell snapshots
 thread's latest stored run independently of its latest turn. This bounded summary survives restart
 and reconnect without making base shell hydration grow with every historical run; complete run
 history remains in the persisted turns.
+
+Native Wayfinder dispatch is wrapped in a server-side, read-only preflight gate. GitHub credentials
+and CLI calls never cross into web, desktop, or mobile clients. The gate resolves the project and any
+continuation issue, returns structured blockers with remediation, and only invokes orchestration
+dispatch after every prerequisite succeeds. An explicit generic execution preference bypasses this
+native-only gate while retaining the pinned skill invocation.

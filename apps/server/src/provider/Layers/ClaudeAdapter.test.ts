@@ -65,7 +65,8 @@ describe("buildPromptText", () => {
               contentDigest:
                 "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
             },
-            arguments: "chart a release",
+            arguments: "continue-map 42",
+            action: { id: "continue-map", reference: "42" },
             execution: {
               mode: "native",
               adapterId: "wayfinder",
@@ -76,7 +77,7 @@ describe("buildPromptText", () => {
         },
         ProviderInstanceId.make("claudeAgent"),
       ),
-      "/wayfinder chart a release",
+      "/wayfinder continue-map 42",
     );
   });
 });

@@ -12,7 +12,10 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
+import {
+  resolveNativeSkillRunInvocation,
+  type NativeSkillRunInvocationChooser,
+} from "@t3tools/client-runtime/operations/native-skill-runs";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -31,12 +34,20 @@ export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
+export function nativeSkillChooserMessage(
+  reason: NativeSkillRunInvocationChooser["reason"],
+): string {
+  return reason === "launch-selection-required"
+    ? "Choose New, Continue, or Generic before sending."
+    : "Choose one continuation issue number or GitHub issue URL before sending.";
+}
+
 export function resolveChatSkillInvocationRequest(input: {
   readonly text: string;
   readonly providerInstanceId: ProviderInstanceId;
   readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "skills">>;
   readonly explicitRequest?: SkillInvocationRequest | null;
-}): SkillInvocationRequest | null {
+}): SkillInvocationRequest | NativeSkillRunInvocationChooser | null {
   const skills =
     input.providers.find((provider) => provider.instanceId === input.providerInstanceId)?.skills ??
     [];
@@ -45,6 +56,7 @@ export function resolveChatSkillInvocationRequest(input: {
     text: input.text,
     skills,
   });
+  if (leadingRequest && "kind" in leadingRequest) return leadingRequest;
   if (
     input.explicitRequest == null ||
     leadingRequest === null ||
@@ -55,7 +67,7 @@ export function resolveChatSkillInvocationRequest(input: {
   }
   return {
     ...input.explicitRequest,
-    ...(leadingRequest.arguments === undefined ? {} : { arguments: leadingRequest.arguments }),
+    ...leadingRequest,
   };
 }
 

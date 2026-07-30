@@ -89,6 +89,7 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import { nativeSkillActionPrompt, type NativeSkillMenuAction } from "./nativeSkillMenuActions";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -1779,22 +1780,65 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
 
   const onNativeSkillAction = useCallback(
-    (item: Extract<ComposerCommandItem, { type: "skill" }>) => {
+    (item: Extract<ComposerCommandItem, { type: "skill" }>, action: NativeSkillMenuAction) => {
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (action === "generic") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
       const request = resolveNativeSkillRunInvocation({
         kind: "native-action",
         skill: item.skill,
+        ...(action === "new-map"
+          ? { action: { id: "new-map" } }
+          : action === "continue-map"
+            ? { action: { id: "continue-map" } }
+            : {}),
       });
-      if (
-        request &&
-        applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)
-      ) {
+      if (request && "kind" in request && request.kind === "chooser") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      if (!request || !("skillName" in request)) return;
+      if (action === "new-map") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          onExplicitSkillInvocation(request);
+          onSend();
+        }
+        return;
+      }
+      if (applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)) {
         onExplicitSkillInvocation(request);
         onSend();
       }
     },
-    [applySkillPromptReplacement, onExplicitSkillInvocation, onSend, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      applySkillPromptReplacement,
+      onExplicitSkillInvocation,
+      onSend,
+      resolveActiveComposerTrigger,
+    ],
   );
 
   const onComposerMenuItemHighlighted = useCallback(

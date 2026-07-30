@@ -71,6 +71,17 @@ describe("resolveNativeSkillExecution", () => {
       reason: "unregistered-skill",
     });
   });
+
+  it("honors an explicit generic Wayfinder launch on a native-capable provider", () => {
+    expect(
+      resolveNativeSkillExecution({
+        provider: ProviderDriverKind.make("codex"),
+        skillName: "wayfinder",
+        contentDigest: VERIFIED_WAYFINDER_CONTENT_DIGEST,
+        executionPreference: "generic",
+      }),
+    ).toEqual({ mode: "generic", reason: "user-selected-generic" });
+  });
 });
 
 effectIt.layer(NodeServices.layer)("resolveSkillInvocationRequest", (it) => {
@@ -109,6 +120,24 @@ effectIt.layer(NodeServices.layer)("resolveSkillInvocationRequest", (it) => {
           reason: "unsupported-digest",
         });
         expect(resolved.arguments).toBe("chart a release");
+
+        const resolvedAction = yield* resolveSkillInvocationRequest({
+          request: {
+            skillName: "wayfinder",
+            skillPath,
+            action: { id: "new-map" },
+          },
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providers: [
+            {
+              driver: ProviderDriverKind.make("codex"),
+              instanceId: ProviderInstanceId.make("codex"),
+              skills: [{ name: "wayfinder", path: skillPath, enabled: true }],
+            },
+          ],
+        });
+        expect(resolvedAction.action).toEqual({ id: "new-map" });
+        expect(resolvedAction.arguments).toBe("new-map");
       }),
   );
 });

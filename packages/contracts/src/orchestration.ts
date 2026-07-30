@@ -180,10 +180,18 @@ export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
+export const SkillInvocationAction = Schema.Union([
+  Schema.Struct({ id: Schema.Literal("new-map") }),
+  Schema.Struct({ id: Schema.Literal("continue-map"), reference: TrimmedNonEmptyString }),
+]);
+export type SkillInvocationAction = typeof SkillInvocationAction.Type;
+
 export const SkillInvocationRequest = Schema.Struct({
   skillName: TrimmedNonEmptyString,
   skillPath: TrimmedNonEmptyString,
   arguments: Schema.optional(TrimmedNonEmptyString),
+  action: Schema.optional(SkillInvocationAction),
+  executionPreference: Schema.optional(Schema.Literal("generic")),
 });
 export type SkillInvocationRequest = typeof SkillInvocationRequest.Type;
 
@@ -203,7 +211,12 @@ export type NativeSkillExecution = typeof NativeSkillExecution.Type;
 
 export const GenericSkillExecution = Schema.Struct({
   mode: Schema.Literal("generic"),
-  reason: Schema.Literals(["unsupported-provider", "unsupported-digest", "unregistered-skill"]),
+  reason: Schema.Literals([
+    "unsupported-provider",
+    "unsupported-digest",
+    "unregistered-skill",
+    "user-selected-generic",
+  ]),
 });
 export type GenericSkillExecution = typeof GenericSkillExecution.Type;
 
@@ -213,6 +226,7 @@ export type SkillExecution = typeof SkillExecution.Type;
 export const ResolvedSkillInvocation = Schema.Struct({
   skill: PinnedSkillIdentity,
   arguments: Schema.optional(TrimmedNonEmptyString),
+  action: Schema.optional(SkillInvocationAction),
   execution: SkillExecution,
 });
 export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;
@@ -1456,6 +1470,14 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    preflightBlockers: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          check: TrimmedNonEmptyString,
+          remediation: TrimmedNonEmptyString,
+        }),
+      ),
+    ),
   },
 ) {}
 

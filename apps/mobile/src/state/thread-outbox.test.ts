@@ -114,7 +114,7 @@ describe("thread outbox", () => {
   it("persists an explicit skill invocation request for offline delivery", () => {
     const skillInvocationRequest = resolveNativeSkillRunInvocation({
       kind: "leading-token",
-      text: "$wayfinder chart a release",
+      text: "$wayfinder generic chart a release",
       skills: [
         {
           name: "wayfinder",
@@ -124,7 +124,7 @@ describe("thread outbox", () => {
       ],
     });
     expect(skillInvocationRequest).not.toBeNull();
-    if (skillInvocationRequest === null) {
+    if (skillInvocationRequest === null || "kind" in skillInvocationRequest) {
       throw new Error("Expected a leading Wayfinder invocation");
     }
     const message = {

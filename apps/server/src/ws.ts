@@ -114,6 +114,11 @@ import * as VcsProjectConfig from "./vcs/VcsProjectConfig.ts";
 import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
+import * as NativeWayfinderPreflightService from "./nativeSkills/NativeWayfinderPreflightService.ts";
+import { dispatchWithNativeWayfinderPreflight } from "./nativeSkills/WayfinderDispatchGate.ts";
+import * as GitHubPreflightInspector from "./nativeSkills/GitHubPreflightInspector.ts";
+import * as IssueTracker from "./nativeSkills/IssueTracker.ts";
+import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
@@ -337,6 +342,7 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  nativeWayfinderPreflight: NativeWayfinderPreflightService.NativeWayfinderPreflightService["Service"],
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -1034,7 +1040,30 @@ const makeWsRpcLayer = (
                         Effect.orElseSucceed(() => false),
                       )
                   : false;
-              const result = yield* dispatchNormalizedCommand(normalizedCommand);
+              const result = yield* dispatchWithNativeWayfinderPreflight({
+                command: normalizedCommand,
+                dependencies: {
+                  providers: providers ?? [],
+                  getThread: (threadId) =>
+                    projectionSnapshotQuery
+                      .getThreadShellById(threadId)
+                      .pipe(
+                        Effect.mapError((cause) =>
+                          toDispatchCommandError(cause, "Failed to load Wayfinder thread"),
+                        ),
+                      ),
+                  getProject: (projectId) =>
+                    projectionSnapshotQuery
+                      .getProjectShellById(projectId)
+                      .pipe(
+                        Effect.mapError((cause) =>
+                          toDispatchCommandError(cause, "Failed to load Wayfinder project"),
+                        ),
+                      ),
+                  check: nativeWayfinderPreflight.check,
+                },
+                dispatch: dispatchNormalizedCommand,
+              });
               if (normalizedCommand.type === "thread.archive") {
                 if (shouldStopSessionAfterArchive) {
                   yield* Effect.gen(function* () {
@@ -2035,6 +2064,8 @@ export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
     const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
+    const nativeWayfinderPreflight =
+      yield* NativeWayfinderPreflightService.NativeWayfinderPreflightService;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2054,7 +2085,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker).pipe(
+            makeWsRpcLayer(session, previewAutomationBroker, nativeWayfinderPreflight).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
@@ -2094,5 +2125,16 @@ export const websocketRpcRouteLayer = Layer.unwrap(
         }),
       ),
     );
-  }),
+  }).pipe(
+    Effect.provide(
+      NativeWayfinderPreflightService.layer.pipe(
+        Layer.provide(
+          Layer.merge(IssueTracker.GitHubIssueTrackerLive, GitHubPreflightInspector.layer).pipe(
+            Layer.provide(GitHubCli.layer.pipe(Layer.provide(VcsProcess.layer))),
+            Layer.provide(RepositoryIdentityResolver.layer),
+          ),
+        ),
+      ),
+    ),
+  ),
 );

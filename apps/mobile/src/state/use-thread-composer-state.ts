@@ -161,6 +161,12 @@ export function useThreadComposerState() {
       text,
       skills,
     });
+    if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+      setPendingConnectionError(
+        "Choose one continuation issue number or GitHub issue URL before sending.",
+      );
+      return null;
+    }
     try {
       await enqueueThreadOutboxMessage({
         environmentId: selectedThreadShell.environmentId,

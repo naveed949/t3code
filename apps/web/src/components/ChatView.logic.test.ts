@@ -22,6 +22,7 @@ import {
   getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  nativeSkillChooserMessage,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveThreadMetadataUpdateForNextTurn,
@@ -31,6 +32,15 @@ import {
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
+
+describe("nativeSkillChooserMessage", () => {
+  it("distinguishes a missing launch choice from a missing continuation issue", () => {
+    expect(nativeSkillChooserMessage("launch-selection-required")).toBe(
+      "Choose New, Continue, or Generic before sending.",
+    );
+    expect(nativeSkillChooserMessage("continuation-reference-required")).toContain("issue number");
+  });
+});
 
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");
@@ -52,17 +62,18 @@ describe("resolveChatSkillInvocationRequest", () => {
     },
   ];
 
-  it("uses the same typed identity for picker text and a leading skill command", () => {
+  it("preserves an explicit generic Wayfinder fallback", () => {
     expect(
       resolveChatSkillInvocationRequest({
-        text: "$wayfinder chart a release",
+        text: "$wayfinder generic chart a release",
         providerInstanceId: ProviderInstanceId.make("codex"),
         providers,
       }),
     ).toEqual({
       skillName: "wayfinder",
       skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "chart a release",
+      arguments: "generic chart a release",
+      executionPreference: "generic",
     });
   });
 
@@ -76,10 +87,20 @@ describe("resolveChatSkillInvocationRequest", () => {
     ).toBeNull();
   });
 
+  it("returns client-visible chooser state for an incomplete continuation", () => {
+    expect(
+      resolveChatSkillInvocationRequest({
+        text: "$wayfinder continue-map 42 and 43",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providers,
+      }),
+    ).toEqual({ kind: "chooser", reason: "continuation-reference-required" });
+  });
+
   it("dispatches a user-reachable native action through the same typed request", () => {
     expect(
       resolveChatSkillInvocationRequest({
-        text: "$wayfinder chart a release",
+        text: "$wayfinder new-map",
         providerInstanceId: ProviderInstanceId.make("codex"),
         providers,
         explicitRequest: {
@@ -90,7 +111,8 @@ describe("resolveChatSkillInvocationRequest", () => {
     ).toEqual({
       skillName: "wayfinder",
       skillPath: "/skills/wayfinder/SKILL.md",
-      arguments: "chart a release",
+      arguments: "new-map",
+      action: { id: "new-map" },
     });
   });
 });
