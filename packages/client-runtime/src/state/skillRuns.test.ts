@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import {
-  ProjectId,
-  SkillRunId,
-  ThreadId,
-  WorkstreamId,
-  type OrchestrationThreadShell,
-} from "@t3tools/contracts";
+import { ProjectId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
 
 import { deriveProjectWorkstreams } from "./skillRuns.ts";
 
@@ -28,22 +22,8 @@ const invocation = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-it("derives durable project Workstreams from shared thread state", () => {
-  const thread = {
-    id: ThreadId.make("thread-1"),
-    projectId: ProjectId.make("project-1"),
-    latestTurn: {
-      turnId: "turn-1",
-      state: "running",
-      requestedAt: invocation.createdAt,
-      startedAt: invocation.createdAt,
-      completedAt: null,
-      assistantMessageId: null,
-      skillInvocation: invocation,
-    },
-  } as OrchestrationThreadShell;
-
-  expect(deriveProjectWorkstreams(ProjectId.make("project-1"), [thread])).toEqual([
+it("derives durable project Workstreams from shared Skill Run state", () => {
+  expect(deriveProjectWorkstreams(ProjectId.make("project-1"), [invocation])).toEqual([
     {
       id: WorkstreamId.make("workstream:1"),
       projectId: ProjectId.make("project-1"),
@@ -54,17 +34,13 @@ it("derives durable project Workstreams from shared thread state", () => {
 });
 
 describe("deriveProjectWorkstreams", () => {
-  it("ignores ordinary turns and invocations owned by another project", () => {
+  it("keeps runs discoverable independently of a thread's latest turn", () => {
     expect(
       deriveProjectWorkstreams(ProjectId.make("project-2"), [
         {
+          ...invocation,
           projectId: ProjectId.make("project-1"),
-          latestTurn: { skillInvocation: invocation },
-        } as OrchestrationThreadShell,
-        {
-          projectId: ProjectId.make("project-2"),
-          latestTurn: null,
-        } as OrchestrationThreadShell,
+        },
       ]),
     ).toEqual([]);
   });

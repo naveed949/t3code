@@ -84,8 +84,8 @@ A side-effecting service that handles follow-up work after events or runtime sig
 #### Workstream
 
 A project-scoped identity that groups related skill work. The first explicit skill invocation creates
-the Workstream identifier in [decider.ts][8]; clients derive its current representation from shared
-thread state.
+the Workstream identifier in [decider.ts][8]; clients derive its current representation from the
+shared project Skill Run list and each run's linked thread.
 
 #### Skill Run
 

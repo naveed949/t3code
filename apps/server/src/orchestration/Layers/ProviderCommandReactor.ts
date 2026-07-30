@@ -10,6 +10,7 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type SkillInvocation,
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
@@ -617,12 +618,7 @@ const make = Effect.gen(function* () {
     readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
-    readonly skillInvocation?: NonNullable<
-      Extract<
-        OrchestrationEvent,
-        { type: "thread.turn-start-requested" }
-      >["payload"]["skillInvocation"]
-    >;
+    readonly skillInvocation?: SkillInvocation;
     readonly createdAt: string;
   }) {
     const thread = yield* resolveThread(input.threadId);

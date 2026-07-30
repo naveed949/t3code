@@ -45,9 +45,21 @@ describe("resolveChatSkillInvocationRequest", () => {
       enabled: true,
     },
   ];
+  const providers = [
+    {
+      instanceId: ProviderInstanceId.make("codex"),
+      skills,
+    },
+  ];
 
   it("uses the same typed identity for picker text and a leading skill command", () => {
-    expect(resolveChatSkillInvocationRequest("$wayfinder chart a release", skills)).toEqual({
+    expect(
+      resolveChatSkillInvocationRequest({
+        text: "$wayfinder chart a release",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providers,
+      }),
+    ).toEqual({
       skillName: "wayfinder",
       skillPath: "/skills/wayfinder/SKILL.md",
       arguments: "chart a release",
@@ -56,7 +68,11 @@ describe("resolveChatSkillInvocationRequest", () => {
 
   it("leaves ordinary prose as an ordinary turn", () => {
     expect(
-      resolveChatSkillInvocationRequest("Tell me whether Wayfinder would help here", skills),
+      resolveChatSkillInvocationRequest({
+        text: "Tell me whether Wayfinder would help here",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providers,
+      }),
     ).toBeNull();
   });
 });

@@ -10,5 +10,6 @@ verified Wayfinder skill runs through the Codex and Claude native skill mechanis
 unregistered skills, and locally modified Wayfinder content continue as ordinary provider prompts
 with a truthful generic fallback.
 
-The resulting skill-run identity is part of the shared thread snapshot, so web, desktop, and mobile
-clients see the same run after reconnecting.
+The resulting skill-run identity is part of the shared project snapshot and links back to its
+originating thread, so web, desktop, and mobile clients retain the same run after later turns and
+after reconnecting.

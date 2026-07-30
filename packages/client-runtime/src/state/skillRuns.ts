@@ -1,5 +1,4 @@
 import type {
-  OrchestrationThreadShell,
   ProjectId,
   SkillInvocation,
   SkillRunId,
@@ -16,7 +15,7 @@ export interface ProjectSkillWorkstream {
 
 export const deriveProjectWorkstreams = (
   projectId: ProjectId,
-  threadShells: ReadonlyArray<OrchestrationThreadShell>,
+  skillRuns: ReadonlyArray<SkillInvocation>,
 ): ReadonlyArray<ProjectSkillWorkstream> => {
   const workstreams = new Map<
     WorkstreamId,
@@ -26,18 +25,15 @@ export const deriveProjectWorkstreams = (
     }
   >();
 
-  for (const thread of threadShells) {
-    if (thread.projectId !== projectId) continue;
-
-    const invocation = thread.latestTurn?.skillInvocation;
-    if (!invocation || invocation.projectId !== projectId) continue;
+  for (const invocation of skillRuns) {
+    if (invocation.projectId !== projectId) continue;
 
     const existing = workstreams.get(invocation.workstreamId) ?? {
       linkedThreadIds: new Set<ThreadId>(),
       skillRuns: new Map<SkillRunId, SkillInvocation>(),
     };
 
-    existing.linkedThreadIds.add(thread.id);
+    existing.linkedThreadIds.add(invocation.threadId);
     existing.skillRuns.set(invocation.skillRunId, invocation);
     workstreams.set(invocation.workstreamId, existing);
   }

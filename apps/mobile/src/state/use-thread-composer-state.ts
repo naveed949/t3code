@@ -11,8 +11,8 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
-import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
 import {
@@ -156,7 +156,11 @@ export function useThreadComposerState() {
       serverConfig?.providers.find(
         (provider) => provider.instanceId === selectedModelSelection.instanceId,
       )?.skills ?? [];
-    const skillInvocationRequest = resolveLeadingSkillInvocationRequest(text, skills);
+    const skillInvocationRequest = resolveNativeSkillRunInvocation({
+      kind: "leading-token",
+      text,
+      skills,
+    });
     try {
       await enqueueThreadOutboxMessage({
         environmentId: selectedThreadShell.environmentId,

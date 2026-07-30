@@ -8,7 +8,7 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { useFontFamily } from "../../lib/useFontFamily";
 
 import { EnvironmentId } from "@t3tools/contracts";
-import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -805,10 +805,11 @@ export function NewTaskDraftScreen(props: {
     const runtimeMode = draft.runtimeMode ?? flow.runtimeMode;
     const interactionMode = draft.interactionMode ?? flow.interactionMode;
     const initialMessageText = draft.text.trim();
-    const skillInvocationRequest = resolveLeadingSkillInvocationRequest(
-      initialMessageText,
-      flow.selectedProviderSkills,
-    );
+    const skillInvocationRequest = resolveNativeSkillRunInvocation({
+      kind: "leading-token",
+      text: initialMessageText,
+      skills: flow.selectedProviderSkills,
+    });
 
     if (
       !modelSelection ||

@@ -13,7 +13,8 @@ Methods mirror the `NativeApi` interface defined in `@t3tools/contracts`:
 - `providers.respondToRequest`, `providers.stopSession`
 - `shell.openInEditor`, `server.getConfig`
 
-Codex is the only implemented provider. `claudeCode` is reserved in contracts/UI.
+Provider adapters currently cover Codex, Claude, Cursor, Grok, and OpenCode. Their capabilities are
+not identical; adapter-specific features must use explicit capability checks and truthful fallback.
 
 ## Client transport
 
@@ -39,4 +40,6 @@ verified name-and-digest pairs.
 Codex receives a native skill input item and Claude receives its native slash-command form. Providers
 without a registered native adapter, unknown skills, and digest mismatches preserve the original
 prompt as a generic turn. The orchestration event owns the Workstream and Skill Run identifiers, and
-the projected turn stores the complete invocation record for restart and reconnect hydration.
+the projected turn stores the complete invocation record. Shared shell snapshots collect every
+stored run independently of the latest turn so restart and reconnect hydration cannot hide older
+Workstreams.

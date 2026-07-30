@@ -4,15 +4,15 @@ import {
   ProjectId,
   type ModelSelection,
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProvider,
-  type ServerProviderSkill,
   type SkillInvocationRequest,
   type ScopedProjectRef,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -31,11 +31,19 @@ export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
 
-export function resolveChatSkillInvocationRequest(
-  text: string,
-  skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "path" | "enabled">>,
-): SkillInvocationRequest | null {
-  return resolveLeadingSkillInvocationRequest(text, skills);
+export function resolveChatSkillInvocationRequest(input: {
+  readonly text: string;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "skills">>;
+}): SkillInvocationRequest | null {
+  const skills =
+    input.providers.find((provider) => provider.instanceId === input.providerInstanceId)?.skills ??
+    [];
+  return resolveNativeSkillRunInvocation({
+    kind: "leading-token",
+    text: input.text,
+    skills,
+  });
 }
 
 export function startNewThreadForProject(

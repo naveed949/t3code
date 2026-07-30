@@ -105,6 +105,10 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
   skillInvocation: Schema.NullOr(Schema.fromJsonString(SkillInvocation)),
 });
+const ProjectionSkillRunDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  skillInvocation: Schema.fromJsonString(SkillInvocation),
+});
 const ProjectionStateDbRowSchema = ProjectionState;
 const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
@@ -649,6 +653,48 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND threads.archived_at IS NOT NULL
           AND threads.latest_turn_id IS NOT NULL
         ORDER BY turns.thread_id ASC
+      `,
+  });
+
+  const listActiveSkillRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          turns.thread_id AS "threadId",
+          turns.skill_invocation_json AS "skillInvocation"
+        FROM projection_turns turns
+        INNER JOIN projection_threads threads
+          ON threads.thread_id = turns.thread_id
+        WHERE turns.skill_invocation_json IS NOT NULL
+          AND threads.deleted_at IS NULL
+          AND threads.archived_at IS NULL
+        ORDER BY
+          turns.thread_id ASC,
+          turns.requested_at ASC,
+          turns.turn_id ASC
+      `,
+  });
+
+  const listArchivedSkillRunRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          turns.thread_id AS "threadId",
+          turns.skill_invocation_json AS "skillInvocation"
+        FROM projection_turns turns
+        INNER JOIN projection_threads threads
+          ON threads.thread_id = turns.thread_id
+        WHERE turns.skill_invocation_json IS NOT NULL
+          AND threads.deleted_at IS NULL
+          AND threads.archived_at IS NOT NULL
+        ORDER BY
+          turns.thread_id ASC,
+          turns.requested_at ASC,
+          turns.turn_id ASC
       `,
   });
 
@@ -1477,19 +1523,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listProjectionStateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:query",
-                "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:decodeRows",
+          Effect.all([
+            listActiveSkillRunRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:listSkillRuns:query",
+                  "ProjectionSnapshotQuery.getShellSnapshot:listSkillRuns:decodeRows",
+                ),
               ),
             ),
-          ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:query",
+                  "ProjectionSnapshotQuery.getShellSnapshot:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+          ]),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, runStateRows]) =>
           Effect.gen(function* () {
+            const [skillRunRows, stateRows] = runStateRows;
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1557,6 +1614,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
               ),
+              skillRuns: skillRunRows.map((row) => row.skillInvocation),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 
@@ -1613,19 +1671,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
-          listProjectionStateRows(undefined).pipe(
-            Effect.mapError(
-              toPersistenceSqlOrDecodeError(
-                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:query",
-                "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:decodeRows",
+          Effect.all([
+            listArchivedSkillRunRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listSkillRuns:query",
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listSkillRuns:decodeRows",
+                ),
               ),
             ),
-          ),
+            listProjectionStateRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:query",
+                  "ProjectionSnapshotQuery.getArchivedShellSnapshot:listProjectionState:decodeRows",
+                ),
+              ),
+            ),
+          ]),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
+        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, runStateRows]) =>
           Effect.gen(function* () {
+            const [skillRunRows, stateRows] = runStateRows;
             let updatedAt: string | null = null;
             for (const row of projectRows) {
               updatedAt = maxIso(updatedAt, row.updatedAt);
@@ -1694,6 +1763,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
                 }),
               ),
+              skillRuns: skillRunRows.map((row) => row.skillInvocation),
               updatedAt: updatedAt ?? "1970-01-01T00:00:00.000Z",
             };
 

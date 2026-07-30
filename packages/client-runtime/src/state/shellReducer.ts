@@ -26,13 +26,30 @@ export function applyShellStreamEvent(
       return {
         ...snapshot,
         projects: Arr.filter(snapshot.projects, (p) => p.id !== event.projectId),
+        ...(snapshot.skillRuns
+          ? {
+              skillRuns: Arr.filter(snapshot.skillRuns, (run) => run.projectId !== event.projectId),
+            }
+          : {}),
         snapshotSequence: event.sequence,
       };
     case "thread-upserted": {
       const threads = snapshot.threads.some((t) => t.id === event.thread.id)
         ? Arr.map(snapshot.threads, (t) => (t.id === event.thread.id ? event.thread : t))
         : Arr.append(snapshot.threads, event.thread);
-      return { ...snapshot, threads, snapshotSequence: event.sequence };
+      const invocation = event.thread.latestTurn?.skillInvocation;
+      const skillRuns =
+        invocation === undefined
+          ? snapshot.skillRuns
+          : snapshot.skillRuns?.some((run) => run.skillRunId === invocation.skillRunId)
+            ? snapshot.skillRuns
+            : Arr.append(snapshot.skillRuns ?? [], invocation);
+      return {
+        ...snapshot,
+        threads,
+        ...(skillRuns ? { skillRuns } : {}),
+        snapshotSequence: event.sequence,
+      };
     }
     case "thread-removed":
       return {

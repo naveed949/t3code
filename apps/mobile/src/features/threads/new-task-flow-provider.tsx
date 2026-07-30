@@ -15,9 +15,9 @@ import {
   MessageId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
-import { resolveLeadingSkillInvocationRequest } from "@t3tools/shared/composerInlineTokens";
 
 import { useEnvironmentServerConfig, useProjects, useThreadShells } from "../../state/entities";
 import type { TurnCommandMetadata } from "../../lib/commandMetadata";
@@ -693,10 +693,11 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const projectCwd = usingPendingSnapshot
         ? editingPendingTask?.creation?.projectCwd
         : selectedProject.workspaceRoot;
-      const skillInvocationRequest = resolveLeadingSkillInvocationRequest(
+      const skillInvocationRequest = resolveNativeSkillRunInvocation({
+        kind: "leading-token",
         text,
-        selectedProviderSkills,
-      );
+        skills: selectedProviderSkills,
+      });
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),

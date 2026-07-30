@@ -7,6 +7,7 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
 import {
@@ -111,16 +112,27 @@ describe("thread outbox", () => {
   });
 
   it("persists an explicit skill invocation request for offline delivery", () => {
+    const skillInvocationRequest = resolveNativeSkillRunInvocation({
+      kind: "leading-token",
+      text: "$wayfinder chart a release",
+      skills: [
+        {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          enabled: true,
+        },
+      ],
+    });
+    expect(skillInvocationRequest).not.toBeNull();
+    if (skillInvocationRequest === null) {
+      throw new Error("Expected a leading Wayfinder invocation");
+    }
     const message = {
       ...queuedMessage({
         messageId: "message-skill",
         createdAt: "2026-06-08T10:00:01.000Z",
       }),
-      skillInvocationRequest: {
-        skillName: "wayfinder",
-        skillPath: "/skills/wayfinder/SKILL.md",
-        arguments: "chart a release",
-      },
+      skillInvocationRequest,
     } satisfies QueuedThreadMessage;
 
     expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(message))).toEqual(message);

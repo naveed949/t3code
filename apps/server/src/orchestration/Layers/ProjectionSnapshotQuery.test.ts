@@ -1392,7 +1392,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'message-user-2',
             NULL,
             NULL,
-            ${encodedSkillInvocation},
+            NULL,
             NULL,
             'running',
             '2026-04-03T00:00:30.000Z',
@@ -1409,7 +1409,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'message-user-1',
             NULL,
             NULL,
-            NULL,
+            ${encodedSkillInvocation},
             'message-assistant-1',
             'completed',
             '2026-04-03T00:00:05.000Z',
@@ -1437,17 +1437,18 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const commandReadModel = yield* snapshotQuery.getCommandReadModel();
       assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
-      assert.deepEqual(commandReadModel.threads[0]?.latestTurn?.skillInvocation, skillInvocation);
+      assert.equal(commandReadModel.threads[0]?.latestTurn?.skillInvocation, undefined);
 
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(shellSnapshot.threads[0]?.latestTurn?.state, "running");
-      assert.deepEqual(shellSnapshot.threads[0]?.latestTurn?.skillInvocation, skillInvocation);
+      assert.equal(shellSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
+      assert.deepEqual(shellSnapshot.skillRuns, [skillInvocation]);
 
       const fullSnapshot = yield* snapshotQuery.getSnapshot();
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.state, "running");
-      assert.deepEqual(fullSnapshot.threads[0]?.latestTurn?.skillInvocation, skillInvocation);
+      assert.equal(fullSnapshot.threads[0]?.latestTurn?.skillInvocation, undefined);
     }),
   );
 
