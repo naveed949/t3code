@@ -19,6 +19,7 @@ import {
   CommandSeparator,
 } from "../ui/command";
 import { PierreEntryIcon } from "./PierreEntryIcon";
+import type { NativeSkillMenuAction } from "./nativeSkillMenuActions";
 
 export type ComposerCommandItem =
   | {
@@ -52,8 +53,6 @@ export type ComposerCommandItem =
       label: string;
       description: string;
     };
-
-export type NativeSkillMenuAction = "run" | "new-map" | "continue-map" | "generic";
 
 type ComposerCommandGroup = {
   id: string;

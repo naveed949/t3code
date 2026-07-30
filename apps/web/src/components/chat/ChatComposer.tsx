@@ -88,11 +88,8 @@ import {
 } from "../composerFooterLayout";
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
-import {
-  type ComposerCommandItem,
-  ComposerCommandMenu,
-  type NativeSkillMenuAction,
-} from "./ComposerCommandMenu";
+import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import { nativeSkillActionPrompt, type NativeSkillMenuAction } from "./nativeSkillMenuActions";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -1790,7 +1787,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const applied = applyPromptReplacement(
           trigger.rangeStart,
           trigger.rangeEnd,
-          `$${item.skill.name} generic `,
+          nativeSkillActionPrompt(item.skill.name, action),
           { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
         );
         if (applied) setComposerHighlightedItemId(null);
@@ -1809,13 +1806,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         const applied = applyPromptReplacement(
           trigger.rangeStart,
           trigger.rangeEnd,
-          `$${item.skill.name} continue-map `,
+          nativeSkillActionPrompt(item.skill.name, action),
           { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
         );
         if (applied) setComposerHighlightedItemId(null);
         return;
       }
       if (!request || !("skillName" in request)) return;
+      if (action === "new-map") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          onExplicitSkillInvocation(request);
+          onSend();
+        }
+        return;
+      }
       if (applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)) {
         onExplicitSkillInvocation(request);
         onSend();

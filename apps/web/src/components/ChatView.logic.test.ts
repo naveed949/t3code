@@ -22,6 +22,7 @@ import {
   getStartedThreadModelChangeBlockReason,
   hasServerAcknowledgedLocalDispatch,
   isBranchMismatchDismissedForSession,
+  nativeSkillChooserMessage,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
   resolveThreadMetadataUpdateForNextTurn,
@@ -31,6 +32,15 @@ import {
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "./ChatView.logic";
+
+describe("nativeSkillChooserMessage", () => {
+  it("distinguishes a missing launch choice from a missing continuation issue", () => {
+    expect(nativeSkillChooserMessage("launch-selection-required")).toBe(
+      "Choose New, Continue, or Generic before sending.",
+    );
+    expect(nativeSkillChooserMessage("continuation-reference-required")).toContain("issue number");
+  });
+});
 
 const environmentId = EnvironmentId.make("environment-local");
 const projectId = ProjectId.make("project-1");

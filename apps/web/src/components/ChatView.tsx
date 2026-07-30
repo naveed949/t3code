@@ -271,6 +271,7 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  nativeSkillChooserMessage,
   resolveChatSkillInvocationRequest,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
@@ -4611,10 +4612,7 @@ function ChatViewContent(props: ChatViewProps) {
       explicitRequest: explicitSkillInvocationRequestRef.current,
     });
     if (skillInvocationResolution && "kind" in skillInvocationResolution) {
-      setThreadError(
-        threadIdForSend,
-        "Choose one continuation issue number or GitHub issue URL before sending.",
-      );
+      setThreadError(threadIdForSend, nativeSkillChooserMessage(skillInvocationResolution.reason));
       return;
     }
 
