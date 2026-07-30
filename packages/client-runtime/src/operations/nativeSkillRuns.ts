@@ -1,8 +1,4 @@
-import type {
-  ServerProviderSkill,
-  SkillInvocationAction,
-  SkillInvocationRequest,
-} from "@t3tools/contracts";
+import type { ServerProviderSkill, SkillInvocationRequest } from "@t3tools/contracts";
 import {
   createSkillInvocationRequest,
   resolveLeadingSkillInvocationRequest,
@@ -25,7 +21,9 @@ export type NativeSkillRunInvocationIntent =
       readonly kind: "native-action";
       readonly skill: SelectableSkill;
       readonly arguments?: string;
-      readonly action?: SkillInvocationAction;
+      readonly action?:
+        | { readonly id: "new-map" }
+        | { readonly id: "continue-map"; readonly reference?: string };
       readonly executionPreference?: "generic";
     };
 
@@ -54,7 +52,7 @@ function resolveGitHubIssueReference(reference: string | undefined): string | nu
  */
 export function resolveNativeSkillRunInvocation(
   intent: Extract<NativeSkillRunInvocationIntent, { readonly kind: "leading-token" }>,
-): SkillInvocationRequest | null;
+): SkillInvocationRequest | NativeSkillRunInvocationChooser | null;
 export function resolveNativeSkillRunInvocation(
   intent: Extract<NativeSkillRunInvocationIntent, { readonly kind: "picker-selection" }>,
 ): SkillInvocationRequest | null;
@@ -78,17 +76,9 @@ export function resolveNativeSkillRunInvocation(
     if (continueMatch) {
       const suppliedReference = continueMatch[1]?.trim();
       const issueReference = resolveGitHubIssueReference(suppliedReference);
-      return {
-        ...request,
-        action: {
-          id: "continue-map",
-          ...(issueReference
-            ? { reference: issueReference }
-            : suppliedReference
-              ? { reference: suppliedReference }
-              : {}),
-        },
-      };
+      return issueReference
+        ? { ...request, action: { id: "continue-map", reference: issueReference } }
+        : { kind: "chooser", reason: "continuation-reference-required" };
     }
     return request;
   }

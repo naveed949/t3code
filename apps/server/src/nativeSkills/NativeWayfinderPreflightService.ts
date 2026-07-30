@@ -78,14 +78,13 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
         remediation: "Choose whether to start a new map or continue an existing issue.",
       });
     } else if (input.action.id === "continue-map") {
-      const issue =
-        repository && input.action.reference
-          ? yield* issueTracker.resolveIssue({
-              cwd: input.workspaceRoot,
-              repository,
-              reference: input.action.reference,
-            })
-          : null;
+      const issue = repository
+        ? yield* issueTracker.resolveIssue({
+            cwd: input.workspaceRoot,
+            repository,
+            reference: input.action.reference,
+          })
+        : null;
       if (issue === null) {
         blockers.unshift({
           check: "continuation-issue",

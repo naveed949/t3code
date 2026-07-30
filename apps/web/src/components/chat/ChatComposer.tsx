@@ -1786,15 +1786,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (item: Extract<ComposerCommandItem, { type: "skill" }>, action: NativeSkillMenuAction) => {
       const { snapshot, trigger } = resolveActiveComposerTrigger();
       if (!trigger) return;
+      if (action === "generic") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `$${item.skill.name} generic `,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
       const request = resolveNativeSkillRunInvocation({
         kind: "native-action",
         skill: item.skill,
-        ...(action === "new-map" || action === "generic"
+        ...(action === "new-map"
           ? { action: { id: "new-map" } }
           : action === "continue-map"
             ? { action: { id: "continue-map" } }
             : {}),
-        ...(action === "generic" ? { executionPreference: "generic" } : {}),
       });
       if (request && "kind" in request && request.kind === "chooser") {
         const applied = applyPromptReplacement(

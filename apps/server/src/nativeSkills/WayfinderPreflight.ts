@@ -9,15 +9,6 @@ export { VERIFIED_WAYFINDER_CONTENT_DIGEST } from "./WayfinderCompatibility.ts";
 
 const REQUIRED_WAYFINDER_LABELS = ["wayfinder:map", "wayfinder:decision"] as const;
 
-export type WayfinderLaunchIntent =
-  | { readonly kind: "new-map" }
-  | { readonly kind: "continue-map"; readonly reference?: string };
-
-export type ResolvedWayfinderLaunch =
-  | { readonly kind: "new-map" }
-  | { readonly kind: "continue-map"; readonly issueNumber: number }
-  | { readonly kind: "chooser"; readonly reason: "continuation-reference-required" };
-
 export interface WayfinderPreflightSnapshot {
   readonly skillDigest: string;
   readonly provider: ProviderDriverKind;
@@ -56,28 +47,6 @@ export interface WayfinderPreflightBlocker {
 export type WayfinderPreflightResult =
   | { readonly kind: "ready" }
   | { readonly kind: "blocked"; readonly blockers: ReadonlyArray<WayfinderPreflightBlocker> };
-
-function resolveIssueNumber(reference: string | undefined): number | null {
-  const trimmed = reference?.trim() ?? "";
-  const directMatch = /^#?(\d+)$/u.exec(trimmed);
-  if (directMatch?.[1]) return Number(directMatch[1]);
-
-  try {
-    const url = new URL(trimmed);
-    const issueMatch = /^\/[^/]+\/[^/]+\/issues\/(\d+)\/?$/u.exec(url.pathname);
-    return url.hostname === "github.com" && issueMatch?.[1] ? Number(issueMatch[1]) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function resolveWayfinderLaunch(intent: WayfinderLaunchIntent): ResolvedWayfinderLaunch {
-  if (intent.kind === "new-map") return { kind: "new-map" };
-  const issueNumber = resolveIssueNumber(intent.reference);
-  return issueNumber === null
-    ? { kind: "chooser", reason: "continuation-reference-required" }
-    : { kind: "continue-map", issueNumber };
-}
 
 /**
  * Evaluates only read-only environment observations. Canonical tracker writes

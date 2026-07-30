@@ -120,6 +120,24 @@ effectIt.layer(NodeServices.layer)("resolveSkillInvocationRequest", (it) => {
           reason: "unsupported-digest",
         });
         expect(resolved.arguments).toBe("chart a release");
+
+        const resolvedAction = yield* resolveSkillInvocationRequest({
+          request: {
+            skillName: "wayfinder",
+            skillPath,
+            action: { id: "new-map" },
+          },
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          providers: [
+            {
+              driver: ProviderDriverKind.make("codex"),
+              instanceId: ProviderInstanceId.make("codex"),
+              skills: [{ name: "wayfinder", path: skillPath, enabled: true }],
+            },
+          ],
+        });
+        expect(resolvedAction.action).toEqual({ id: "new-map" });
+        expect(resolvedAction.arguments).toBe("new-map");
       }),
   );
 });

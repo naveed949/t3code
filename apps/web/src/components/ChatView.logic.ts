@@ -12,7 +12,10 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
-import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
+import {
+  resolveNativeSkillRunInvocation,
+  type NativeSkillRunInvocationChooser,
+} from "@t3tools/client-runtime/operations/native-skill-runs";
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
 import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
 import * as Schema from "effect/Schema";
@@ -36,7 +39,7 @@ export function resolveChatSkillInvocationRequest(input: {
   readonly providerInstanceId: ProviderInstanceId;
   readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "skills">>;
   readonly explicitRequest?: SkillInvocationRequest | null;
-}): SkillInvocationRequest | null {
+}): SkillInvocationRequest | NativeSkillRunInvocationChooser | null {
   const skills =
     input.providers.find((provider) => provider.instanceId === input.providerInstanceId)?.skills ??
     [];
@@ -45,6 +48,7 @@ export function resolveChatSkillInvocationRequest(input: {
     text: input.text,
     skills,
   });
+  if (leadingRequest && "kind" in leadingRequest) return leadingRequest;
   if (
     input.explicitRequest == null ||
     leadingRequest === null ||

@@ -180,10 +180,10 @@ export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 
-export const SkillInvocationAction = Schema.Struct({
-  id: TrimmedNonEmptyString,
-  reference: Schema.optional(TrimmedNonEmptyString),
-});
+export const SkillInvocationAction = Schema.Union([
+  Schema.Struct({ id: Schema.Literal("new-map") }),
+  Schema.Struct({ id: Schema.Literal("continue-map"), reference: TrimmedNonEmptyString }),
+]);
 export type SkillInvocationAction = typeof SkillInvocationAction.Type;
 
 export const SkillInvocationRequest = Schema.Struct({

@@ -26,6 +26,7 @@ import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStri
 import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ComposerSurface } from "./ThreadComposer";
+import { WayfinderLaunchChooser } from "./WayfinderLaunchChooser";
 
 import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
 import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
@@ -810,6 +811,13 @@ export function NewTaskDraftScreen(props: {
       text: initialMessageText,
       skills: flow.selectedProviderSkills,
     });
+    if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+      Alert.alert(
+        "Choose a continuation issue",
+        "Enter one issue number or GitHub issue URL after continue-map.",
+      );
+      return;
+    }
 
     if (
       !modelSelection ||
@@ -1072,6 +1080,7 @@ export function NewTaskDraftScreen(props: {
                 : "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.85) 40%, rgba(255,255,255,0.95) 100%)",
             }}
           >
+            <WayfinderLaunchChooser prompt={flow.prompt} onChangePrompt={flow.setPrompt} />
             <ComposerSurface
               isDarkMode={isDarkMode}
               style={
@@ -1136,7 +1145,10 @@ export function NewTaskDraftScreen(props: {
       <NativeStackScreenOptions options={{ title: selectedProject.title }} />
 
       <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1">
-        <View className="min-h-0 flex-1 px-5 pt-2">{promptEditor}</View>
+        <View className="min-h-0 flex-1 px-5 pt-2">
+          <WayfinderLaunchChooser prompt={flow.prompt} onChangePrompt={flow.setPrompt} />
+          {promptEditor}
+        </View>
 
         <View className="border-t border-border" style={{ paddingBottom: controlsBottomPadding }}>
           {flow.attachments.length > 0 ? (

@@ -134,13 +134,13 @@ describe("resolveNativeSkillRunInvocation", () => {
     ).toMatchObject({ executionPreference: "generic" });
   });
 
-  it("preserves an ambiguous continuation as a chooser-bound intent without guessing", () => {
+  it("returns chooser state for an ambiguous continuation without guessing", () => {
     expect(
       resolveNativeSkillRunInvocation({
         kind: "leading-token",
         text: "$wayfinder continue-map 42 and 43",
         skills: [skill],
       }),
-    ).toMatchObject({ action: { id: "continue-map", reference: "42 and 43" } });
+    ).toEqual({ kind: "chooser", reason: "continuation-reference-required" });
   });
 });

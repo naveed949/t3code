@@ -4,7 +4,6 @@ import { ProviderDriverKind } from "@t3tools/contracts";
 import {
   VERIFIED_WAYFINDER_CONTENT_DIGEST,
   preflightWayfinderLaunch,
-  resolveWayfinderLaunch,
   type WayfinderPreflightSnapshot,
 } from "./WayfinderPreflight.ts";
 
@@ -21,36 +20,6 @@ const readySnapshot = (): WayfinderPreflightSnapshot => ({
     labels: ["wayfinder:map", "wayfinder:decision"],
   },
   repositoryInstructions: { applicable: true, loaded: true },
-});
-
-describe("resolveWayfinderLaunch", () => {
-  it("distinguishes a new map from a resolved issue continuation", () => {
-    expect(resolveWayfinderLaunch({ kind: "new-map" })).toEqual({ kind: "new-map" });
-    expect(resolveWayfinderLaunch({ kind: "continue-map", reference: "#42" })).toEqual({
-      kind: "continue-map",
-      issueNumber: 42,
-    });
-    expect(
-      resolveWayfinderLaunch({
-        kind: "continue-map",
-        reference: "https://github.com/t3tools/t3code/issues/42",
-      }),
-    ).toEqual({ kind: "continue-map", issueNumber: 42 });
-  });
-
-  it.each([undefined, "", "keep working", "42 and 43"])(
-    "returns a chooser instead of guessing continuation reference %j",
-    (reference) => {
-      const intent =
-        reference === undefined
-          ? { kind: "continue-map" as const }
-          : { kind: "continue-map" as const, reference };
-      expect(resolveWayfinderLaunch(intent)).toEqual({
-        kind: "chooser",
-        reason: "continuation-reference-required",
-      });
-    },
-  );
 });
 
 describe("preflightWayfinderLaunch", () => {

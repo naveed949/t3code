@@ -76,6 +76,16 @@ describe("resolveChatSkillInvocationRequest", () => {
     ).toBeNull();
   });
 
+  it("returns client-visible chooser state for an incomplete continuation", () => {
+    expect(
+      resolveChatSkillInvocationRequest({
+        text: "$wayfinder continue-map 42 and 43",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        providers,
+      }),
+    ).toEqual({ kind: "chooser", reason: "continuation-reference-required" });
+  });
+
   it("dispatches a user-reachable native action through the same typed request", () => {
     expect(
       resolveChatSkillInvocationRequest({

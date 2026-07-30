@@ -698,6 +698,9 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         text,
         skills: selectedProviderSkills,
       });
+      if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+        return null;
+      }
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),

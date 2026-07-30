@@ -390,7 +390,8 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
             contentDigest:
               "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
           },
-          arguments: "chart a release",
+          arguments: "new-map",
+          action: { id: "new-map" },
           execution: {
             mode: "native",
             adapterId: "wayfinder",
@@ -401,7 +402,7 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       });
 
       NodeAssert.deepStrictEqual(runtime.sendTurnImpl.mock.calls[0]?.[0], {
-        input: "chart a release",
+        input: "new-map",
         skill: {
           name: "wayfinder",
           path: "/skills/wayfinder/SKILL.md",

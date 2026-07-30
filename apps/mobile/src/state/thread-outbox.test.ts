@@ -124,7 +124,7 @@ describe("thread outbox", () => {
       ],
     });
     expect(skillInvocationRequest).not.toBeNull();
-    if (skillInvocationRequest === null) {
+    if (skillInvocationRequest === null || "kind" in skillInvocationRequest) {
       throw new Error("Expected a leading Wayfinder invocation");
     }
     const message = {

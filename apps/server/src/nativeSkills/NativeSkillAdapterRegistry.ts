@@ -106,6 +106,13 @@ export const resolveSkillInvocationRequest = Effect.fn("resolveSkillInvocationRe
       ),
     );
     const contentDigest = `sha256:${Encoding.encodeHex(digestBytes)}`;
+    const invocationArguments =
+      input.request.arguments ??
+      (input.request.action?.id === "new-map"
+        ? "new-map"
+        : input.request.action?.id === "continue-map"
+          ? `continue-map ${input.request.action.reference}`
+          : undefined);
 
     return {
       skill: {
@@ -113,7 +120,7 @@ export const resolveSkillInvocationRequest = Effect.fn("resolveSkillInvocationRe
         path: installedSkill.path,
         contentDigest,
       },
-      ...(input.request.arguments ? { arguments: input.request.arguments } : {}),
+      ...(invocationArguments ? { arguments: invocationArguments } : {}),
       ...(input.request.action ? { action: input.request.action } : {}),
       execution: resolveNativeSkillExecution({
         provider: provider.driver,
