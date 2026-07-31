@@ -5,6 +5,7 @@ import {
   createWayfinderHitlResolutionAction,
   createWayfinderTicketAction,
   deriveWayfinderTicketClaimActions,
+  deriveWayfinderResearchModel,
   deriveWayfinderWorkbenchModel,
   isWayfinderMutationInFlight,
 } from "./wayfinderWorkbench.ts";
@@ -135,6 +136,68 @@ describe("deriveWayfinderTicketClaimActions", () => {
         },
       }),
     ).toMatchObject({ canClaim: false, canRetry: true, canRelease: true });
+  });
+});
+
+describe("deriveWayfinderResearchModel", () => {
+  it("automatically selects only open unblocked unclaimed research within the visible limit", () => {
+    const derived = deriveWayfinderResearchModel({
+      map: {
+        ...map,
+        tickets: [
+          map.tickets[1]!,
+          { ...map.tickets[0]!, blockedBy: [], classification: "prototype" as const },
+          {
+            ...map.tickets[1]!,
+            number: 46,
+            title: "Research claimed fact",
+            claimedBy: "alice",
+          },
+          {
+            ...map.tickets[1]!,
+            number: 47,
+            title: "Research another fact",
+          },
+        ],
+        frontier: [43, 44, 46, 47],
+      },
+      research: {
+        automaticLaunchesPaused: false,
+        concurrencyLimit: 1,
+        tickets: [],
+        updatedAt: "2026-07-31T10:00:00.000Z",
+      },
+      ticketThreads: [],
+    });
+
+    expect(derived.automaticCandidates).toEqual([43, 47]);
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 43)?.status).toBe("eligible");
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 47)?.status).toBe("queued");
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 44)?.status).toBe(
+      "manual-only",
+    );
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 46)?.status).toBe("claimed");
+  });
+
+  it("pauses automatic candidates while keeping manual start available", () => {
+    const derived = deriveWayfinderResearchModel({
+      map,
+      research: {
+        automaticLaunchesPaused: true,
+        concurrencyLimit: 2,
+        tickets: [],
+        updatedAt: "2026-07-31T10:00:00.000Z",
+      },
+      ticketThreads: [],
+    });
+
+    expect(derived.automaticCandidates).toEqual([]);
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 43)).toMatchObject({
+      status: "paused",
+      canStart: true,
+      canCancel: false,
+      canRetry: false,
+    });
   });
 });
 

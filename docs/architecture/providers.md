@@ -104,6 +104,22 @@ recognizes either the persisted linked run or an empty deterministic thread and 
 step without duplication. If local dispatch fails after assignment, reconciliation persists the
 canonical claim with a failed, recoverable mutation instead of reporting success.
 
+Agent-only research adds a dedicated queue-backed reactor on top of that claim seam. Reconciliation
+and persisted research-state events select only open, unblocked, unclaimed `research` tickets.
+Selection is bounded by a two-ticket Workstream limit, the existing scoped background-activity
+policy, the source runtime permission mode, and the provider runtime's own scheduling. The persisted
+research projection records pause state and per-ticket launch mode, queue, activity, output,
+cancellation, failure, retry, resolution, and error state; each transition also emits a typed
+runtime receipt.
+
+Research turns receive a companion result-envelope contract. A ready checkpoint plus a valid
+structured resolved result moves the run to `resolving`; prose alone, missing checkpoints,
+interruptions, and explicit failed results cannot close the ticket. Resolution dispatches the same
+linked-run canonical completion mutation used by decision tickets, so only confirmed GitHub
+comment, map-pointer, issue-close, and reconciliation receipts mark the research resolved and
+recompute the frontier. Cancellation interrupts the provider turn and releases the claim, including
+the claim-completion race; retry reuses the deterministic linked thread with a fresh turn identity.
+
 Human-in-the-loop completion is another specialized mutation and is accepted only from the pinned
 `work-ticket` Skill Run for its assigned claimed ticket. The processor locates that run's source map
 Skill Run, then records an idempotent canonical resolution comment before changing the route. A

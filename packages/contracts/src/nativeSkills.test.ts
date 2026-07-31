@@ -2,11 +2,17 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ApprovalRequestId } from "./baseSchemas.ts";
-import { WayfinderDraft, WayfinderMutation, WayfinderPublication } from "./nativeSkills.ts";
+import {
+  WayfinderDraft,
+  WayfinderMutation,
+  WayfinderPublication,
+  WayfinderResearchState,
+} from "./nativeSkills.ts";
 
 const decodeWayfinderDraft = Schema.decodeUnknownSync(WayfinderDraft);
 const decodeWayfinderPublication = Schema.decodeUnknownSync(WayfinderPublication);
 const decodeWayfinderMutation = Schema.decodeUnknownSync(WayfinderMutation);
+const decodeWayfinderResearchState = Schema.decodeUnknownSync(WayfinderResearchState);
 
 describe("WayfinderDraft", () => {
   it("represents every unpublished map section without making it canonical", () => {
@@ -167,5 +173,46 @@ describe("WayfinderMutation", () => {
     expect(decoded.action.kind).toBe("complete-hitl-ticket");
     expect(decoded.artifacts).toHaveLength(2);
     expect(decoded.nextStep).toBe("link graduated ticket mobile-recovery");
+  });
+});
+
+describe("WayfinderResearchState", () => {
+  it("represents concurrent automatic and manual research without treating activity as resolution", () => {
+    const decoded = decodeWayfinderResearchState({
+      automaticLaunchesPaused: false,
+      concurrencyLimit: 2,
+      tickets: [
+        {
+          ticketNumber: 43,
+          launchMode: "automatic",
+          status: "active",
+          threadId: "wayfinder-ticket:workstream:release:43",
+          updatedAt: "2026-07-31T10:00:00.000Z",
+        },
+        {
+          ticketNumber: 44,
+          launchMode: "manual",
+          status: "failed",
+          output: "The upstream API did not expose the required fact.",
+          error: "Research finished without a resolved receipt.",
+          updatedAt: "2026-07-31T10:01:00.000Z",
+        },
+      ],
+      updatedAt: "2026-07-31T10:01:00.000Z",
+    });
+
+    expect(decoded.concurrencyLimit).toBe(2);
+    expect(decoded.tickets.map((ticket) => ticket.status)).toEqual(["active", "failed"]);
+  });
+
+  it("rejects an invisible or unbounded concurrency limit", () => {
+    expect(() =>
+      decodeWayfinderResearchState({
+        automaticLaunchesPaused: false,
+        concurrencyLimit: 0,
+        tickets: [],
+        updatedAt: "2026-07-31T10:01:00.000Z",
+      }),
+    ).toThrow();
   });
 });

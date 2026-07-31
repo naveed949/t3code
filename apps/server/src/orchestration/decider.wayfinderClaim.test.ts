@@ -332,6 +332,113 @@ it.layer(NodeServices.layer)("Wayfinder ticket claim invariants", (it) => {
   }
 });
 
+it.layer(NodeServices.layer)("Wayfinder research control invariants", (it) => {
+  it.effect("accepts pause and resume on the canonical map run", () =>
+    Effect.gen(function* () {
+      for (const kind of ["pause-automatic-launches", "resume-automatic-launches"] as const) {
+        const result = yield* decideOrchestrationCommand({
+          readModel: yield* makeReadModel(),
+          command: {
+            type: "thread.wayfinder.research",
+            commandId: CommandId.make(`research:${kind}`),
+            threadId,
+            skillRunId,
+            action: { kind },
+            createdAt: now,
+          },
+        });
+        const requested = Array.isArray(result) ? result[0] : result;
+        expect(requested).toMatchObject({
+          type: "thread.wayfinder-research-requested",
+          payload: { skillRunId, action: { kind } },
+        });
+      }
+    }),
+  );
+
+  it.effect("accepts manual launch only for an eligible research frontier ticket", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        readModel: yield* makeReadModel(),
+        command: {
+          type: "thread.wayfinder.research",
+          commandId: CommandId.make("research:start:43"),
+          threadId,
+          skillRunId,
+          action: { kind: "start-ticket", ticketNumber: 43 },
+          createdAt: now,
+        },
+      });
+      const requested = Array.isArray(result) ? result[0] : result;
+      expect(requested).toMatchObject({
+        type: "thread.wayfinder-research-requested",
+        payload: { action: { kind: "start-ticket", ticketNumber: 43 } },
+      });
+    }),
+  );
+
+  for (const [ticketNumber, reason] of [
+    [44, "research"],
+    [45, "research"],
+    [46, "open"],
+  ] as const) {
+    it.effect(`rejects research launch for ticket #${ticketNumber}`, () =>
+      Effect.gen(function* () {
+        const failure = yield* Effect.flip(
+          decideOrchestrationCommand({
+            readModel: yield* makeReadModel(),
+            command: {
+              type: "thread.wayfinder.research",
+              commandId: CommandId.make(`research:start:${ticketNumber}`),
+              threadId,
+              skillRunId,
+              action: { kind: "start-ticket", ticketNumber },
+              createdAt: now,
+            },
+          }),
+        );
+        expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+        if ("detail" in failure) expect(failure.detail.toLowerCase()).toContain(reason);
+      }),
+    );
+  }
+
+  it.effect("rebuilds durable research queue and failure state from events", () =>
+    Effect.gen(function* () {
+      const research = {
+        automaticLaunchesPaused: true,
+        concurrencyLimit: 2,
+        tickets: [
+          {
+            ticketNumber: 43,
+            launchMode: "automatic" as const,
+            status: "failed" as const,
+            output: "Primary documentation was unavailable.",
+            error: "Research finished without a resolved receipt.",
+            updatedAt: now,
+          },
+        ],
+        updatedAt: now,
+      };
+      const projected = yield* projectEvent(yield* makeReadModel(), {
+        ...eventBase(4, "research-updated"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.wayfinder-research-updated",
+        payload: {
+          threadId,
+          skillRunId,
+          research,
+        },
+      });
+
+      expect(projected.threads[0]?.latestTurn?.skillInvocation?.wayfinderResearch).toEqual(
+        research,
+      );
+    }),
+  );
+});
+
 it.layer(NodeServices.layer)("Wayfinder HITL resolution invariants", (it) => {
   const action = {
     kind: "complete-hitl-ticket" as const,

@@ -3,6 +3,7 @@ import type {
   WayfinderMapProjection,
   WayfinderMutation,
   WayfinderMutationAction,
+  WayfinderResearchState,
   WayfinderTicketState,
 } from "@t3tools/contracts";
 
@@ -127,6 +128,136 @@ export function deriveWayfinderTicketClaimActions(input: {
     canRetry: failedClaim && input.ticket.claimedBy !== null && input.linkedThreadId === null,
     canRelease: input.ticket.claimedBy !== null && (input.linkedThreadId !== null || failedClaim),
     linkedThreadId: input.linkedThreadId,
+  };
+}
+
+export type WayfinderResearchPresentationStatus =
+  | "blocked"
+  | "cancelled"
+  | "cancelling"
+  | "claimed"
+  | "closed"
+  | "eligible"
+  | "failed"
+  | "manual-only"
+  | "paused"
+  | "queued"
+  | "claiming"
+  | "active"
+  | "resolving"
+  | "resolved";
+
+export interface WayfinderResearchTicketPresentation {
+  readonly ticketNumber: number;
+  readonly status: WayfinderResearchPresentationStatus;
+  readonly launchMode: "automatic" | "manual" | null;
+  readonly threadId: ThreadId | null;
+  readonly output: string | null;
+  readonly error: string | null;
+  readonly canStart: boolean;
+  readonly canCancel: boolean;
+  readonly canRetry: boolean;
+}
+
+const ACTIVE_RESEARCH_STATUSES = new Set([
+  "queued",
+  "claiming",
+  "active",
+  "cancelling",
+  "resolving",
+]);
+
+export function deriveWayfinderResearchModel(input: {
+  readonly map: WayfinderMapProjection;
+  readonly research: WayfinderResearchState | null;
+  readonly ticketThreads: ReadonlyArray<{
+    readonly ticketNumber: number;
+    readonly threadId: ThreadId;
+  }>;
+}) {
+  const research = input.research ?? {
+    automaticLaunchesPaused: false,
+    concurrencyLimit: 2,
+    tickets: [],
+    updatedAt: input.map.lastSynchronizedAt,
+  };
+  const runByTicket = new Map(research.tickets.map((run) => [run.ticketNumber, run] as const));
+  const threadByTicket = new Map(
+    input.ticketThreads.map((thread) => [thread.ticketNumber, thread.threadId] as const),
+  );
+  const automaticCandidates = input.map.tickets
+    .filter(
+      (ticket) =>
+        ticket.state === "open" &&
+        ticket.classification === "research" &&
+        ticket.claimedBy === null &&
+        input.map.frontier.includes(ticket.number) &&
+        runByTicket.get(ticket.number) === undefined,
+    )
+    .map((ticket) => ticket.number)
+    .sort((left, right) => left - right);
+  const activeCount = research.tickets.filter((run) =>
+    ACTIVE_RESEARCH_STATUSES.has(run.status),
+  ).length;
+  const availableSlots = Math.max(0, research.concurrencyLimit - activeCount);
+  const immediatelyEligible = new Set(automaticCandidates.slice(0, availableSlots));
+
+  const tickets: WayfinderResearchTicketPresentation[] = input.map.tickets.map((ticket) => {
+    const run = runByTicket.get(ticket.number);
+    const linkedThreadId = threadByTicket.get(ticket.number) ?? null;
+    const canStart =
+      ticket.state === "open" &&
+      ticket.classification === "research" &&
+      ticket.claimedBy === null &&
+      input.map.frontier.includes(ticket.number) &&
+      run?.status !== "active" &&
+      run?.status !== "claiming" &&
+      run?.status !== "resolving";
+    if (run) {
+      return {
+        ticketNumber: ticket.number,
+        status: run.status,
+        launchMode: run.launchMode,
+        threadId: (run.threadId as ThreadId | undefined) ?? linkedThreadId,
+        output: run.output ?? null,
+        error: run.error ?? null,
+        canStart,
+        canCancel: ACTIVE_RESEARCH_STATUSES.has(run.status),
+        canRetry: run.status === "failed" || run.status === "cancelled",
+      };
+    }
+    const status: WayfinderResearchPresentationStatus =
+      ticket.state === "closed"
+        ? "closed"
+        : ticket.classification !== "research"
+          ? "manual-only"
+          : ticket.claimedBy !== null
+            ? "claimed"
+            : !input.map.frontier.includes(ticket.number)
+              ? "blocked"
+              : research.automaticLaunchesPaused
+                ? "paused"
+                : immediatelyEligible.has(ticket.number)
+                  ? "eligible"
+                  : "queued";
+    return {
+      ticketNumber: ticket.number,
+      status,
+      launchMode: null,
+      threadId: linkedThreadId,
+      output: null,
+      error: null,
+      canStart,
+      canCancel: false,
+      canRetry: false,
+    };
+  });
+
+  return {
+    automaticLaunchesPaused: research.automaticLaunchesPaused,
+    concurrencyLimit: research.concurrencyLimit,
+    automaticCandidates: research.automaticLaunchesPaused ? [] : automaticCandidates,
+    tickets,
   };
 }
 

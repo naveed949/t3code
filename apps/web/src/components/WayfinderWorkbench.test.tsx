@@ -201,4 +201,51 @@ describe("WayfinderWorkbench", () => {
     expect(markup).not.toContain("Structured actions");
     expect(markup).not.toContain("Start work");
   });
+
+  it("shows visible background research controls, lifecycle, output, and recovery", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={{
+          ...map,
+          tickets: map.tickets.map((ticket) =>
+            ticket.number === 43 ? { ...ticket, claimedBy: "alice" } : ticket,
+          ),
+          frontier: [],
+        }}
+        research={{
+          automaticLaunchesPaused: false,
+          concurrencyLimit: 2,
+          tickets: [
+            {
+              ticketNumber: 43,
+              launchMode: "automatic",
+              status: "failed",
+              threadId: "wayfinder-ticket:workstream:release:43",
+              output: "The provider supports conditional requests.",
+              error: "Canonical resolution was interrupted.",
+              updatedAt: "2026-07-31T10:00:00.000Z",
+            },
+          ],
+          updatedAt: "2026-07-31T10:00:00.000Z",
+        }}
+        ticketThreads={[
+          {
+            ticketNumber: 43,
+            threadId: ThreadId.make("wayfinder-ticket:workstream:release:43"),
+          },
+        ]}
+        onResearch={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Background research");
+    expect(markup).toContain("Pause automatic launches");
+    expect(markup).toContain("Limit 2");
+    expect(markup).toContain("Canonical resolution was interrupted.");
+    expect(markup).toContain("The provider supports conditional requests.");
+    expect(markup).toContain("Retry research");
+  });
 });

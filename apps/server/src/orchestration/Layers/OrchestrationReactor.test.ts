@@ -13,6 +13,7 @@ import { OrchestrationReactor } from "../Services/OrchestrationReactor.ts";
 import { WayfinderPublicationReactor } from "../Services/WayfinderPublicationReactor.ts";
 import { WayfinderMutationReactor } from "../Services/WayfinderMutationReactor.ts";
 import { WayfinderReconciliationReactor } from "../Services/WayfinderReconciliationReactor.ts";
+import { WayfinderResearchReactor } from "../Services/WayfinderResearchReactor.ts";
 import { makeOrchestrationReactor } from "./OrchestrationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
@@ -95,6 +96,15 @@ describe("OrchestrationReactor", () => {
           }),
         ),
         Layer.provideMerge(
+          Layer.succeed(WayfinderResearchReactor, {
+            start: () => {
+              started.push("wayfinder-research-reactor");
+              return Effect.void;
+            },
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
           Layer.succeed(AgentAwarenessRelay.AgentAwarenessRelay, {
             publishThread: () => Effect.void,
             start: () => {
@@ -118,6 +128,7 @@ describe("OrchestrationReactor", () => {
       "wayfinder-publication-reactor",
       "wayfinder-mutation-reactor",
       "wayfinder-reconciliation-reactor",
+      "wayfinder-research-reactor",
       "agent-awareness-relay",
     ]);
 

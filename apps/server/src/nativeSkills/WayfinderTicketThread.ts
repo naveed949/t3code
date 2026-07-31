@@ -36,6 +36,23 @@ export function buildWayfinderTicketThreadSeed(input: {
           )
           .join("\n");
 
+  const workingAgreement =
+    input.ticket.classification === "research"
+      ? [
+          "Agent-only research working agreement",
+          `Research only this assigned factual ticket (#${input.ticket.number}); do not resolve unrelated Wayfinder work.`,
+          "Use primary sources where available and keep the evidence and conclusion in this thread.",
+          "Finish with exactly one structured result envelope:",
+          '<wayfinder-research-result>{"status":"resolved","summary":"concise evidence-backed conclusion"}</wayfinder-research-result>',
+          "If the fact cannot be established, use status failed instead. A failed result must not close the canonical issue.",
+        ]
+      : [
+          "HITL working agreement",
+          `Work only this assigned ticket (#${input.ticket.number}); do not resolve unrelated Wayfinder work.`,
+          "Present one user decision at a time through structured input.",
+          "When the answer is verified, use the complete-hitl-ticket action so T3 records the canonical resolution before advancing the shared map.",
+        ];
+
   return {
     title: `Wayfinder #${input.ticket.number}: ${input.ticket.title}`,
     message: [
@@ -53,10 +70,7 @@ export function buildWayfinderTicketThreadSeed(input: {
       `Canonical ticket: ${input.ticket.url}`,
       `Canonical map: ${input.map.canonicalReference.url}`,
       "",
-      "HITL working agreement",
-      `Work only this assigned ticket (#${input.ticket.number}); do not resolve unrelated Wayfinder work.`,
-      "Present one user decision at a time through structured input.",
-      "When the answer is verified, use the complete-hitl-ticket action so T3 records the canonical resolution before advancing the shared map.",
+      ...workingAgreement,
       "",
       "Provenance",
       `Workstream: ${input.workstreamId}`,

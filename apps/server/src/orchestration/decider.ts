@@ -1328,6 +1328,76 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.wayfinder.research": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const invocation = thread.latestTurn?.skillInvocation;
+      if (
+        invocation?.skillRunId !== command.skillRunId ||
+        invocation.wayfinderMap === undefined ||
+        invocation.action?.id === "work-ticket"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder research controls require the canonical shared map run.",
+        });
+      }
+      const action = command.action;
+      if ("ticketNumber" in action) {
+        const ticket = invocation.wayfinderMap.tickets.find(
+          (candidate) => candidate.number === action.ticketNumber,
+        );
+        if (!ticket) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder research controls require a ticket in the canonical map.",
+          });
+        }
+        if (action.kind === "start-ticket") {
+          if (ticket.state !== "open") {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder research ticket #${ticket.number} must be open.`,
+            });
+          }
+          if (ticket.classification !== "research") {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder ticket #${ticket.number} is not agent-only research.`,
+            });
+          }
+          if (
+            ticket.claimedBy !== null ||
+            !invocation.wayfinderMap.frontier.includes(ticket.number)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder research ticket #${ticket.number} must be unblocked and unclaimed.`,
+            });
+          }
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-research-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          action: command.action,
+          launchMode: command.launchMode ?? "manual",
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.checkpoint.revert": {
       yield* requireThread({
         readModel,
@@ -1739,6 +1809,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           skillRunId: command.skillRunId,
           synchronization: command.synchronization,
           ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+    }
+
+    case "thread.wayfinder.research.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-research-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          research: command.research,
         },
       };
     }

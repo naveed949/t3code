@@ -4,6 +4,7 @@ import {
   createWayfinderGraduatedFogTicket,
   createWayfinderTicketAction,
   deriveWayfinderTicketClaimActions,
+  deriveWayfinderResearchModel,
   deriveWayfinderWorkbenchModel,
   isWayfinderMutationInFlight,
   WAYFINDER_TICKET_CLASSIFICATIONS,
@@ -20,6 +21,8 @@ import type {
   WayfinderMutation,
   WayfinderMutationAction,
   WayfinderReconcileReason,
+  WayfinderResearchAction,
+  WayfinderResearchState,
   WayfinderSynchronizationState,
 } from "@t3tools/contracts";
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
@@ -514,6 +517,8 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     readonly threadId: ThreadId;
   }>;
   readonly onReturnToThread?: (threadId: ThreadId) => void;
+  readonly research?: WayfinderResearchState | null;
+  readonly onResearch?: (action: WayfinderResearchAction) => void;
   readonly assignedTicketNumber?: number | null;
   readonly onCompleteHitl?: (
     action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
@@ -569,6 +574,14 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   const ticketsByNumber = new Map(map.tickets.map((ticket) => [ticket.number, ticket] as const));
   const ticketThreadIdsByNumber = new Map(
     props.ticketThreads?.map((link) => [link.ticketNumber, link.threadId] as const),
+  );
+  const researchModel = deriveWayfinderResearchModel({
+    map,
+    research: props.research ?? null,
+    ticketThreads: props.ticketThreads ?? [],
+  });
+  const researchByTicket = new Map(
+    researchModel.tickets.map((ticket) => [ticket.ticketNumber, ticket] as const),
   );
   const incomingEdgesByNumber = new Map<number, typeof model.edges>();
   for (const edge of model.edges) {
@@ -731,9 +744,36 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
         </section>
 
         <section aria-labelledby="wayfinder-frontier">
-          <h3 id="wayfinder-frontier" className="mb-2 text-xs font-semibold text-foreground">
-            Frontier
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <h3 id="wayfinder-frontier" className="text-xs font-semibold text-foreground">
+                Frontier
+              </h3>
+              {props.assignedTicketNumber == null ? (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Background research · Limit {researchModel.concurrencyLimit}
+                </p>
+              ) : null}
+            </div>
+            {props.onResearch && props.assignedTicketNumber == null ? (
+              <button
+                type="button"
+                disabled={!mutationsEnabled}
+                className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                onClick={() =>
+                  props.onResearch?.({
+                    kind: researchModel.automaticLaunchesPaused
+                      ? "resume-automatic-launches"
+                      : "pause-automatic-launches",
+                  })
+                }
+              >
+                {researchModel.automaticLaunchesPaused
+                  ? "Resume automatic launches"
+                  : "Pause automatic launches"}
+              </button>
+            ) : null}
+          </div>
           {model.tickets.length === 0 ? (
             <p className="text-xs text-muted-foreground">No decision tickets.</p>
           ) : (
@@ -749,6 +789,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                   linkedThreadId,
                   mutation: props.mutation ?? null,
                 });
+                const research = researchByTicket.get(ticket.number);
                 return (
                   <li key={ticket.number} className="rounded-md border border-border/70 p-3">
                     <div className="flex items-start justify-between gap-2">
@@ -765,6 +806,73 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                         ? ` · Blocked by ${ticket.blockedBy.map((number) => `#${number}`).join(", ")}`
                         : ""}
                     </p>
+                    {ticket.classification === "research" && research ? (
+                      <div className="mt-2 space-y-1 text-[11px]">
+                        <p role="status" className="capitalize text-muted-foreground">
+                          Research: {research.status.replace("-", " ")}
+                          {research.launchMode ? ` · ${research.launchMode}` : ""}
+                        </p>
+                        {research.output ? (
+                          <p className="rounded-md border border-border/70 p-2 text-foreground">
+                            {research.output}
+                          </p>
+                        ) : null}
+                        {research.error ? (
+                          <p role="alert" className="text-destructive">
+                            {research.error}
+                          </p>
+                        ) : null}
+                        {ticketIsAssigned && props.onResearch ? (
+                          <div className="flex flex-wrap gap-2">
+                            {research.canStart ? (
+                              <button
+                                type="button"
+                                disabled={!mutationsEnabled}
+                                className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                                onClick={() =>
+                                  props.onResearch?.({
+                                    kind: "start-ticket",
+                                    ticketNumber: ticket.number,
+                                  })
+                                }
+                              >
+                                Start research
+                              </button>
+                            ) : null}
+                            {research.canCancel ? (
+                              <button
+                                type="button"
+                                disabled={!mutationsEnabled}
+                                className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                                onClick={() =>
+                                  props.onResearch?.({
+                                    kind: "cancel-ticket",
+                                    ticketNumber: ticket.number,
+                                  })
+                                }
+                              >
+                                Cancel research
+                              </button>
+                            ) : null}
+                            {research.canRetry ? (
+                              <button
+                                type="button"
+                                disabled={!mutationsEnabled}
+                                className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                                onClick={() =>
+                                  props.onResearch?.({
+                                    kind: "retry-ticket",
+                                    ticketNumber: ticket.number,
+                                  })
+                                }
+                              >
+                                Retry research
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {(ticketIsAssigned && props.onMutate) ||
                     (ticketIsAssigned && linkedThreadId && props.onReturnToThread) ? (
                       <div className="mt-2 flex flex-wrap gap-2">

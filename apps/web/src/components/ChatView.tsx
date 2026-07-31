@@ -18,6 +18,7 @@ import {
   type WayfinderReconcileReason,
   type KeybindingCommand,
   type WayfinderMutationAction,
+  type WayfinderResearchAction,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -1203,6 +1204,10 @@ function ChatViewContent(props: ChatViewProps) {
   const reconcileWayfinderMapCommand = useAtomCommand(threadEnvironment.reconcileWayfinderMap, {
     reportFailure: false,
   });
+  const controlWayfinderResearchCommand = useAtomCommand(
+    threadEnvironment.controlWayfinderResearch,
+    { reportFailure: false },
+  );
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -5137,6 +5142,27 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeLinkedTicketInvocation, environmentId, mutateWayfinderCommand, setThreadError],
   );
+  const onControlWayfinderResearch = useCallback(
+    async (action: WayfinderResearchAction) => {
+      if (!activeWayfinderInvocation) return;
+      const result = await controlWayfinderResearchCommand({
+        environmentId,
+        input: {
+          threadId: activeWayfinderInvocation.threadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          action,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeWayfinderInvocation.threadId,
+          error instanceof Error ? error.message : "Failed to control Wayfinder research.",
+        );
+      }
+    },
+    [activeWayfinderInvocation, controlWayfinderResearchCommand, environmentId, setThreadError],
+  );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -5824,7 +5850,9 @@ function ChatViewContent(props: ChatViewProps) {
       <WayfinderWorkbench
         map={activeWayfinderMap}
         mutation={activeWayfinderMutation}
+        research={activeWayfinderInvocation?.wayfinderResearch ?? null}
         onMutate={onMutateWayfinder}
+        onResearch={onControlWayfinderResearch}
         ticketThreads={activeWayfinderWorkstream?.ticketThreads ?? []}
         onReturnToThread={returnToWayfinderTicketThread}
         assignedTicketNumber={activeLinkedTicketAction?.ticketNumber ?? null}

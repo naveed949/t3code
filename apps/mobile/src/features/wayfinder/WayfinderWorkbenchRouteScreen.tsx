@@ -24,6 +24,8 @@ import {
   type WayfinderMutation,
   type WayfinderMutationAction,
   type WayfinderReconcileReason,
+  type WayfinderResearchAction,
+  type WayfinderResearchState,
 } from "@t3tools/contracts";
 import {
   StackActions,
@@ -49,6 +51,7 @@ import {
   buildMobileDependencyAction,
   buildMobileGraduatedFogTicket,
   buildMobileHitlResolutionAction,
+  buildMobileResearchPresentation,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
@@ -156,13 +159,48 @@ function TicketList(props: {
   readonly disabled: boolean;
   readonly onMutate: (action: WayfinderMutationAction) => void;
   readonly onReturnToThread: (threadId: ThreadId) => void;
+  readonly research: WayfinderResearchState | null;
+  readonly onResearch: (action: WayfinderResearchAction) => void;
 }) {
   const presentation = buildMobileWayfinderPresentation(props.map);
   const ticketThreadIdsByNumber = new Map(
     props.ticketThreads.map((link) => [link.ticketNumber, link.threadId] as const),
   );
+  const research = buildMobileResearchPresentation({
+    map: props.map,
+    research: props.research,
+    ticketThreads: props.ticketThreads,
+  });
+  const researchByTicket = new Map(
+    research.tickets.map((ticket) => [ticket.ticketNumber, ticket] as const),
+  );
   return (
     <View className="gap-2">
+      {props.assignedTicketNumber === null ? (
+        <View className="mb-2 flex-row items-center justify-between gap-3">
+          <Text className="text-xs text-foreground-muted">
+            Background research · Limit {research.concurrencyLimit}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={props.disabled}
+            className="rounded-lg border border-border px-3 py-2"
+            onPress={() =>
+              props.onResearch({
+                kind: research.automaticLaunchesPaused
+                  ? "resume-automatic-launches"
+                  : "pause-automatic-launches",
+              })
+            }
+          >
+            <Text className="text-xs font-semibold">
+              {research.automaticLaunchesPaused
+                ? "Resume automatic launches"
+                : "Pause automatic launches"}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
       {presentation.tickets.map((ticket) => {
         const linkedThreadId = ticketThreadIdsByNumber.get(ticket.number) ?? null;
         const claimActions = buildMobileTicketClaimActions(
@@ -174,6 +212,7 @@ function TicketList(props: {
         );
         const ticketIsAssigned =
           props.assignedTicketNumber === null || ticket.number === props.assignedTicketNumber;
+        const researchTicket = researchByTicket.get(ticket.number);
         return (
           <View key={ticket.number} className="rounded-xl border border-border bg-card p-4">
             <View className="flex-row items-start justify-between gap-3">
@@ -200,8 +239,29 @@ function TicketList(props: {
             ) : props.map.frontier.includes(ticket.number) ? (
               <Text className="mt-1 text-xs font-semibold text-foreground">Frontier</Text>
             ) : null}
+            {ticket.classification === "research" && researchTicket ? (
+              <View className="mt-2 gap-1">
+                <Text
+                  accessibilityRole="summary"
+                  className="text-xs capitalize text-foreground-muted"
+                >
+                  Research: {researchTicket.status.replace("-", " ")}
+                  {researchTicket.launchMode ? ` · ${researchTicket.launchMode}` : ""}
+                </Text>
+                {researchTicket.output ? (
+                  <Text className="rounded-lg border border-border p-2 text-xs text-foreground">
+                    {researchTicket.output}
+                  </Text>
+                ) : null}
+                {researchTicket.error ? (
+                  <Text accessibilityRole="alert" className="text-xs text-destructive">
+                    {researchTicket.error}
+                  </Text>
+                ) : null}
+              </View>
+            ) : null}
             <View className="mt-3 flex-row flex-wrap gap-2">
-              {claimActions.canClaim ? (
+              {claimActions.canClaim && ticket.classification !== "research" ? (
                 <Pressable
                   accessibilityRole="button"
                   disabled={props.disabled}
@@ -244,6 +304,44 @@ function TicketList(props: {
                   }
                 >
                   <Text className="text-xs font-semibold">Release</Text>
+                </Pressable>
+              ) : null}
+              {ticketIsAssigned &&
+              ticket.classification === "research" &&
+              researchTicket?.canStart ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onResearch({ kind: "start-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">Start research</Text>
+                </Pressable>
+              ) : null}
+              {ticketIsAssigned && researchTicket?.canCancel ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onResearch({ kind: "cancel-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">Cancel research</Text>
+                </Pressable>
+              ) : null}
+              {ticketIsAssigned && researchTicket?.canRetry ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onResearch({ kind: "retry-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">Retry research</Text>
                 </Pressable>
               ) : null}
             </View>
@@ -472,6 +570,10 @@ function WayfinderWorkbenchContent(props: {
 }) {
   const [showGraph, setShowGraph] = useState(false);
   const mutateWayfinder = useAtomCommand(threadEnvironment.mutateWayfinder, "update Wayfinder");
+  const controlWayfinderResearch = useAtomCommand(
+    threadEnvironment.controlWayfinderResearch,
+    "control Wayfinder research",
+  );
   const [appState, setAppState] = useState(AppState.currentState);
   const reconcileWayfinderMapCommand = useAtomCommand(
     threadEnvironment.reconcileWayfinderMap,
@@ -544,6 +646,17 @@ function WayfinderWorkbenchContent(props: {
         action,
         ...(resumeActionId ? { actionId: resumeActionId } : {}),
         confirmed: resumeActionId !== undefined,
+      },
+    });
+  };
+  const onResearch = (action: WayfinderResearchAction) => {
+    if (!invocation) return;
+    void controlWayfinderResearch({
+      environmentId: props.environmentId,
+      input: {
+        threadId: invocation.threadId,
+        skillRunId: invocation.skillRunId,
+        action,
       },
     });
   };
@@ -885,10 +998,12 @@ function WayfinderWorkbenchContent(props: {
         <TicketList
           map={map}
           mutation={mutation}
+          research={invocation?.wayfinderResearch ?? null}
           ticketThreads={workstream?.ticketThreads ?? []}
           assignedTicketNumber={linkedTicketAction?.ticketNumber ?? null}
           disabled={working || !connected || synchronization?.canMutate === false}
           onMutate={onMutate}
+          onResearch={onResearch}
           onReturnToThread={props.onReturnToThread}
         />
       </View>

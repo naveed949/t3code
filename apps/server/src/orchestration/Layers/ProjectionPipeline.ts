@@ -790,6 +790,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.wayfinder-mutation-updated":
         case "thread.wayfinder-reconciliation-requested":
         case "thread.wayfinder-reconciliation-updated":
+        case "thread.wayfinder-research-requested":
+        case "thread.wayfinder-research-updated":
         case "thread.approval-response-requested":
         case "thread.user-input-response-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -1176,6 +1178,28 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
               ...(event.payload.wayfinderMap !== undefined
                 ? { wayfinderMap: event.payload.wayfinderMap }
                 : {}),
+            },
+          });
+          return;
+        }
+
+        case "thread.wayfinder-research-updated": {
+          const turns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          });
+          const invocation = turns
+            .map((turn) => turn.skillInvocation)
+            .find(
+              (candidate) =>
+                candidate !== null && candidate.skillRunId === event.payload.skillRunId,
+            );
+          if (!invocation) return;
+          yield* projectionTurnRepository.updateSkillInvocation({
+            threadId: event.payload.threadId,
+            skillRunId: event.payload.skillRunId,
+            skillInvocation: {
+              ...invocation,
+              wayfinderResearch: event.payload.research,
             },
           });
           return;
