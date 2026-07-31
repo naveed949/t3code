@@ -160,7 +160,7 @@ export interface WayfinderResearchTicketPresentation {
 }
 
 const ACTIVE_RESEARCH_STATUSES = new Set(["claiming", "active", "cancelling", "resolving"]);
-const CANCELLABLE_RESEARCH_STATUSES = new Set(["queued", ...ACTIVE_RESEARCH_STATUSES]);
+const CANCELLABLE_RESEARCH_STATUSES = new Set(["queued", "claiming", "active"]);
 
 export function deriveWayfinderResearchModel(input: {
   readonly map: WayfinderMapProjection;

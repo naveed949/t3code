@@ -273,6 +273,14 @@ export const makeWayfinderResearchProcessor = Effect.gen(function* () {
     const launchMode = event.payload.launchMode;
 
     if (action.kind === "cancel-ticket") {
+      if (
+        !previous ||
+        (previous.status !== "queued" &&
+          previous.status !== "claiming" &&
+          previous.status !== "active")
+      ) {
+        return;
+      }
       const threadId =
         (previous?.threadId as ThreadId | undefined) ??
         wayfinderTicketThreadId(invocation.workstreamId, ticket.number);

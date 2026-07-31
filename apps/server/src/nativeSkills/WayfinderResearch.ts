@@ -86,13 +86,15 @@ export function selectQueuedWayfinderResearchTickets(input: {
   return input.research.tickets
     .filter((run) => {
       const ticket = input.map.tickets.find((candidate) => candidate.number === run.ticketNumber);
+      const canResumeExistingClaim = run.retrying === true && ticket?.claimedBy !== null;
+      const canClaimFrontierTicket =
+        ticket?.claimedBy === null && input.map.frontier.includes(ticket.number);
       return (
         run.status === "queued" &&
         (run.launchMode === "manual" || !input.research.automaticLaunchesPaused) &&
         ticket?.state === "open" &&
         ticket.classification === "research" &&
-        ticket.claimedBy === null &&
-        input.map.frontier.includes(ticket.number)
+        (canResumeExistingClaim || canClaimFrontierTicket)
       );
     })
     .toSorted((left, right) => left.ticketNumber - right.ticketNumber)

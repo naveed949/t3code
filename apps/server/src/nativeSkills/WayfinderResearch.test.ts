@@ -177,6 +177,33 @@ describe("selectQueuedWayfinderResearchTickets", () => {
       }),
     ).toEqual([]);
   });
+
+  it("promotes a queued retry that already owns the canonical claim", () => {
+    const retry = {
+      ticketNumber: 43,
+      launchMode: "manual" as const,
+      retrying: true,
+      status: "queued" as const,
+      updatedAt: "2026-07-31T10:00:00.000Z",
+    };
+    expect(
+      selectQueuedWayfinderResearchTickets({
+        map: {
+          ...map,
+          tickets: map.tickets.map((ticket) =>
+            ticket.number === 43 ? { ...ticket, claimedBy: "alice" } : ticket,
+          ),
+          frontier: [44, 46],
+        },
+        research: {
+          automaticLaunchesPaused: false,
+          concurrencyLimit: 1,
+          tickets: [retry],
+          updatedAt: "2026-07-31T10:00:00.000Z",
+        },
+      }),
+    ).toEqual([retry]);
+  });
 });
 
 it("updates one ticket without losing concurrent run state", () => {

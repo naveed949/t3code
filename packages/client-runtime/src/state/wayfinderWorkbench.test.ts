@@ -227,6 +227,38 @@ describe("deriveWayfinderResearchModel", () => {
       canRetry: true,
     });
   });
+
+  it("stops offering cancellation once canonical resolution begins", () => {
+    const derived = deriveWayfinderResearchModel({
+      map: {
+        ...map,
+        tickets: map.tickets.map((ticket) =>
+          ticket.number === 43 ? { ...ticket, claimedBy: "alice" } : ticket,
+        ),
+        frontier: [],
+      },
+      research: {
+        automaticLaunchesPaused: false,
+        concurrencyLimit: 2,
+        tickets: [
+          {
+            ticketNumber: 43,
+            launchMode: "automatic",
+            status: "resolving",
+            updatedAt: "2026-07-31T10:00:00.000Z",
+          },
+        ],
+        updatedAt: "2026-07-31T10:00:00.000Z",
+      },
+      ticketThreads: [],
+    });
+
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 43)).toMatchObject({
+      status: "resolving",
+      canCancel: false,
+      canRetry: false,
+    });
+  });
 });
 
 describe("applyOptimisticWayfinderMutation", () => {

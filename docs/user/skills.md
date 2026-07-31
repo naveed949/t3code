@@ -100,11 +100,12 @@ manufacturing a user approval in the background.
 The Workbench shows whether each research ticket is eligible, queued, claiming, active, cancelling,
 cancelled, failed, resolving, or resolved, along with its latest structured output or error.
 **Pause automatic launches** stops new automatic work without interrupting active threads.
-**Start research** remains available for an eligible ticket while paused; **Cancel research**
-interrupts its provider turn and releases the canonical claim; **Retry research** reuses the linked
-thread after a failed or cancelled attempt. Manual starts and retries still respect T3's scoped
-background policy and visible provider limit, remaining queued until a slot is available. These
-controls and states are shared by web, desktop, mobile, and remote clients.
+**Start research** remains available for an eligible ticket while paused; before canonical
+resolution begins, **Cancel research** interrupts its provider turn and releases the canonical
+claim; **Retry research** reuses the linked thread after a failed or cancelled attempt. Manual
+starts and retries still respect T3's scoped background policy and visible provider limit, remaining
+queued until a slot is available. These controls and states are shared by web, desktop, mobile, and
+remote clients.
 
 Research completion requires more than assistant narration. The linked provider turn must finish
 with a checkpoint and a structured resolved result. T3 then records that conclusion through the
