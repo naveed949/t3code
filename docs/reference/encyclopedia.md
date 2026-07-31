@@ -116,6 +116,20 @@ Newly specifiable fog may graduate into child tickets and native blocking relati
 the destination is classified and represented as out of scope instead of becoming a route decision.
 Verified artifacts and the claim survive interruption for explicit resume or release.
 
+#### Wayfinder readiness
+
+The receipt-backed completion decision for a synchronized map. Readiness requires a destination, no
+open decision tickets, no active linked ticket threads, no in-scope fog, no closed ticket with an
+unknown classification, and healthy tracker synchronization. The Workbench displays every failed
+invariant; closing the parent issue or narrating completion does not satisfy one.
+
+#### Wayfinder to-spec handoff
+
+An explicit, provenance-linked transition from a Wayfinder Skill Run to a separate generic
+`to-spec` Skill Run in the same project Workstream. The invocation retains its source Skill Run and
+thread, canonical issue reference, and synchronization receipt time. An incomplete map requires a
+recorded early-handoff acknowledgement, and T3 never starts this transition automatically.
+
 #### Wayfinder research run
 
 The visible background lifecycle for one agent-only `research` ticket. Only an open, unblocked,

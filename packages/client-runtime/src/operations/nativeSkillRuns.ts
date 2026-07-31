@@ -1,10 +1,44 @@
-import type { ServerProviderSkill, SkillInvocationRequest } from "@t3tools/contracts";
+import type {
+  ServerProviderSkill,
+  SkillInvocationRequest,
+  SkillRunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   createSkillInvocationRequest,
   resolveLeadingSkillInvocationRequest,
 } from "@t3tools/shared/composerInlineTokens";
 
 type SelectableSkill = Pick<ServerProviderSkill, "name" | "path" | "enabled">;
+
+export function createWayfinderToSpecInvocationRequest(input: {
+  readonly skill: SelectableSkill;
+  readonly sourceSkillRunId: SkillRunId;
+  readonly sourceThreadId: ThreadId;
+  readonly destination: string;
+  readonly canonicalReference: { readonly number: number; readonly url: string };
+  readonly wayfinderSynchronizedAt: string;
+  readonly acknowledgedIncomplete: boolean;
+}): SkillInvocationRequest | null {
+  if (!input.skill.enabled || input.skill.name !== "to-spec") return null;
+
+  const destination = input.destination.trim();
+  return {
+    ...createSkillInvocationRequest(
+      input.skill,
+      `Create a specification from the Wayfinder map at ${input.canonicalReference.url}.${destination === "" ? "" : ` Destination: ${destination}`}`,
+    ),
+    action: {
+      id: "handoff-to-spec",
+      sourceSkillRunId: input.sourceSkillRunId,
+      sourceThreadId: input.sourceThreadId,
+      canonicalReference: input.canonicalReference,
+      wayfinderSynchronizedAt: input.wayfinderSynchronizedAt,
+      acknowledgedIncomplete: input.acknowledgedIncomplete,
+    },
+    executionPreference: "generic",
+  };
+}
 
 export type NativeSkillRunInvocationIntent =
   | {

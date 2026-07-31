@@ -66,7 +66,10 @@ import {
   projectActivityEvent,
   projectThreadDetailSnapshot,
 } from "./orchestration/ActivityPayloadProjection.ts";
-import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
+import {
+  loadWayfinderHandoffSource,
+  normalizeDispatchCommand,
+} from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -1048,10 +1051,11 @@ const makeWsRpcLayer = (
                 command.type === "thread.turn.start" && command.skillInvocationRequest !== undefined
                   ? yield* providerRegistry.getProviders
                   : undefined;
-              const normalizedCommand = yield* normalizeDispatchCommand(
-                command,
-                providers ? { providers } : {},
-              );
+              const normalizedCommand = yield* normalizeDispatchCommand(command, {
+                ...(providers ? { providers } : {}),
+                getWayfinderHandoffSource: (skillRunId) =>
+                  loadWayfinderHandoffSource(projectionSnapshotQuery, skillRunId),
+              });
               const shouldStopSessionAfterArchive =
                 normalizedCommand.type === "thread.archive"
                   ? yield* projectionSnapshotQuery

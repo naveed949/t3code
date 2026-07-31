@@ -195,6 +195,17 @@ export const SkillInvocationAction = Schema.Union([
   Schema.Struct({ id: Schema.Literal("new-map") }),
   Schema.Struct({ id: Schema.Literal("continue-map"), reference: TrimmedNonEmptyString }),
   Schema.Struct({
+    id: Schema.Literal("handoff-to-spec"),
+    sourceSkillRunId: SkillRunId,
+    sourceThreadId: ThreadId,
+    canonicalReference: Schema.Struct({
+      number: Schema.Int.check(Schema.isGreaterThan(0)),
+      url: TrimmedNonEmptyString,
+    }),
+    wayfinderSynchronizedAt: IsoDateTime,
+    acknowledgedIncomplete: Schema.Boolean,
+  }),
+  Schema.Struct({
     id: Schema.Literal("work-ticket"),
     ticketNumber: Schema.Int.check(Schema.isGreaterThan(0)),
     sourceSkillRunId: SkillRunId,

@@ -8,6 +8,7 @@ import {
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
+import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -840,6 +841,97 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const requestedSkillInvocation = command.skillInvocation;
+      const handoffAction =
+        requestedSkillInvocation?.action?.id === "handoff-to-spec"
+          ? requestedSkillInvocation.action
+          : null;
+      let handoffWorkstreamId: WorkstreamId | null = null;
+      if (handoffAction !== null) {
+        if (
+          requestedSkillInvocation?.skill.name !== "to-spec" ||
+          requestedSkillInvocation.execution.mode !== "generic"
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder handoff requires generic to-spec execution.",
+          });
+        }
+        const wayfinderThread = yield* requireThread({
+          readModel,
+          command,
+          threadId: handoffAction.sourceThreadId,
+        });
+        const wayfinderInvocation = wayfinderThread.latestTurn?.skillInvocation;
+        if (wayfinderThread.projectId !== targetThread.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "to-spec provenance must reference a native Wayfinder map in the target project.",
+          });
+        }
+        const latestTurnHasSource =
+          wayfinderInvocation?.skillRunId === handoffAction.sourceSkillRunId &&
+          wayfinderInvocation.skill.name === "wayfinder" &&
+          wayfinderInvocation.execution.mode === "native" &&
+          wayfinderInvocation.wayfinderMap !== undefined;
+        if (!latestTurnHasSource) {
+          if (requestedSkillInvocation.reconnectWorkstreamId === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec provenance must resolve from a durable Wayfinder Skill Run.",
+            });
+          }
+          handoffWorkstreamId = requestedSkillInvocation.reconnectWorkstreamId;
+        } else {
+          const wayfinderMap = wayfinderInvocation.wayfinderMap;
+          const synchronizedAt =
+            wayfinderInvocation.wayfinderSynchronizedAt ?? wayfinderMap.lastSynchronizedAt;
+          if (
+            handoffAction.canonicalReference.number !== wayfinderMap.canonicalReference.number ||
+            handoffAction.canonicalReference.url !== wayfinderMap.canonicalReference.url ||
+            handoffAction.wayfinderSynchronizedAt !== synchronizedAt
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec provenance does not match the canonical synchronized Wayfinder map.",
+            });
+          }
+          const activeLinkedTicketNumbers = readModel.threads.flatMap((thread) => {
+            const invocation = thread.latestTurn?.skillInvocation;
+            const action = invocation?.action?.id === "work-ticket" ? invocation.action : null;
+            const active =
+              thread.latestTurn?.state === "running" ||
+              thread.session?.status === "starting" ||
+              thread.session?.status === "running";
+            return invocation?.workstreamId === wayfinderInvocation.workstreamId &&
+              action !== null &&
+              active
+              ? [action.ticketNumber]
+              : [];
+          });
+          const readiness = deriveWayfinderReadiness({
+            map: wayfinderMap,
+            synchronization: wayfinderInvocation.wayfinderSynchronization ?? null,
+            activeLinkedTicketNumbers,
+          });
+          if (!readiness.ready && !handoffAction.acknowledgedIncomplete) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Acknowledge the incomplete Wayfinder map before early to-spec handoff. Blockers: ${readiness.blockers.map((blocker) => blocker.kind).join(", ")}.`,
+            });
+          }
+          if (
+            requestedSkillInvocation.reconnectWorkstreamId !== undefined &&
+            requestedSkillInvocation.reconnectWorkstreamId !== wayfinderInvocation.workstreamId
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec reconnect Workstream does not match its Wayfinder provenance.",
+            });
+          }
+          handoffWorkstreamId = wayfinderInvocation.workstreamId;
+        }
+      }
       const skillInvocationFields = requestedSkillInvocation
         ? (({ reconnectWorkstreamId: _reconnectWorkstreamId, ...invocation }) => invocation)(
             requestedSkillInvocation,
@@ -849,6 +941,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ? {
             ...skillInvocationFields,
             workstreamId:
+              handoffWorkstreamId ??
               requestedSkillInvocation.reconnectWorkstreamId ??
               WorkstreamId.make(
                 `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,

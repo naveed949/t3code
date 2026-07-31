@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
-import { WayfinderWorkbench } from "./WayfinderWorkbench.tsx";
+import { requestWayfinderToSpecStart, WayfinderWorkbench } from "./WayfinderWorkbench.tsx";
 import { ThreadId } from "@t3tools/contracts";
 
 const map = {
@@ -266,5 +266,94 @@ describe("WayfinderWorkbench", () => {
 
     expect(markup).toContain("Start research");
     expect(markup).not.toContain("Start work");
+  });
+
+  it("offers an explicit to-spec handoff when every readiness invariant holds", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={{
+          ...map,
+          fogOfWar: [],
+          tickets: map.tickets.map((ticket) => ({ ...ticket, state: "closed" as const })),
+          frontier: [],
+        }}
+        readiness={{ ready: true, blockers: [] }}
+        toSpecAvailable
+        onStartToSpec={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Ready for specification");
+    expect(markup).toContain("Start to-spec");
+    expect(markup).not.toContain("Start to-spec early");
+  });
+
+  it("lists every readiness blocker and labels the acknowledged early path", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        readiness={{
+          ready: false,
+          blockers: [
+            { kind: "open-decision-tickets", ticketNumbers: [43, 44] },
+            { kind: "fog-of-war", entries: ["Deployment ownership"] },
+            { kind: "tracker-synchronization-unhealthy", status: "unavailable" },
+          ],
+        }}
+        toSpecAvailable
+        onStartToSpec={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Wayfinder is not complete");
+    expect(markup).toContain("Close every decision ticket. Open: #43, #44.");
+    expect(markup).toContain("Resolve or move every in-scope unknown: Deployment ownership.");
+    expect(markup).toContain("Restore healthy tracker synchronization");
+    expect(markup).toContain("Start to-spec early");
+  });
+
+  it("starts a ready handoff directly and gates an early handoff on the full warning", () => {
+    const starts: boolean[] = [];
+    requestWayfinderToSpecStart({
+      readiness: { ready: true, blockers: [] },
+      confirmIncomplete: () => false,
+      onStart: (acknowledgedIncomplete) => starts.push(acknowledgedIncomplete),
+    });
+
+    let warning = "";
+    requestWayfinderToSpecStart({
+      readiness: {
+        ready: false,
+        blockers: [
+          { kind: "open-decision-tickets", ticketNumbers: [43] },
+          { kind: "fog-of-war", entries: ["Deployment ownership"] },
+        ],
+      },
+      confirmIncomplete: (message) => {
+        warning = message;
+        return false;
+      },
+      onStart: (acknowledgedIncomplete) => starts.push(acknowledgedIncomplete),
+    });
+
+    expect(starts).toEqual([false]);
+    expect(warning).toContain("Open: #43");
+    expect(warning).toContain("Deployment ownership");
+
+    requestWayfinderToSpecStart({
+      readiness: {
+        ready: false,
+        blockers: [{ kind: "fog-of-war", entries: ["Deployment ownership"] }],
+      },
+      confirmIncomplete: () => true,
+      onStart: (acknowledgedIncomplete) => starts.push(acknowledgedIncomplete),
+    });
+    expect(starts).toEqual([false, true]);
   });
 });

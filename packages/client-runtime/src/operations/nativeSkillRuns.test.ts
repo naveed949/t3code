@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
+import { SkillRunId, ThreadId } from "@t3tools/contracts";
 
-import { resolveNativeSkillRunInvocation } from "./nativeSkillRuns.ts";
+import {
+  createWayfinderToSpecInvocationRequest,
+  resolveNativeSkillRunInvocation,
+} from "./nativeSkillRuns.ts";
 
 describe("resolveNativeSkillRunInvocation", () => {
   const skill = {
@@ -153,5 +157,55 @@ describe("resolveNativeSkillRunInvocation", () => {
         skills: [skill],
       }),
     ).toEqual({ kind: "chooser", reason: "launch-selection-required" });
+  });
+});
+
+describe("createWayfinderToSpecInvocationRequest", () => {
+  it("creates an explicit generic run with canonical source provenance", () => {
+    expect(
+      createWayfinderToSpecInvocationRequest({
+        skill: { name: "to-spec", path: "/skills/to-spec/SKILL.md", enabled: true },
+        sourceSkillRunId: SkillRunId.make("skill-run:wayfinder"),
+        sourceThreadId: ThreadId.make("thread-wayfinder"),
+        destination: "Ship a remote-ready release.",
+        canonicalReference: {
+          number: 42,
+          url: "https://github.com/t3tools/t3code/issues/42",
+        },
+        wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+        acknowledgedIncomplete: true,
+      }),
+    ).toEqual({
+      skillName: "to-spec",
+      skillPath: "/skills/to-spec/SKILL.md",
+      arguments:
+        "Create a specification from the Wayfinder map at https://github.com/t3tools/t3code/issues/42. Destination: Ship a remote-ready release.",
+      action: {
+        id: "handoff-to-spec",
+        sourceSkillRunId: "skill-run:wayfinder",
+        sourceThreadId: "thread-wayfinder",
+        canonicalReference: {
+          number: 42,
+          url: "https://github.com/t3tools/t3code/issues/42",
+        },
+        wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+        acknowledgedIncomplete: true,
+      },
+      executionPreference: "generic",
+    });
+  });
+
+  it("does not create a handoff when to-spec is unavailable", () => {
+    expect(
+      createWayfinderToSpecInvocationRequest({
+        skill: { name: "to-spec", path: "/skills/to-spec/SKILL.md", enabled: false },
+        sourceSkillRunId: SkillRunId.make("skill-run:wayfinder"),
+        sourceThreadId: ThreadId.make("thread-wayfinder"),
+        destination: "Ship a release.",
+        canonicalReference: { number: 42, url: "https://example.test/issues/42" },
+        wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+        acknowledgedIncomplete: false,
+      }),
+    ).toBeNull();
   });
 });

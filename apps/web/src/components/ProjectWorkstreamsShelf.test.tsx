@@ -33,6 +33,7 @@ it("lists active and completed Workstreams with their project context", () => {
             lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
           },
           wayfinderSynchronization: null,
+          readiness: { ready: true, blockers: [] },
         },
       ]}
       projectTitleByKey={new Map([["environment:1:project:1", "T3 Code"]])}

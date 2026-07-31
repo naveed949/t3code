@@ -8,7 +8,7 @@ import * as Option from "effect/Option";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import { projectThreadDetailSnapshot } from "./ActivityPayloadProjection.ts";
-import { normalizeDispatchCommand } from "./Normalizer.ts";
+import { loadWayfinderHandoffSource, normalizeDispatchCommand } from "./Normalizer.ts";
 import {
   annotateEnvironmentRequest,
   failEnvironmentInternal,
@@ -16,6 +16,7 @@ import {
   failEnvironmentNotFound,
   requireEnvironmentScope,
 } from "../auth/http.ts";
+import * as ProviderRegistry from "../provider/Services/ProviderRegistry.ts";
 import { OrchestrationEngineService } from "./Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "./Services/ProjectionSnapshotQuery.ts";
 
@@ -25,6 +26,7 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   Effect.fnUntraced(function* (handlers) {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
     const orchestrationEngine = yield* OrchestrationEngineService;
+    const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
 
     return handlers
       .handle(
@@ -78,9 +80,16 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         Effect.fn("environment.orchestration.dispatch")(function* (args) {
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
-          const normalizedCommand = yield* normalizeDispatchCommand(args.payload).pipe(
-            Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")),
-          );
+          const providers =
+            args.payload.type === "thread.turn.start" &&
+            args.payload.skillInvocationRequest !== undefined
+              ? yield* providerRegistry.getProviders
+              : undefined;
+          const normalizedCommand = yield* normalizeDispatchCommand(args.payload, {
+            ...(providers ? { providers } : {}),
+            getWayfinderHandoffSource: (skillRunId) =>
+              loadWayfinderHandoffSource(projectionSnapshotQuery, skillRunId),
+          }).pipe(Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")));
           return yield* orchestrationEngine
             .dispatch(normalizedCommand)
             .pipe(

@@ -210,6 +210,10 @@
     "./wayfinderDraft": {
       "types": "./src/wayfinderDraft.ts",
       "import": "./src/wayfinderDraft.ts"
+    },
+    "./wayfinderReadiness": {
+      "types": "./src/wayfinderReadiness.ts",
+      "import": "./src/wayfinderReadiness.ts"
     }
   },
   "scripts": {

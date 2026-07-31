@@ -150,3 +150,13 @@ so tests can wait on the worker rather than timers or polling. Successful public
 same healthy `mutation` synchronization state after its final canonical reload. Continuing a known
 map performs its full GitHub preflight before dispatching the resumed provider turn and persists a
 healthy `resume` state into the newly linked Skill Run.
+
+Wayfinder readiness is one shared pure derivation over receipt-backed projection state: destination,
+open decision tickets, active `work-ticket` threads, in-scope fog, closed-ticket classification, and
+synchronization health. The parent issue's state and provider prose are not completion inputs. Web,
+desktop, and mobile render every returned blocker. An explicit `handoff-to-spec` action is normalized
+by loading its historical source Skill Run from the projection store, validating the canonical issue
+and synchronization receipt, and stamping that source Workstream as `reconnectWorkstreamId`. The
+decider then creates a new generic Skill Run identity in that Workstream. Incomplete readiness is
+accepted only when the typed action records the user's warning acknowledgement; no reactor or
+assistant output automatically dispatches the handoff.

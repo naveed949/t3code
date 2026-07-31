@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import { deriveWayfinderDraft } from "@t3tools/client-runtime/state/wayfinder-draft";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
+import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { expect, it } from "vite-plus/test";
 
 it("uses the shared recoverable Wayfinder draft model in the desktop web shell", () => {
@@ -76,5 +77,30 @@ it("uses the shared recoverable Wayfinder draft model in the desktop web shell",
     destination: "Reliable recovery",
     decisionReceipts: [{ requestId }],
     confirmedDecisions: [{ requestId, questionId: "destination" }],
+  });
+});
+
+it("uses the shared explicit generic to-spec handoff in the desktop web shell", () => {
+  expect(
+    createWayfinderToSpecInvocationRequest({
+      skill: { name: "to-spec", path: "/skills/to-spec/SKILL.md", enabled: true },
+      sourceSkillRunId: SkillRunId.make("skill-run:desktop-wayfinder"),
+      sourceThreadId: ThreadId.make("thread:desktop-wayfinder"),
+      destination: "Ship the desktop release.",
+      canonicalReference: {
+        number: 42,
+        url: "https://github.com/t3tools/t3code/issues/42",
+      },
+      wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+      acknowledgedIncomplete: false,
+    }),
+  ).toMatchObject({
+    skillName: "to-spec",
+    executionPreference: "generic",
+    action: {
+      id: "handoff-to-spec",
+      sourceSkillRunId: "skill-run:desktop-wayfinder",
+      acknowledgedIncomplete: false,
+    },
   });
 });

@@ -25,10 +25,34 @@ import type {
   WayfinderResearchState,
   WayfinderSynchronizationState,
 } from "@t3tools/contracts";
+import {
+  deriveWayfinderReadiness,
+  describeWayfinderReadinessBlocker,
+  type WayfinderReadiness,
+} from "@t3tools/shared/wayfinderReadiness";
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+
+export function requestWayfinderToSpecStart(input: {
+  readonly readiness: WayfinderReadiness;
+  readonly confirmIncomplete: (warning: string) => boolean;
+  readonly onStart: (acknowledgedIncomplete: boolean) => void;
+}) {
+  if (input.readiness.ready) {
+    input.onStart(false);
+    return;
+  }
+  const blockers = input.readiness.blockers.map(describeWayfinderReadinessBlocker).join("\n");
+  if (
+    input.confirmIncomplete(
+      `This Wayfinder map is incomplete:\n\n${blockers}\n\nStart to-spec early anyway?`,
+    )
+  ) {
+    input.onStart(true);
+  }
+}
 
 function ReferenceLink(props: { readonly href: string; readonly children: ReactNode }) {
   return (
@@ -527,6 +551,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly connected: boolean;
   readonly onReconcile: (reason: WayfinderReconcileReason) => void;
+  readonly readiness?: WayfinderReadiness;
+  readonly toSpecAvailable?: boolean;
+  readonly onStartToSpec?: (acknowledgedIncomplete: boolean) => void;
 }) {
   const reconcileRef = useRef(props.onReconcile);
   reconcileRef.current = props.onReconcile;
@@ -597,6 +624,21 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     props.connected &&
     props.synchronization?.canMutate !== false &&
     !isWayfinderMutationInFlight(props.mutation ?? null);
+  const readiness =
+    props.readiness ??
+    deriveWayfinderReadiness({
+      map,
+      synchronization: props.synchronization,
+      activeLinkedTicketNumbers: [],
+    });
+  const startToSpec = () => {
+    if (!props.onStartToSpec) return;
+    requestWayfinderToSpecStart({
+      readiness,
+      confirmIncomplete: (warning) => window.confirm(warning),
+      onStart: props.onStartToSpec,
+    });
+  };
 
   return (
     <section
@@ -658,6 +700,44 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
             GitHub #{String(props.map.canonicalReference.number)}
           </ReferenceLink>
         </header>
+
+        <section
+          aria-labelledby="wayfinder-completion"
+          className="space-y-3 rounded-lg border border-border/70 p-3"
+        >
+          <div>
+            <h3 id="wayfinder-completion" className="text-xs font-semibold text-foreground">
+              {readiness.ready ? "Ready for specification" : "Wayfinder is not complete"}
+            </h3>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {readiness.ready
+                ? "Every observable completion invariant holds. The next skill starts only when you choose it."
+                : "Resolve these invariants before the normal handoff, or explicitly acknowledge an early handoff."}
+            </p>
+          </div>
+          {readiness.blockers.length > 0 ? (
+            <ul className="space-y-1 text-xs text-foreground">
+              {readiness.blockers.map((blocker) => (
+                <li key={blocker.kind} className="ml-4 list-disc">
+                  {describeWayfinderReadinessBlocker(blocker)}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {props.toSpecAvailable && props.onStartToSpec ? (
+            <button
+              type="button"
+              className="rounded-md border border-border px-3 py-1.5 text-xs font-semibold text-foreground"
+              onClick={startToSpec}
+            >
+              {readiness.ready ? "Start to-spec" : "Start to-spec early"}
+            </button>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Enable the to-spec skill for this provider to start the handoff.
+            </p>
+          )}
+        </section>
 
         {props.onMutate && props.assignedTicketNumber == null ? (
           <EditingControls map={map} mutation={props.mutation ?? null} onMutate={props.onMutate} />
