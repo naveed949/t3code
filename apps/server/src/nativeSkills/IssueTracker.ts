@@ -36,7 +36,6 @@ export interface IssueTrackerIssue {
 
 export interface IssueTrackerClaim {
   readonly viewerLogin: string;
-  readonly alreadyOwned: boolean;
 }
 
 export type WayfinderMapLoadResult =
@@ -889,7 +888,7 @@ export const GitHubIssueTrackerLive = Layer.effect(
         }
         const currentOwner = before.assignees[0]?.login;
         if (currentOwner === viewerLogin) {
-          return { viewerLogin, alreadyOwned: true };
+          return { viewerLogin };
         }
         if (currentOwner !== undefined) {
           return yield* new GitHubCli.GitHubCliCommandError({
@@ -902,7 +901,7 @@ export const GitHubIssueTrackerLive = Layer.effect(
         yield* editViewerAssignment({ ...input, operation: "add" });
         const after = yield* loadIssueClaim(input);
         if (after.state === "OPEN" && after.assignees[0]?.login === viewerLogin) {
-          return { viewerLogin, alreadyOwned: false };
+          return { viewerLogin };
         }
         if (after.assignees.some((assignee) => assignee.login === viewerLogin)) {
           yield* editViewerAssignment({ ...input, operation: "remove" });

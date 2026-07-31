@@ -1100,6 +1100,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (command.action.kind === "claim-ticket") {
         const action = command.action;
         const ticket = map?.tickets.find((candidate) => candidate.number === action.ticketNumber);
+        const recoveringClaim =
+          invocation?.wayfinderMutation?.status === "failed" &&
+          invocation.wayfinderMutation.action.kind === "claim-ticket" &&
+          invocation.wayfinderMutation.action.ticketNumber === action.ticketNumber;
         if (!ticket) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
@@ -1112,13 +1116,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             detail: `Wayfinder ticket #${ticket.number} must be open before it can be claimed.`,
           });
         }
-        if (ticket.claimedBy !== null) {
+        if (ticket.claimedBy !== null && !recoveringClaim) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `Wayfinder ticket #${ticket.number} is already claimed by ${ticket.claimedBy}.`,
           });
         }
-        if (!map?.frontier.includes(ticket.number)) {
+        if (!recoveringClaim && !map?.frontier.includes(ticket.number)) {
           return yield* new OrchestrationCommandInvariantError({
             commandType: command.type,
             detail: `Wayfinder ticket #${ticket.number} is blocked and is not on the runnable frontier.`,

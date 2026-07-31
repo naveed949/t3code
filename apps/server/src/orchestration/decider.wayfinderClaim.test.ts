@@ -212,6 +212,60 @@ it.layer(NodeServices.layer)("Wayfinder ticket claim invariants", (it) => {
     }),
   );
 
+  it.effect("accepts an exact retry after the canonical claim outlived thread startup", () =>
+    Effect.gen(function* () {
+      const initial = yield* makeReadModel();
+      const readModel = {
+        ...initial,
+        threads: initial.threads.map((thread) =>
+          thread.id === threadId && thread.latestTurn?.skillInvocation
+            ? {
+                ...thread,
+                latestTurn: {
+                  ...thread.latestTurn,
+                  skillInvocation: {
+                    ...thread.latestTurn.skillInvocation,
+                    wayfinderMap: {
+                      ...map,
+                      tickets: map.tickets.map((ticket) =>
+                        ticket.number === 43 ? { ...ticket, claimedBy: "octocat" } : ticket,
+                      ),
+                      frontier: [],
+                    },
+                    wayfinderMutation: {
+                      actionId: "claim-43",
+                      action: { kind: "claim-ticket" as const, ticketNumber: 43 },
+                      status: "failed" as const,
+                      error: "The linked thread is incomplete.",
+                      updatedAt: now,
+                    },
+                  },
+                },
+              }
+            : thread,
+        ),
+      };
+      const result = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("retry-claim-43"),
+          threadId,
+          skillRunId,
+          action: { kind: "claim-ticket", ticketNumber: 43 },
+          confirmed: false,
+          createdAt: now,
+        },
+      });
+
+      const requested = Array.isArray(result) ? result[0] : result;
+      expect(requested).toMatchObject({
+        type: "thread.wayfinder-mutation-requested",
+        payload: { action: { kind: "claim-ticket", ticketNumber: 43 } },
+      });
+    }),
+  );
+
   for (const [ticketNumber, reason] of [
     [44, "blocked"],
     [45, "claimed"],

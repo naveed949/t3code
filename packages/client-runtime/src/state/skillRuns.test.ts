@@ -212,6 +212,43 @@ it("reconciles through the map-owning linked thread after a newer continuation r
   });
 });
 
+it("routes linked-ticket work back through its published source map run", () => {
+  const wayfinderMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Current map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "Current",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [],
+    frontier: [],
+    lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
+  };
+  const source = { ...invocation, wayfinderMap };
+  const linked = {
+    ...source,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("wayfinder-ticket:workstream:1:43"),
+    createdAt: "2026-01-03T00:00:00.000Z",
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: source.skillRunId,
+    },
+  };
+  const [workstream] = deriveProjectWorkstreams(source.projectId, [source, linked]);
+
+  expect(findWayfinderReconciliationInvocation(workstream ?? null, linked)).toMatchObject({
+    skillRunId: source.skillRunId,
+    threadId: source.threadId,
+  });
+});
+
 it("does not report completion until reconciliation is healthy and reactivates reopened work", () => {
   const synchronizedAt = "2026-01-04T00:00:00.000Z";
   const baseMap = {

@@ -138,8 +138,8 @@ function sourceSnapshot(withEmptyTicketThread = false): OrchestrationReadModel {
   };
 }
 
-function trackerLayer(claimedMap: WayfinderMapProjection) {
-  let claimed = false;
+function trackerLayer(claimedMap: WayfinderMapProjection, alreadyClaimed = false) {
+  let claimed = alreadyClaimed;
   return Layer.succeed(
     IssueTracker,
     IssueTracker.of({
@@ -157,9 +157,9 @@ function trackerLayer(claimedMap: WayfinderMapProjection) {
       claimIssue: () =>
         Effect.sync(() => {
           claimed = true;
-          return { viewerLogin: "alice", alreadyOwned: false };
+          return { viewerLogin: "alice" };
         }),
-      releaseIssue: () => Effect.die("unexpected tracker write"),
+      releaseIssue: () => Effect.sync(() => void (claimed = false)),
       ensureLabel: () => Effect.die("unexpected tracker write"),
       createIssue: () => Effect.die("unexpected tracker write"),
       addChild: () => Effect.die("unexpected tracker write"),
@@ -280,6 +280,17 @@ it.effect("recovers an empty deterministic ticket thread without creating a dupl
       tickets: [{ ...map.tickets[0]!, claimedBy: "alice" }],
       frontier: [],
     };
+    const retryInvocation: SkillInvocation = {
+      ...invocation,
+      wayfinderMap: claimedMap,
+      wayfinderMutation: {
+        actionId: "action:claim:43",
+        action: { kind: "claim-ticket", ticketNumber: 43 },
+        status: "failed",
+        error: "The linked thread is incomplete.",
+        updatedAt: now,
+      },
+    };
     const dependencies = Layer.mergeAll(
       NodeServices.layer,
       Layer.succeed(OrchestrationEngineService, {
@@ -294,9 +305,10 @@ it.effect("recovers an empty deterministic ticket thread without creating a dupl
       }),
       Layer.mock(ProjectionSnapshotQuery)({
         getSnapshot: () => Effect.succeed(sourceSnapshot(true)),
-        getSkillRunsByThreadId: () => Effect.succeed([invocation]),
+        getSkillRunsByThreadId: (candidateThreadId) =>
+          Effect.succeed(candidateThreadId === sourceThreadId ? [retryInvocation] : []),
       }),
-      trackerLayer(claimedMap),
+      trackerLayer(claimedMap, true),
       Layer.succeed(
         RuntimeReceiptBus,
         RuntimeReceiptBus.of({
@@ -336,5 +348,76 @@ it.effect("recovers an empty deterministic ticket thread without creating a dupl
     const success = dispatched.at(-1);
     assert(success?.type === "thread.wayfinder.mutation.update");
     assert.strictEqual(success.mutation.status, "synchronized");
+  }),
+);
+
+it.effect("releases the canonical claim without deleting its linked thread", () =>
+  Effect.gen(function* () {
+    const dispatched: OrchestrationCommand[] = [];
+    const claimedMap = {
+      ...map,
+      tickets: [{ ...map.tickets[0]!, claimedBy: "alice" }],
+      frontier: [],
+    };
+    const claimedInvocation: SkillInvocation = {
+      ...invocation,
+      wayfinderMap: claimedMap,
+    };
+    const dependencies = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(OrchestrationEngineService, {
+        readEvents: () => Stream.empty,
+        dispatch: (command) =>
+          Effect.sync(() => {
+            dispatched.push(command);
+            return { sequence: dispatched.length };
+          }),
+        streamDomainEvents: Stream.empty,
+        latestSequence: Effect.succeed(0),
+      }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getSnapshot: () => Effect.succeed(sourceSnapshot(true)),
+        getSkillRunsByThreadId: () => Effect.succeed([claimedInvocation]),
+      }),
+      trackerLayer(claimedMap, true),
+      Layer.succeed(
+        RuntimeReceiptBus,
+        RuntimeReceiptBus.of({
+          publish: () => Effect.void,
+          streamEventsForTest: Stream.empty,
+        }),
+      ),
+    );
+    const process = yield* makeWayfinderMutationProcessor.pipe(Effect.provide(dependencies));
+    yield* process({
+      sequence: 3,
+      eventId: EventId.make("event:release"),
+      aggregateKind: "thread",
+      aggregateId: sourceThreadId,
+      type: "thread.wayfinder-mutation-requested",
+      occurredAt: now,
+      commandId: CommandId.make("command:release"),
+      causationEventId: null,
+      correlationId: CommandId.make("command:release"),
+      metadata: {},
+      payload: {
+        threadId: sourceThreadId,
+        skillRunId: sourceSkillRunId,
+        actionId: "action:release:43",
+        action: { kind: "release-ticket", ticketNumber: 43 },
+        runtimeMode: "full-access",
+        confirmed: false,
+        createdAt: now,
+      },
+    });
+
+    assert.deepStrictEqual(
+      dispatched.map((command) => command.type),
+      ["thread.wayfinder.mutation.update", "thread.wayfinder.mutation.update"],
+    );
+    const success = dispatched.at(-1);
+    assert(success?.type === "thread.wayfinder.mutation.update");
+    assert.strictEqual(success.mutation.status, "synchronized");
+    assert.strictEqual(success.wayfinderMap?.tickets[0]?.claimedBy, null);
   }),
 );

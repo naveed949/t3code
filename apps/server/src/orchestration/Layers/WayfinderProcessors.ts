@@ -302,11 +302,19 @@ export const makeWayfinderMutationProcessor = Effect.gen(function* () {
         const canonicalTicketBeforeClaim = canonicalBeforeClaim.tickets.find(
           (candidate) => candidate.number === action.ticketNumber,
         );
-        if (
-          canonicalTicketBeforeClaim?.state !== "open" ||
-          canonicalTicketBeforeClaim.claimedBy !== null ||
-          !canonicalBeforeClaim.frontier.includes(action.ticketNumber)
-        ) {
+        const recoveringClaim =
+          invocation.wayfinderMutation?.status === "failed" &&
+          invocation.wayfinderMutation.action.kind === "claim-ticket" &&
+          invocation.wayfinderMutation.action.ticketNumber === action.ticketNumber;
+        const canonicalClaimIsRunnable =
+          canonicalTicketBeforeClaim?.state === "open" &&
+          canonicalTicketBeforeClaim.claimedBy === null &&
+          canonicalBeforeClaim.frontier.includes(action.ticketNumber);
+        const canonicalClaimIsRecoverable =
+          recoveringClaim &&
+          canonicalTicketBeforeClaim?.state === "open" &&
+          canonicalTicketBeforeClaim.claimedBy !== null;
+        if (!canonicalClaimIsRunnable && !canonicalClaimIsRecoverable) {
           return yield* new WayfinderReconciliationError({
             detail: "The canonical ticket is no longer open, unblocked, and unclaimed.",
           });

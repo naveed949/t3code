@@ -47,7 +47,7 @@ export function deriveWayfinderTicketClaimActions(input: {
     canClaim,
     claimLabel: input.linkedThreadId === null ? "Start work" : "Reclaim",
     canRetry: failedClaim && input.ticket.claimedBy !== null && input.linkedThreadId === null,
-    canRelease: input.linkedThreadId !== null && input.ticket.claimedBy !== null,
+    canRelease: input.ticket.claimedBy !== null && (input.linkedThreadId !== null || failedClaim),
     linkedThreadId: input.linkedThreadId,
   };
 }

@@ -155,11 +155,13 @@ function TicketList(props: {
   readonly onReturnToThread: (threadId: ThreadId) => void;
 }) {
   const presentation = buildMobileWayfinderPresentation(props.map);
+  const ticketThreadIdsByNumber = new Map(
+    props.ticketThreads.map((link) => [link.ticketNumber, link.threadId] as const),
+  );
   return (
     <View className="gap-2">
       {presentation.tickets.map((ticket) => {
-        const linkedThreadId =
-          props.ticketThreads.find((link) => link.ticketNumber === ticket.number)?.threadId ?? null;
+        const linkedThreadId = ticketThreadIdsByNumber.get(ticket.number) ?? null;
         const claimActions = buildMobileTicketClaimActions(
           ticket,
           props.map.frontier,
@@ -332,7 +334,7 @@ function WayfinderWorkbenchContent(props: {
     void mutateWayfinder({
       environmentId: props.environmentId,
       input: {
-        threadId: props.threadId,
+        threadId: invocation.threadId,
         skillRunId: invocation.skillRunId,
         action,
         ...(confirmed && mutation ? { actionId: mutation.actionId } : {}),

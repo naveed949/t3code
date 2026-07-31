@@ -181,15 +181,15 @@ export function findWayfinderReconciliationInvocation(
   workstream: ProjectSkillWorkstream | null,
   fallback: SkillInvocation | null,
 ): SkillInvocation | null {
+  const mapRuns = workstream?.skillRuns.filter(isWayfinderMapInvocation) ?? [];
+  const canonicalMapRuns = mapRuns.filter((run) => run.action?.id !== "work-ticket");
   return (
-    workstream?.skillRuns
-      .filter(isWayfinderMapInvocation)
-      .sort(
-        (left, right) =>
-          mapSynchronizationTime(right).localeCompare(mapSynchronizationTime(left)) ||
-          right.createdAt.localeCompare(left.createdAt) ||
-          right.skillRunId.localeCompare(left.skillRunId),
-      )[0] ?? (fallback?.wayfinderMap ? fallback : null)
+    (canonicalMapRuns.length > 0 ? canonicalMapRuns : mapRuns).sort(
+      (left, right) =>
+        mapSynchronizationTime(right).localeCompare(mapSynchronizationTime(left)) ||
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.skillRunId.localeCompare(left.skillRunId),
+    )[0] ?? (fallback?.wayfinderMap && fallback.action?.id !== "work-ticket" ? fallback : null)
   );
 }
 

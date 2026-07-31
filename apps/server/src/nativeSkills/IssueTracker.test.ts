@@ -125,7 +125,7 @@ it.effect("claims an open unassigned ticket and confirms canonical ownership", (
       issueNumber: 43,
     });
 
-    assert.deepStrictEqual(claim, { viewerLogin: "alice", alreadyOwned: false });
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
     assert.ok(calls.some((args) => args.includes("--add-assignee")));
   }).pipe(
     Effect.provide(
@@ -164,7 +164,7 @@ it.effect("reuses the viewer's canonical claim without assigning twice", () => {
       issueNumber: 43,
     });
 
-    assert.deepStrictEqual(claim, { viewerLogin: "alice", alreadyOwned: true });
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
     assert.strictEqual(edits, 0);
   }).pipe(
     Effect.provide(
@@ -255,6 +255,59 @@ it.effect("releases only the viewer's canonical ticket claim", () => {
             return Effect.succeed(
               output(JSON.stringify({ state: "OPEN", assignees: [{ login: "alice" }] })),
             );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("claims separate frontier tickets independently", () => {
+  const assignees = new Map<number, string>();
+  const assignedIssues: number[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claims = yield* Effect.all(
+      [43, 44].map((issueNumber) =>
+        tracker.claimIssue({
+          cwd: "/project",
+          repository: project,
+          issueNumber,
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+
+    assert.deepStrictEqual(claims, [{ viewerLogin: "alice" }, { viewerLogin: "alice" }]);
+    assert.deepStrictEqual(
+      assignedIssues.sort((left, right) => left - right),
+      [43, 44],
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            const issueNumber = Number(args[2]);
+            const assignee = assignees.get(issueNumber);
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: assignee ? [{ login: assignee }] : [],
+                }),
+              ),
+            );
+          }
+          if (args[0] === "issue" && args[1] === "edit" && args.includes("--add-assignee")) {
+            const issueNumber = Number(args[2]);
+            assignees.set(issueNumber, "alice");
+            assignedIssues.push(issueNumber);
           }
           return Effect.succeed(output(""));
         },

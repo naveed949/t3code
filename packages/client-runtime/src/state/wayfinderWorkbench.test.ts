@@ -133,7 +133,7 @@ describe("deriveWayfinderTicketClaimActions", () => {
           updatedAt: "2026-01-02T00:01:00.000Z",
         },
       }),
-    ).toMatchObject({ canClaim: false, canRetry: true, canRelease: false });
+    ).toMatchObject({ canClaim: false, canRetry: true, canRelease: true });
   });
 });
 

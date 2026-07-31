@@ -379,6 +379,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   const map = applyOptimisticWayfinderMutation(props.map, props.mutation ?? null);
   const model = deriveWayfinderWorkbenchModel(map);
   const ticketsByNumber = new Map(map.tickets.map((ticket) => [ticket.number, ticket] as const));
+  const ticketThreadIdsByNumber = new Map(
+    props.ticketThreads?.map((link) => [link.ticketNumber, link.threadId] as const),
+  );
   const incomingEdgesByNumber = new Map<number, typeof model.edges>();
   for (const edge of model.edges) {
     incomingEdgesByNumber.set(edge.to, [...(incomingEdgesByNumber.get(edge.to) ?? []), edge]);
@@ -538,9 +541,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           ) : (
             <ol className="space-y-2">
               {model.tickets.map((ticket) => {
-                const linkedThreadId =
-                  props.ticketThreads?.find((link) => link.ticketNumber === ticket.number)
-                    ?.threadId ?? null;
+                const linkedThreadId = ticketThreadIdsByNumber.get(ticket.number) ?? null;
                 const claimActions = deriveWayfinderTicketClaimActions({
                   ticket,
                   frontier: map.frontier,

@@ -5084,11 +5084,11 @@ function ChatViewContent(props: ChatViewProps) {
       action: WayfinderMutationAction,
       options?: { readonly actionId?: string; readonly confirmed?: boolean },
     ) => {
-      if (!activeThreadId || !activeWayfinderInvocation) return;
+      if (!activeWayfinderInvocation) return;
       const result = await mutateWayfinderCommand({
         environmentId,
         input: {
-          threadId: activeThreadId,
+          threadId: activeWayfinderInvocation.threadId,
           skillRunId: activeWayfinderInvocation.skillRunId,
           action,
           ...(options?.actionId ? { actionId: options.actionId } : {}),
@@ -5098,18 +5098,12 @@ function ChatViewContent(props: ChatViewProps) {
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
-          activeThreadId,
+          activeWayfinderInvocation.threadId,
           error instanceof Error ? error.message : "Failed to update the Wayfinder map.",
         );
       }
     },
-    [
-      activeThreadId,
-      activeWayfinderInvocation,
-      environmentId,
-      mutateWayfinderCommand,
-      setThreadError,
-    ],
+    [activeWayfinderInvocation, environmentId, mutateWayfinderCommand, setThreadError],
   );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
