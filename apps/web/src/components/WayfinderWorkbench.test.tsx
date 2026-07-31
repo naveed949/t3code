@@ -56,6 +56,12 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain('href="https://github.com/t3tools/t3code/issues/42"');
     expect(markup.indexOf("Research hosting")).toBeLessThan(markup.indexOf("Choose deployment"));
     expect(markup).toContain('data-wayfinder-dependency-graph="stable"');
+    expect(markup).toContain('data-wayfinder-initial-focus="true"');
+    expect(markup).toContain('tabindex="-1"');
+    expect(markup).toContain('aria-describedby="wayfinder-graph-alternative"');
+    expect(markup).toContain(
+      "The frontier-first ticket list after this graph is the complete dependency alternative.",
+    );
     expect(markup).toContain('data-wayfinder-edge="43:44"');
     expect(markup).not.toMatch(/animate-|transition-/u);
   });

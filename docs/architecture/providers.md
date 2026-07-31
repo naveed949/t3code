@@ -160,3 +160,24 @@ and synchronization receipt, and stamping that source Workstream as `reconnectWo
 decider then creates a new generic Skill Run identity in that Workstream. Incomplete readiness is
 accepted only when the typed action records the user's warning acknowledgement; no reactor or
 assistant output automatically dispatches the handoff.
+
+## Wayfinder projection and rendering budgets
+
+GitHub pagination and shared-shell payload size are separate trust boundaries. `IssueTracker` rejects
+any relationship connection whose first 100 entries report another page. After projecting a complete
+response, the server measures its UTF-8 JSON representation and accepts at most 256 KiB. An oversized
+continuation fails preflight with remediation; an oversized reconciliation preserves the last
+successful projection as read-only. Neither case sends a partial authoritative map.
+
+Clients derive one deterministic model from that bounded projection. All supported tickets remain in
+the frontier-first list, while the decorative dependency graph is limited to 100 nodes and the first
+200 stably sorted relationships. Web and desktop link the graph to the complete list alternative;
+mobile derives its compact rows and accessibility description from the same capped edge set. This
+prevents a dense 100-ticket DAG from expanding into thousands of rendered badges or one unbounded
+screen-reader announcement.
+
+Reconciliation polling runs only while the Workbench is connected and visible. The 60-second client
+interval requests lightweight revision evidence first; unchanged evidence updates synchronization
+health without loading or broadcasting the full map. Graph surfaces use static layout and Decision
+Card transitions disable themselves for reduced-motion users. The web Workbench focuses its heading
+once on mount, while native controls expose their selected and disabled states on both web and mobile.

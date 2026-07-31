@@ -124,6 +124,13 @@ export function buildMobileHitlResolutionAction(input: {
 export function buildMobileWayfinderPresentation(map: WayfinderMapProjection) {
   const model = deriveWayfinderWorkbenchModel(map);
   const ticketsByNumber = new Map(map.tickets.map((ticket) => [ticket.number, ticket] as const));
+  const shownDependenciesByTicket = new Map<number, number[]>();
+  for (const edge of model.edges) {
+    shownDependenciesByTicket.set(edge.to, [
+      ...(shownDependenciesByTicket.get(edge.to) ?? []),
+      edge.from,
+    ]);
+  }
   const relationships = model.edges.flatMap((edge) => {
     const from = ticketsByNumber.get(edge.from);
     const to = ticketsByNumber.get(edge.to);
@@ -134,10 +141,12 @@ export function buildMobileWayfinderPresentation(map: WayfinderMapProjection) {
     graphRows: model.nodes.map((node) => ({
       ticketNumber: node.ticketNumber,
       depth: node.column,
-      dependsOn: ticketsByNumber.get(node.ticketNumber)?.blockedBy ?? [],
+      dependsOn: shownDependenciesByTicket.get(node.ticketNumber) ?? [],
     })),
-    graphAccessibilityLabel:
-      relationships.length > 0
+    graphTruncated: model.graphTruncated,
+    graphAccessibilityLabel: model.graphTruncated
+      ? `Dependency graph with ${model.nodes.length} tickets and ${model.edges.length} shown relationships. The complete dependency list follows.`
+      : relationships.length > 0
         ? `Dependency graph. ${relationships.join(". ")}.`
         : "Dependency graph. No dependencies.",
     accessibilitySummary: model.accessibilitySummary,

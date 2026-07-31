@@ -1,5 +1,15 @@
 import type { WayfinderMapProjection, WayfinderTicketClassification } from "@t3tools/contracts";
 
+export const WAYFINDER_MAP_PROJECTION_MAX_BYTES = 256 * 1024;
+
+export function measureWayfinderMapProjectionBytes(projection: WayfinderMapProjection): number {
+  return new TextEncoder().encode(JSON.stringify(projection)).byteLength;
+}
+
+export function isWayfinderMapProjectionWithinBudget(projection: WayfinderMapProjection): boolean {
+  return measureWayfinderMapProjectionBytes(projection) <= WAYFINDER_MAP_PROJECTION_MAX_BYTES;
+}
+
 interface GitHubMapIssue {
   readonly number: number;
   readonly title: string;

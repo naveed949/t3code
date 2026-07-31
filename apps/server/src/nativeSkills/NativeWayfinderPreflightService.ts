@@ -111,6 +111,12 @@ export const make = Effect.fn("NativeWayfinderPreflightService.make")(function* 
             remediation:
               "This read-only slice supports up to 100 child tickets, labels, assignees, or dependencies per connection; split the map before continuing it.",
           });
+        } else if (mapResult.kind === "over-budget") {
+          blockers.unshift({
+            check: "continuation-issue",
+            remediation:
+              "This map exceeds the 256 KiB shared projection budget; reduce oversized map sections or dependency density before continuing it.",
+          });
         } else {
           blockers.unshift({
             check: "continuation-issue",
