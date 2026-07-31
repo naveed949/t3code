@@ -26,6 +26,7 @@ import {
   ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
   ThreadWayfinderPublicationUpdatedPayload as ContractsThreadWayfinderPublicationUpdatedPayloadSchema,
   ThreadWayfinderMutationUpdatedPayload as ContractsThreadWayfinderMutationUpdatedPayloadSchema,
+  ThreadWayfinderReconciliationUpdatedPayload as ContractsThreadWayfinderReconciliationUpdatedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -64,3 +65,5 @@ export const ThreadWayfinderPublicationUpdatedPayload =
   ContractsThreadWayfinderPublicationUpdatedPayloadSchema;
 export const ThreadWayfinderMutationUpdatedPayload =
   ContractsThreadWayfinderMutationUpdatedPayloadSchema;
+export const ThreadWayfinderReconciliationUpdatedPayload =
+  ContractsThreadWayfinderReconciliationUpdatedPayloadSchema;

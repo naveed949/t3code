@@ -39,6 +39,7 @@ import {
   ThreadTurnDiffCompletedPayload,
   ThreadWayfinderPublicationUpdatedPayload,
   ThreadWayfinderMutationUpdatedPayload,
+  ThreadWayfinderReconciliationUpdatedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -860,6 +861,45 @@ export function projectEvent(
                     ? {
                         wayfinderMap: payload.wayfinderMap,
                         wayfinderSynchronizedAt: payload.wayfinderMap.lastSynchronizedAt,
+                      }
+                    : {}),
+                },
+              },
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.wayfinder-reconciliation-updated":
+      return decodeForEvent(
+        ThreadWayfinderReconciliationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const invocation = thread?.latestTurn?.skillInvocation;
+          if (!thread || !invocation || invocation.skillRunId !== payload.skillRunId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                ...thread.latestTurn!,
+                skillInvocation: {
+                  ...invocation,
+                  wayfinderSynchronization: payload.synchronization,
+                  ...(payload.synchronization.lastSuccessfulAt !== undefined
+                    ? {
+                        wayfinderSynchronizedAt: payload.synchronization.lastSuccessfulAt,
+                      }
+                    : {}),
+                  ...(payload.wayfinderMap !== undefined
+                    ? {
+                        wayfinderMap: payload.wayfinderMap,
                       }
                     : {}),
                 },

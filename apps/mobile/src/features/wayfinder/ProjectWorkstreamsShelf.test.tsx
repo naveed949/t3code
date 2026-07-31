@@ -58,6 +58,7 @@ function workstream(
       frontier: [],
       lastSynchronizedAt: "2026-07-30T00:00:00.000Z",
     },
+    wayfinderSynchronization: null,
   };
 }
 

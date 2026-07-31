@@ -1168,6 +1168,32 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       ];
     }
 
+    case "thread.wayfinder.reconcile": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-reconciliation-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          reason: command.reason,
+          ...(command.expectedRevision !== undefined
+            ? { expectedRevision: command.expectedRevision }
+            : {}),
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
     case "thread.checkpoint.revert": {
       yield* requireThread({
         readModel,
@@ -1558,6 +1584,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         },
       ];
+    }
+
+    case "thread.wayfinder.reconciliation.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-reconciliation-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          synchronization: command.synchronization,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
     }
 
     default: {

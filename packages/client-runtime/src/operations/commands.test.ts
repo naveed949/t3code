@@ -26,6 +26,7 @@ import {
   createProject,
   mutateWayfinder,
   publishWayfinderDraft,
+  reconcileWayfinderMap,
   settleThread,
   stopThreadSession,
   unsettleThread,
@@ -222,6 +223,33 @@ describe("environment commands", () => {
           action: { kind: "close-ticket", ticketNumber: 8 },
           confirmed: false,
           createdAt: "2026-06-06T00:04:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches an immediate revision-scoped Wayfinder reconciliation command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      yield* reconcileWayfinderMap({
+        commandId: CommandId.make("refresh-command"),
+        threadId: ThreadId.make("thread-1"),
+        skillRunId: SkillRunId.make("skill-run:1"),
+        reason: "mutation",
+        expectedRevision: "revision:before-mutation",
+        createdAt: "2026-07-30T16:05:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.wayfinder.reconcile",
+          commandId: "refresh-command",
+          threadId: "thread-1",
+          skillRunId: "skill-run:1",
+          reason: "mutation",
+          expectedRevision: "revision:before-mutation",
+          createdAt: "2026-07-30T16:05:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

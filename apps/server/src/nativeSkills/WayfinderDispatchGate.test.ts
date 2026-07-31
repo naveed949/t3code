@@ -12,6 +12,7 @@ import {
   type OrchestrationProjectShell,
   type OrchestrationThreadShell,
   type ServerProvider,
+  type WayfinderSynchronizationState,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -69,6 +70,7 @@ const dependencies = (check: () => Effect.Effect<WayfinderPreflightResult>) => (
       Option.some({ workspaceRoot: "/project" } as unknown as OrchestrationProjectShell),
     ),
   getSkillRuns: () => Effect.succeed([]),
+  markWayfinderUnavailable: () => Effect.void,
   check,
 });
 
@@ -191,6 +193,18 @@ it.effect("reconnects a known canonical map to its project Workstream", () =>
         : null,
       wayfinderMap.lastSynchronizedAt,
     );
+    assert.deepStrictEqual(
+      dispatched.type === "thread.turn.start"
+        ? dispatched.skillInvocation?.wayfinderSynchronization
+        : null,
+      {
+        status: "healthy",
+        reason: "resume",
+        lastAttemptedAt: wayfinderMap.lastSynchronizedAt,
+        lastSuccessfulAt: wayfinderMap.lastSynchronizedAt,
+        canMutate: true,
+      },
+    );
   }),
 );
 
@@ -212,6 +226,137 @@ it.effect("returns structured blockers without dispatching canonical mutation", 
       { check: "github-authentication", remediation: "Run gh auth login." },
     ]);
     assert.strictEqual(dispatches, 0);
+  });
+});
+
+it.effect("marks a known cached map read-only when resume preflight cannot reach GitHub", () => {
+  const updates: Array<{
+    readonly threadId: ThreadId;
+    readonly skillRunId: SkillRunId;
+    readonly synchronization: WayfinderSynchronizationState;
+  }> = [];
+  let dispatches = 0;
+  const cachedMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Release map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "A release plan.",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [],
+    frontier: [],
+    lastSynchronizedAt: "2026-07-29T00:00:00.000Z",
+  };
+  const continuation = {
+    ...command,
+    skillInvocation: {
+      ...command.skillInvocation!,
+      action: { id: "continue-map" as const, reference: "42" },
+    },
+  };
+  return Effect.gen(function* () {
+    yield* dispatchWithNativeWayfinderPreflight({
+      command: continuation,
+      dependencies: {
+        ...dependencies(() =>
+          Effect.succeed({
+            kind: "blocked",
+            blockers: [
+              { check: "github-cli", remediation: "Restore GitHub connectivity and retry." },
+            ],
+          }),
+        ),
+        getSkillRuns: () =>
+          Effect.succeed([
+            {
+              ...continuation.skillInvocation!,
+              workstreamId: WorkstreamId.make("workstream:cached"),
+              skillRunId: SkillRunId.make("skill-run:cached"),
+              projectId,
+              threadId,
+              createdAt: cachedMap.lastSynchronizedAt,
+              wayfinderMap: cachedMap,
+            },
+          ]),
+        markWayfinderUnavailable: (update) =>
+          Effect.sync(() => {
+            updates.push(update);
+          }),
+      },
+      dispatch: () => Effect.sync(() => dispatches++),
+    }).pipe(Effect.flip);
+
+    assert.strictEqual(dispatches, 0);
+    assert.strictEqual(updates[0]?.synchronization.status, "unavailable");
+    assert.strictEqual(updates[0]?.synchronization.reason, "resume");
+    assert.strictEqual(updates[0]?.synchronization.canMutate, false);
+    assert.strictEqual(updates[0]?.synchronization.lastSuccessfulAt, cachedMap.lastSynchronizedAt);
+  });
+});
+
+it.effect("preserves cached synchronization health for setup-only resume blockers", () => {
+  let updates = 0;
+  const cachedMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Release map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "A release plan.",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [],
+    frontier: [],
+    lastSynchronizedAt: "2026-07-29T00:00:00.000Z",
+  };
+  const continuation = {
+    ...command,
+    skillInvocation: {
+      ...command.skillInvocation!,
+      action: { id: "continue-map" as const, reference: "42" },
+    },
+  };
+  return Effect.gen(function* () {
+    yield* dispatchWithNativeWayfinderPreflight({
+      command: continuation,
+      dependencies: {
+        ...dependencies(() =>
+          Effect.succeed({
+            kind: "blocked",
+            blockers: [
+              {
+                check: "required-labels",
+                remediation: "Restore the labels required for native mutation.",
+              },
+            ],
+          }),
+        ),
+        getSkillRuns: () =>
+          Effect.succeed([
+            {
+              ...continuation.skillInvocation!,
+              workstreamId: WorkstreamId.make("workstream:cached"),
+              skillRunId: SkillRunId.make("skill-run:cached"),
+              projectId,
+              threadId,
+              createdAt: cachedMap.lastSynchronizedAt,
+              wayfinderMap: cachedMap,
+            },
+          ]),
+        markWayfinderUnavailable: () => Effect.sync(() => updates++).pipe(Effect.asVoid),
+      },
+      dispatch: Effect.succeed,
+    }).pipe(Effect.flip);
+
+    assert.strictEqual(updates, 0);
   });
 });
 

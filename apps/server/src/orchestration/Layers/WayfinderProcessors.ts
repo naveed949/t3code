@@ -74,6 +74,31 @@ export const makeWayfinderPublicationProcessor = Effect.gen(function* () {
       nextStep: progress.nextStep,
       createdAt: progress.updatedAt,
     });
+    if (publication.status === "synchronized" && wayfinderMap !== undefined) {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.wayfinder.reconciliation.update",
+        commandId: yield* serverCommandId("wayfinder-publication-reconciliation"),
+        threadId: event.payload.threadId,
+        skillRunId: event.payload.skillRunId,
+        synchronization: {
+          status: "healthy",
+          reason: "mutation",
+          lastAttemptedAt: progress.updatedAt,
+          lastSuccessfulAt: progress.updatedAt,
+          canMutate: true,
+          ...(wayfinderMap.revision !== undefined ? { actualRevision: wayfinderMap.revision } : {}),
+        },
+        createdAt: progress.updatedAt,
+      });
+      yield* receipts.publish({
+        type: "wayfinder.reconciliation.completed",
+        threadId: event.payload.threadId,
+        skillRunId: event.payload.skillRunId,
+        reason: "mutation",
+        status: "healthy",
+        createdAt: progress.updatedAt,
+      });
+    }
   });
 
   const processEvent = Effect.fn("WayfinderPublicationReactor.processEvent")(function* (

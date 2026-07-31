@@ -21,6 +21,7 @@ import {
   SkillRunId,
   ThreadId,
   TurnId,
+  WayfinderReconcileReason,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -75,6 +76,16 @@ export const WayfinderMutationProgressReceipt = Schema.Struct({
   createdAt: IsoDateTime,
 });
 export type WayfinderMutationProgressReceipt = typeof WayfinderMutationProgressReceipt.Type;
+export const WayfinderReconciliationCompletedReceipt = Schema.Struct({
+  type: Schema.Literal("wayfinder.reconciliation.completed"),
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  reason: WayfinderReconcileReason,
+  status: Schema.Literals(["healthy", "unavailable", "conflict"]),
+  createdAt: IsoDateTime,
+});
+export type WayfinderReconciliationCompletedReceipt =
+  typeof WayfinderReconciliationCompletedReceipt.Type;
 
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
@@ -82,6 +93,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   TurnProcessingQuiescedReceipt,
   WayfinderPublicationProgressReceipt,
   WayfinderMutationProgressReceipt,
+  WayfinderReconciliationCompletedReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 

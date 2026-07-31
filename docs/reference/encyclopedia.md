@@ -113,6 +113,12 @@ classify, resolve, close, or reopen a decision ticket; or add or remove a blocki
 persisted state identifies the active action and whether it is awaiting approval, mutating, failed,
 or synchronized. GitHub receipts and reconciliation, rather than client optimism or assistant
 prose, confirm the canonical result.
+#### Wayfinder reconciliation
+
+The server-owned refresh flow that keeps a published Wayfinder projection aligned with GitHub. It
+uses lightweight revision evidence before loading the full graph and persists a structured healthy,
+unavailable, or conflict result. An unavailable map remains cached and read-only; stale mutation
+evidence never overwrites canonical GitHub state. See [WayfinderReconciliationReactor.ts][28].
 
 #### Native skill adapter
 
@@ -248,3 +254,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [25]: ../../apps/server/src/nativeSkills/NativeSkillAdapterRegistry.ts
 [26]: ../../packages/contracts/src/nativeSkills.ts
 [27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts
+[28]: ../../apps/server/src/orchestration/Layers/WayfinderReconciliationReactor.ts

@@ -48,6 +48,7 @@ export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type PublishWayfinderDraftInput = CommandInput<"thread.wayfinder.publish">;
 export type MutateWayfinderInput = CommandInput<"thread.wayfinder.mutate">;
+export type ReconcileWayfinderMapInput = CommandInput<"thread.wayfinder.reconcile">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -301,6 +302,17 @@ export const mutateWayfinder: (input: MutateWayfinderInput) => CommandEffect = E
     createdAt: metadata.createdAt,
   });
 });
+
+export const reconcileWayfinderMap: (input: ReconcileWayfinderMapInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.reconcileWayfinderMap")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.wayfinder.reconcile",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
 
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.revertThreadCheckpoint")(function* (input) {

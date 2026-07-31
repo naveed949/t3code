@@ -701,7 +701,8 @@ const makeWsRpcLayer = (
               includeSkillRuns:
                 latestByAggregate.get(key)?.includeSkillRuns === true ||
                 event.type === "thread.wayfinder-publication-updated" ||
-                event.type === "thread.wayfinder-mutation-updated",
+                event.type === "thread.wayfinder-mutation-updated" ||
+                event.type === "thread.wayfinder-reconciliation-updated",
             });
           }
           const survivors = Array.from(latestByAggregate.values()).sort(
@@ -1093,6 +1094,17 @@ const makeWsRpcLayer = (
                         toDispatchCommandError(cause, "Failed to load Wayfinder Workstreams"),
                       ),
                     ),
+                  markWayfinderUnavailable: ({ threadId, skillRunId, synchronization }) =>
+                    dispatchNormalizedCommand({
+                      type: "thread.wayfinder.reconciliation.update",
+                      commandId: CommandId.make(
+                        `wayfinder-resume-unavailable:${normalizedCommand.commandId}`,
+                      ),
+                      threadId,
+                      skillRunId,
+                      synchronization,
+                      createdAt: synchronization.lastAttemptedAt,
+                    }).pipe(Effect.asVoid),
                   check: nativeWayfinderPreflight.check,
                 },
                 dispatch: dispatchNormalizedCommand,

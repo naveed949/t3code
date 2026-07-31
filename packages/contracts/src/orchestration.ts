@@ -243,13 +243,38 @@ export const WayfinderTicketClassification = Schema.Literals([
 ]);
 export type WayfinderTicketClassification = typeof WayfinderTicketClassification.Type;
 
+export const WayfinderReconcileReason = Schema.Literals([
+  "open",
+  "reconnect",
+  "focus",
+  "manual",
+  "mutation",
+  "poll",
+  "resume",
+]);
+export type WayfinderReconcileReason = typeof WayfinderReconcileReason.Type;
+
+export const WayfinderSynchronizationState = Schema.Struct({
+  status: Schema.Literals(["synchronizing", "healthy", "unavailable", "conflict"]),
+  reason: WayfinderReconcileReason,
+  lastAttemptedAt: IsoDateTime,
+  lastSuccessfulAt: Schema.optional(IsoDateTime),
+  canMutate: Schema.Boolean,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  actualRevision: Schema.optional(TrimmedNonEmptyString),
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type WayfinderSynchronizationState = typeof WayfinderSynchronizationState.Type;
+
 export const WayfinderMapProjection = Schema.Struct({
   canonicalReference: Schema.Struct({
     number: Schema.Int.check(Schema.isGreaterThan(0)),
     title: TrimmedNonEmptyString,
     url: TrimmedNonEmptyString,
     state: WayfinderTicketState,
+    commentCount: Schema.optional(NonNegativeInt),
   }),
+  revision: Schema.optional(TrimmedNonEmptyString),
   destination: Schema.String,
   notes: Schema.String,
   decisionsSoFar: Schema.Array(
@@ -271,6 +296,8 @@ export const WayfinderMapProjection = Schema.Struct({
       claimedBy: Schema.NullOr(TrimmedNonEmptyString),
       blockedBy: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
       blocks: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+      commentCount: Schema.optional(NonNegativeInt),
+      lastCommentedAt: Schema.optional(IsoDateTime),
     }),
   ),
   frontier: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
@@ -285,6 +312,7 @@ export const ResolvedSkillInvocation = Schema.Struct({
   execution: SkillExecution,
   wayfinderMap: Schema.optional(WayfinderMapProjection),
   wayfinderSynchronizedAt: Schema.optional(IsoDateTime),
+  wayfinderSynchronization: Schema.optional(WayfinderSynchronizationState),
   reconnectWorkstreamId: Schema.optional(WorkstreamId),
 });
 export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;
@@ -879,6 +907,16 @@ const ThreadWayfinderMutateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWayfinderReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  reason: WayfinderReconcileReason,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -915,6 +953,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadWayfinderPublishCommand,
   ThreadWayfinderMutateCommand,
+  ThreadWayfinderReconcileCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -942,6 +981,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadWayfinderPublishCommand,
   ThreadWayfinderMutateCommand,
+  ThreadWayfinderReconcileCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1032,6 +1072,16 @@ const ThreadWayfinderMutationUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWayfinderReconciliationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.reconciliation.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  synchronization: WayfinderSynchronizationState,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1042,6 +1092,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadRevertCompleteCommand,
   ThreadWayfinderPublicationUpdateCommand,
   ThreadWayfinderMutationUpdateCommand,
+  ThreadWayfinderReconciliationUpdateCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -1075,6 +1126,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.wayfinder-publication-updated",
   "thread.wayfinder-mutation-requested",
   "thread.wayfinder-mutation-updated",
+  "thread.wayfinder-reconciliation-requested",
+  "thread.wayfinder-reconciliation-updated",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1276,6 +1329,21 @@ export const ThreadWayfinderMutationUpdatedPayload = Schema.Struct({
   wayfinderMap: Schema.optional(WayfinderMapProjection),
 });
 
+export const ThreadWayfinderReconciliationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  reason: WayfinderReconcileReason,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderReconciliationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  synchronization: WayfinderSynchronizationState,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -1454,6 +1522,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.wayfinder-mutation-updated"),
     payload: ThreadWayfinderMutationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-reconciliation-requested"),
+    payload: ThreadWayfinderReconciliationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-reconciliation-updated"),
+    payload: ThreadWayfinderReconciliationUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

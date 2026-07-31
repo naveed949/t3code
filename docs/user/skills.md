@@ -31,11 +31,27 @@ The initial read-only slice supports up to 100 child tickets, labels, assignees,
 dependency relationships per GitHub connection. T3 blocks continuation with a specific remediation
 instead of displaying an incomplete map when GitHub reports more results.
 
+While a published Workbench is visible, T3 reconciles it when the view opens, the environment
+reconnects, the app regains focus, the user presses **Refresh**, and periodically while the map stays
+visible. Periodic checks first compare lightweight GitHub revision evidence and only reload the full
+graph when canonical issue, comment, assignment, state, child, or blocking data changed. The
+Workbench always shows the last successful synchronization time.
+
+If GitHub cannot be reached or returns only a partial graph, the last synchronized map remains
+available as a cached read-only view and canonical mutation controls are disabled; T3 does not queue
+those mutations for later replay. A native action carrying stale expected-revision evidence enters a
+visible conflict state instead of overwriting GitHub. Refreshing after connectivity or conflict
+reconciles canonical state before readiness and the frontier are derived again, so reopening a
+decision ticket makes its Workstream active again.
+
 On web and desktop, the Workbench opens in the resizable right panel and supports the panel's
 maximize control. The dependency graph uses a deterministic, non-animated layout and the ticket list
 puts the frontier first. On mobile, linked threads expose a full-screen Wayfinder route with the same
 frontier-first list and an optional compact graph. Reopening the same canonical GitHub map creates a
-new Skill Run in the existing project Workstream.
+new Skill Run in the existing project Workstream. Before that resumed provider turn starts, native
+preflight reloads GitHub and the project Workstream snapshot; the new run records a healthy
+`resume` synchronization result. Active linked runtime work and synchronization health are included
+when the shared clients recompute whether the Workstream is complete.
 
 A native **New** run starts with a visible unpublished draft. The draft is explicitly non-canonical:
 T3 does not create or change GitHub issues, labels, assignments, comments, or relationships while

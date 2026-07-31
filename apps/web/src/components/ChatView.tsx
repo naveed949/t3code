@@ -15,6 +15,7 @@ import {
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
+  type WayfinderReconcileReason,
   type KeybindingCommand,
   type WayfinderMutationAction,
   OrchestrationThreadActivity,
@@ -34,6 +35,7 @@ import {
 } from "@t3tools/client-runtime/state/wayfinder-draft";
 import {
   findThreadWayfinderWorkstream,
+  findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
 import {
@@ -1198,6 +1200,9 @@ function ChatViewContent(props: ChatViewProps) {
   const mutateWayfinderCommand = useAtomCommand(threadEnvironment.mutateWayfinder, {
     reportFailure: false,
   });
+  const reconcileWayfinderMapCommand = useAtomCommand(threadEnvironment.reconcileWayfinderMap, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1641,10 +1646,10 @@ function ChatViewContent(props: ChatViewProps) {
     activeWayfinderWorkstream?.wayfinderMap ??
     activeLatestTurn?.skillInvocation?.wayfinderMap ??
     null;
-  const activeWayfinderInvocation =
-    activeWayfinderWorkstream?.skillRuns.toReversed().find((run) => run.wayfinderMap) ??
-    activeLatestTurn?.skillInvocation ??
-    null;
+  const activeWayfinderInvocation = findWayfinderReconciliationInvocation(
+    activeWayfinderWorkstream,
+    activeLatestTurn?.skillInvocation ?? null,
+  );
   const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
@@ -1717,6 +1722,20 @@ function ChatViewContent(props: ChatViewProps) {
       connection: activeEnvironment.connection,
     };
   }, [activeEnvironment, activeEnvironmentUnavailable, activeEnvironmentUnavailableLabel]);
+  const reconcileActiveWayfinderMap = useCallback(
+    (reason: WayfinderReconcileReason) => {
+      if (!activeThread || !activeWayfinderInvocation) return;
+      void reconcileWayfinderMapCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeWayfinderInvocation.threadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          reason,
+        },
+      });
+    },
+    [activeThread, activeWayfinderInvocation, reconcileWayfinderMapCommand],
+  );
   const handleReconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
       const result = await retryEnvironment(environmentId);
@@ -5770,6 +5789,9 @@ function ChatViewContent(props: ChatViewProps) {
         map={activeWayfinderMap}
         mutation={activeWayfinderMutation}
         onMutate={onMutateWayfinder}
+        synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
+        connected={!activeEnvironmentUnavailable}
+        onReconcile={reconcileActiveWayfinderMap}
       />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
