@@ -179,6 +179,8 @@ function dependencies(input: {
           input.trackerReads.value += 1;
           return input.reconcile(request);
         },
+        claimIssue: () => Effect.die("unexpected tracker write"),
+        releaseIssue: () => Effect.die("unexpected tracker write"),
         ensureLabel: () => Effect.die("unexpected tracker write"),
         createIssue: () => Effect.die("unexpected tracker write"),
         addChild: () => Effect.die("unexpected tracker write"),

@@ -42,9 +42,35 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
       projectId: ProjectId.make("project-1"),
       status: "active",
       linkedThreadIds: [ThreadId.make("thread-1")],
+      ticketThreads: [],
       skillRuns: [invocation],
       wayfinderMap: null,
       wayfinderSynchronization: null,
+    },
+  ]);
+});
+
+it("derives durable ticket-to-thread links from pinned linked-ticket runs", () => {
+  const linkedInvocation = {
+    ...invocation,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("wayfinder-ticket:workstream:1:43"),
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: invocation.skillRunId,
+    },
+  };
+
+  expect(
+    deriveProjectWorkstreams(invocation.projectId, [invocation, linkedInvocation])[0]
+      ?.ticketThreads,
+  ).toEqual([
+    {
+      ticketNumber: 43,
+      threadId: linkedInvocation.threadId,
+      skillRunId: linkedInvocation.skillRunId,
+      sourceSkillRunId: invocation.skillRunId,
     },
   ]);
 });
@@ -183,6 +209,43 @@ it("reconciles through the map-owning linked thread after a newer continuation r
   expect(findWayfinderReconciliationInvocation(workstream ?? null, continuation)).toMatchObject({
     skillRunId: mapOwner.skillRunId,
     threadId: mapOwner.threadId,
+  });
+});
+
+it("routes linked-ticket work back through its published source map run", () => {
+  const wayfinderMap = {
+    canonicalReference: {
+      number: 42,
+      title: "Current map",
+      url: "https://github.com/t3tools/t3code/issues/42",
+      state: "open" as const,
+    },
+    destination: "Current",
+    notes: "",
+    decisionsSoFar: [],
+    fogOfWar: [],
+    outOfScope: [],
+    tickets: [],
+    frontier: [],
+    lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
+  };
+  const source = { ...invocation, wayfinderMap };
+  const linked = {
+    ...source,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("wayfinder-ticket:workstream:1:43"),
+    createdAt: "2026-01-03T00:00:00.000Z",
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: source.skillRunId,
+    },
+  };
+  const [workstream] = deriveProjectWorkstreams(source.projectId, [source, linked]);
+
+  expect(findWayfinderReconciliationInvocation(workstream ?? null, linked)).toMatchObject({
+    skillRunId: source.skillRunId,
+    threadId: source.threadId,
   });
 });
 

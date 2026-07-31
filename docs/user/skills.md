@@ -76,3 +76,16 @@ administration. Each action follows the thread's runtime permission mode, shows 
 in-flight state, and applies optimism only to that action. The server performs the write with the
 environment's GitHub credentials, then confirms or corrects the client from a mutation receipt and
 a fresh canonical reconciliation. The same actions are available in web, desktop, and mobile.
+
+An open, unblocked, unclaimed frontier ticket also offers **Start work**. T3 first rechecks the
+canonical GitHub frontier and assigns the current GitHub user, then creates one deterministic,
+project-owned thread linked to the Workstream, source Skill Run, and ticket. The first turn is
+seeded with the destination, prior resolutions, ticket question and classification, canonical
+links, and the pinned skill identity. Separate frontier tickets may run concurrently.
+
+The claim reports success only after both the canonical assignment and local thread linkage are
+known. If GitHub accepted the assignment but thread startup was interrupted, the Workbench keeps
+that partial state visible and offers **Retry thread linkage**. Retrying reuses the same thread;
+**Return to thread** opens an existing link, **Release** removes the current GitHub user's
+assignment, and **Reclaim** reconnects a released ticket without creating a duplicate. These
+controls and their persisted links survive reconnect on web, desktop, and mobile.

@@ -94,6 +94,16 @@ one tracker mutation, emits typed in-flight and completion receipts, reloads the
 and persists both the active-action state and reconciled projection on the same Skill Run. Clients
 may project only an awaiting or mutating action optimistically and discard that projection on a
 failed receipt.
+
+Ticket claims are a specialized mutation because canonical assignment and local orchestration must
+complete as one user-visible operation. The reactor reloads the canonical frontier immediately
+before assignment, uses the tracker adapter's current-viewer compare-and-verify claim, and derives a
+stable thread identifier from the Workstream and ticket number. It dispatches a project-owned
+thread and a pinned `work-ticket` Skill Run only after GitHub confirms the assignment. A retry
+recognizes either the persisted linked run or an empty deterministic thread and resumes the missing
+step without duplication. If local dispatch fails after assignment, reconciliation persists the
+canonical claim with a failed, recoverable mutation instead of reporting success.
+
 Published maps use a separate queue-backed reconciliation reactor. Clients send a typed,
 Skill Run-scoped reason (`open`, `reconnect`, `focus`, `manual`, `poll`, `mutation`, or `resume`), and
 the environment-owning server performs every GitHub read. A lightweight revision query covers the

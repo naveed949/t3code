@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { WayfinderWorkbench } from "./WayfinderWorkbench.tsx";
+import { ThreadId } from "@t3tools/contracts";
 
 const map = {
   canonicalReference: {
@@ -106,5 +107,45 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain("GitHub is temporarily unavailable.");
     expect(markup).toContain('data-wayfinder-mutations-enabled="false"');
     expect(markup).toContain("Research hosting");
+  });
+
+  it("renders start, return, release, and partial-recovery ticket actions", () => {
+    const linkedThreadId = ThreadId.make("wayfinder-ticket:workstream:release:44");
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={{
+          ...map,
+          tickets: [
+            { ...map.tickets[0]!, claimedBy: "alice" },
+            { ...map.tickets[1]!, claimedBy: "alice" },
+            {
+              ...map.tickets[1]!,
+              number: 45,
+              title: "Implement release",
+              url: "https://github.com/t3tools/t3code/issues/45",
+            },
+          ],
+          frontier: [45],
+        }}
+        mutation={{
+          actionId: "claim:43",
+          action: { kind: "claim-ticket", ticketNumber: 43 },
+          status: "failed",
+          error: "The linked thread is incomplete.",
+          updatedAt: "2026-01-02T00:01:00.000Z",
+        }}
+        ticketThreads={[{ ticketNumber: 44, threadId: linkedThreadId }]}
+        onMutate={() => undefined}
+        onReturnToThread={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Start work");
+    expect(markup).toContain("Return to thread");
+    expect(markup).toContain("Release");
+    expect(markup).toContain("Retry thread linkage");
   });
 });

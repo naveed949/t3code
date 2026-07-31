@@ -1,4 +1,5 @@
 import type {
+  ThreadId,
   WayfinderMapProjection,
   WayfinderMutation,
   WayfinderMutationAction,
@@ -26,6 +27,29 @@ export function createWayfinderTicketAction(
   return trimmedTitle === ""
     ? null
     : { kind: "create-ticket", title: trimmedTitle, classification };
+}
+
+export function deriveWayfinderTicketClaimActions(input: {
+  readonly ticket: WayfinderMapProjection["tickets"][number];
+  readonly frontier: ReadonlyArray<number>;
+  readonly linkedThreadId: ThreadId | null;
+  readonly mutation: WayfinderMutation | null;
+}) {
+  const failedClaim =
+    input.mutation?.status === "failed" &&
+    input.mutation.action.kind === "claim-ticket" &&
+    input.mutation.action.ticketNumber === input.ticket.number;
+  const canClaim =
+    input.ticket.state === "open" &&
+    input.ticket.claimedBy === null &&
+    input.frontier.includes(input.ticket.number);
+  return {
+    canClaim,
+    claimLabel: input.linkedThreadId === null ? "Start work" : "Reclaim",
+    canRetry: failedClaim && input.ticket.claimedBy !== null && input.linkedThreadId === null,
+    canRelease: input.ticket.claimedBy !== null && (input.linkedThreadId !== null || failedClaim),
+    linkedThreadId: input.linkedThreadId,
+  };
 }
 
 export interface WayfinderWorkbenchNode {
@@ -123,6 +147,8 @@ export function applyOptimisticWayfinderMutation(
           case "reopen-ticket":
             return { ...ticket, state: "open" as const };
           case "resolve-ticket":
+          case "claim-ticket":
+          case "release-ticket":
             return ticket;
         }
       }),

@@ -86,6 +86,8 @@ function sameWayfinderMutationAction(
       );
     case "close-ticket":
     case "reopen-ticket":
+    case "claim-ticket":
+    case "release-ticket":
       return right.kind === left.kind && left.ticketNumber === right.ticketNumber;
   }
 }
@@ -1081,6 +1083,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     case "thread.wayfinder.mutate": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const actionId = command.actionId ?? command.commandId;
+      const invocation = thread.latestTurn?.skillInvocation;
+      const map =
+        invocation?.skillRunId === command.skillRunId ? invocation.wayfinderMap : undefined;
       const published = thread.activities.some((activity) => {
         if (activity.kind !== "wayfinder.draft.published") return false;
         const payload = decodePublishedWayfinderPayload(activity.payload);
@@ -1091,6 +1096,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandType: command.type,
           detail: "Wayfinder editing requires a published canonical map.",
         });
+      }
+      if (command.action.kind === "claim-ticket") {
+        const action = command.action;
+        const ticket = map?.tickets.find((candidate) => candidate.number === action.ticketNumber);
+        const recoveringClaim =
+          invocation?.wayfinderMutation?.status === "failed" &&
+          invocation.wayfinderMutation.action.kind === "claim-ticket" &&
+          invocation.wayfinderMutation.action.ticketNumber === action.ticketNumber;
+        if (!ticket) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder claims require a ticket in the synchronized canonical map.",
+          });
+        }
+        if (ticket.state !== "open") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} must be open before it can be claimed.`,
+          });
+        }
+        if (ticket.claimedBy !== null && !recoveringClaim) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} is already claimed by ${ticket.claimedBy}.`,
+          });
+        }
+        if (!recoveringClaim && !map?.frontier.includes(ticket.number)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} is blocked and is not on the runnable frontier.`,
+          });
+        }
       }
       let approvalRequested = false;
       let approvalResolved = false;

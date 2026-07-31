@@ -18,6 +18,11 @@ import {
   type WayfinderMutationTracker,
 } from "../../nativeSkills/WayfinderMutation.ts";
 import {
+  buildWayfinderTicketThreadSeed,
+  wayfinderTicketMessageId,
+  wayfinderTicketThreadId,
+} from "../../nativeSkills/WayfinderTicketThread.ts";
+import {
   publishWayfinderDraft,
   type WayfinderPublicationProgress,
 } from "../../nativeSkills/WayfinderPublication.ts";
@@ -173,15 +178,20 @@ export const makeWayfinderMutationProcessor = Effect.gen(function* () {
   const snapshots = yield* ProjectionSnapshotQuery;
   const issueTracker = yield* IssueTracker;
   const receipts = yield* RuntimeReceiptBus;
+  const serverCommandId = Effect.fn("WayfinderMutationReactor.serverCommandId")(function* (
+    tag: string,
+  ) {
+    const uuid = yield* crypto.randomUUIDv4;
+    return CommandId.make(`server:${tag}:${uuid}`);
+  });
   const publishMutation = Effect.fn("WayfinderMutationReactor.publishMutation")(function* (
     event: MutationRequestedEvent,
     mutation: WayfinderMutation,
     wayfinderMap?: WayfinderMapProjection,
   ) {
-    const uuid = yield* crypto.randomUUIDv4;
     yield* orchestrationEngine.dispatch({
       type: "thread.wayfinder.mutation.update",
-      commandId: CommandId.make(`server:wayfinder-mutation:${uuid}`),
+      commandId: yield* serverCommandId("wayfinder-mutation"),
       threadId: event.payload.threadId,
       skillRunId: event.payload.skillRunId,
       mutation,
@@ -221,7 +231,7 @@ export const makeWayfinderMutationProcessor = Effect.gen(function* () {
       ? resolveThreadWorkspaceCwd({ thread, projects: snapshot.projects })
       : undefined;
     const repository = cwd ? yield* issueTracker.resolveProjectRepository(cwd) : null;
-    if (!cwd || !repository || !map) {
+    if (!thread || !invocation || !cwd || !repository || !map) {
       yield* publishMutation(event, {
         actionId: event.payload.actionId,
         action: event.payload.action,
@@ -275,6 +285,166 @@ export const makeWayfinderMutationProcessor = Effect.gen(function* () {
       error: null,
       updatedAt: event.payload.createdAt,
     });
+    if (
+      event.payload.action.kind === "claim-ticket" ||
+      event.payload.action.kind === "release-ticket"
+    ) {
+      const action = event.payload.action;
+      const claimResult = yield* Effect.gen(function* () {
+        if (action.kind === "release-ticket") {
+          yield* issueTracker
+            .releaseIssue({ ...base, issueNumber: action.ticketNumber })
+            .pipe(Effect.mapError(trackerFailure));
+          return yield* loadCanonical();
+        }
+
+        const canonicalBeforeClaim = yield* loadCanonical();
+        const canonicalTicketBeforeClaim = canonicalBeforeClaim.tickets.find(
+          (candidate) => candidate.number === action.ticketNumber,
+        );
+        const recoveringClaim =
+          invocation.wayfinderMutation?.status === "failed" &&
+          invocation.wayfinderMutation.action.kind === "claim-ticket" &&
+          invocation.wayfinderMutation.action.ticketNumber === action.ticketNumber;
+        const canonicalClaimIsRunnable =
+          canonicalTicketBeforeClaim?.state === "open" &&
+          canonicalTicketBeforeClaim.claimedBy === null &&
+          canonicalBeforeClaim.frontier.includes(action.ticketNumber);
+        const canonicalClaimIsRecoverable =
+          recoveringClaim &&
+          canonicalTicketBeforeClaim?.state === "open" &&
+          canonicalTicketBeforeClaim.claimedBy !== null;
+        if (!canonicalClaimIsRunnable && !canonicalClaimIsRecoverable) {
+          return yield* new WayfinderReconciliationError({
+            detail: "The canonical ticket is no longer open, unblocked, and unclaimed.",
+          });
+        }
+
+        const claim = yield* issueTracker
+          .claimIssue({ ...base, issueNumber: action.ticketNumber })
+          .pipe(Effect.mapError(trackerFailure));
+        const canonicalMap = yield* loadCanonical();
+        const canonicalTicket = canonicalMap.tickets.find(
+          (candidate) => candidate.number === action.ticketNumber,
+        );
+        if (canonicalTicket?.claimedBy !== claim.viewerLogin) {
+          return yield* new WayfinderReconciliationError({
+            detail: "GitHub did not confirm the canonical ticket claim.",
+          });
+        }
+
+        const targetThreadId = wayfinderTicketThreadId(
+          invocation.workstreamId,
+          action.ticketNumber,
+        );
+        const targetThread = snapshot.threads.find((candidate) => candidate.id === targetThreadId);
+        const targetSkillRuns = targetThread
+          ? yield* snapshots.getSkillRunsByThreadId(targetThreadId)
+          : [];
+        const linkedRun = targetSkillRuns.find(
+          (candidate) =>
+            candidate.workstreamId === invocation.workstreamId &&
+            candidate.action?.id === "work-ticket" &&
+            candidate.action.ticketNumber === action.ticketNumber,
+        );
+        if (linkedRun) return canonicalMap;
+
+        const seed = buildWayfinderTicketThreadSeed({
+          workstreamId: invocation.workstreamId,
+          sourceSkillRunId: invocation.skillRunId,
+          skill: invocation.skill,
+          map: canonicalMap,
+          ticket: canonicalTicket,
+        });
+        if (!targetThread) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.create",
+            commandId: yield* serverCommandId("wayfinder-ticket-thread"),
+            threadId: targetThreadId,
+            projectId: invocation.projectId,
+            title: seed.title,
+            modelSelection: thread.modelSelection,
+            runtimeMode: thread.runtimeMode,
+            interactionMode: thread.interactionMode,
+            branch: thread.branch,
+            worktreePath: thread.worktreePath,
+            createdAt: event.payload.createdAt,
+          });
+        } else if (targetThread.latestTurn !== null) {
+          return yield* new WayfinderReconciliationError({
+            detail: `Thread '${targetThreadId}' already exists without the expected ticket linkage.`,
+          });
+        }
+        yield* orchestrationEngine.dispatch({
+          type: "thread.turn.start",
+          commandId: yield* serverCommandId("wayfinder-ticket-turn"),
+          threadId: targetThreadId,
+          message: {
+            messageId: wayfinderTicketMessageId(targetThreadId),
+            role: "user",
+            text: seed.message,
+            attachments: [],
+          },
+          modelSelection: thread.modelSelection,
+          titleSeed: seed.title,
+          runtimeMode: thread.runtimeMode,
+          interactionMode: thread.interactionMode,
+          skillInvocation: {
+            skill: invocation.skill,
+            arguments: seed.message,
+            action: {
+              id: "work-ticket",
+              ticketNumber: action.ticketNumber,
+              sourceSkillRunId: invocation.skillRunId,
+            },
+            execution: invocation.execution,
+            wayfinderMap: canonicalMap,
+            wayfinderSynchronizedAt: canonicalMap.lastSynchronizedAt,
+            reconnectWorkstreamId: invocation.workstreamId,
+          },
+          createdAt: event.payload.createdAt,
+        });
+        return canonicalMap;
+      }).pipe(Effect.result);
+
+      if (Result.isFailure(claimResult)) {
+        const correction = yield* loadCanonical().pipe(Effect.result);
+        const canonicalClaimed =
+          Result.isSuccess(correction) &&
+          correction.success.tickets.some(
+            (candidate) => candidate.number === action.ticketNumber && candidate.claimedBy !== null,
+          );
+        yield* publishMutation(
+          event,
+          {
+            actionId: event.payload.actionId,
+            action,
+            status: "failed",
+            error:
+              action.kind === "claim-ticket" && canonicalClaimed
+                ? "The ticket is canonically claimed, but its linked thread is incomplete. Retry to recover it."
+                : action.kind === "release-ticket"
+                  ? "GitHub could not release and reconcile this ticket claim."
+                  : "GitHub could not claim this ticket.",
+            updatedAt: event.payload.createdAt,
+          },
+          Result.isSuccess(correction) ? correction.success : undefined,
+        );
+        return;
+      }
+      yield* publishMutation(
+        event,
+        {
+          actionId: event.payload.actionId,
+          action,
+          status: "synchronized",
+          error: null,
+          updatedAt: claimResult.success.lastSynchronizedAt,
+        },
+        claimResult.success,
+      );
+      return;
+    }
     type Tracker = WayfinderMutationTracker<WayfinderReconciliationError>;
     const createTicket: Tracker["createTicket"] = Effect.fn(
       "WayfinderMutationReactor.createTicket",

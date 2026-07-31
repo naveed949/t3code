@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { SkillRunId } from "@t3tools/contracts";
 
 import { renderNativeWayfinderArguments } from "./WayfinderCompatibility.ts";
 
@@ -24,6 +25,17 @@ describe("renderNativeWayfinderArguments", () => {
         arguments: "continue-map 5",
       }),
     ).toBe("continue-map 5");
+    expect(
+      renderNativeWayfinderArguments({
+        skill: { name: "wayfinder" },
+        action: {
+          id: "work-ticket",
+          ticketNumber: 43,
+          sourceSkillRunId: SkillRunId.make("skill-run:map"),
+        },
+        arguments: "Work canonical ticket #43.",
+      }),
+    ).toBe("Work canonical ticket #43.");
     expect(
       renderNativeWayfinderArguments({
         skill: { name: "research" },

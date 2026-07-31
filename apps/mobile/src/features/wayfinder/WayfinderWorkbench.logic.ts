@@ -1,9 +1,23 @@
-import { deriveWayfinderWorkbenchModel } from "@t3tools/client-runtime/state/wayfinder-workbench";
+import {
+  deriveWayfinderTicketClaimActions,
+  deriveWayfinderWorkbenchModel,
+} from "@t3tools/client-runtime/state/wayfinder-workbench";
 import type {
+  ThreadId,
   WayfinderMapProjection,
+  WayfinderMutation,
   WayfinderMutationAction,
   WayfinderDraftTicketClassification,
 } from "@t3tools/contracts";
+
+export function buildMobileTicketClaimActions(
+  ticket: WayfinderMapProjection["tickets"][number],
+  frontier: ReadonlyArray<number>,
+  linkedThreadId: ThreadId | null,
+  mutation: WayfinderMutation | null,
+) {
+  return deriveWayfinderTicketClaimActions({ ticket, frontier, linkedThreadId, mutation });
+}
 
 export function buildMobileTicketAction(
   ticket: WayfinderMapProjection["tickets"][number],

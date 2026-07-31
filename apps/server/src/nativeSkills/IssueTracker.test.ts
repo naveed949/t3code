@@ -113,6 +113,209 @@ it.effect("updates a structured map field while preserving the publication marke
   );
 });
 
+it.effect("claims an open unassigned ticket and confirms canonical ownership", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  let issueReads = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claim = yield* tracker.claimIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
+    assert.ok(calls.some((args) => args.includes("--add-assignee")));
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            issueReads += 1;
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: issueReads === 1 ? [] : [{ login: "alice" }],
+                }),
+              ),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("reuses the viewer's canonical claim without assigning twice", () => {
+  let edits = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claim = yield* tracker.claimIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
+    assert.strictEqual(edits, 0);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            return Effect.succeed(
+              output(JSON.stringify({ state: "OPEN", assignees: [{ login: "alice" }] })),
+            );
+          }
+          if (args[0] === "issue" && args[1] === "edit") edits += 1;
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("loses a concurrent claim race without reporting ownership", () => {
+  let issueReads = 0;
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const result = yield* Effect.exit(
+      tracker.claimIssue({
+        cwd: "/project",
+        repository: project,
+        issueNumber: 43,
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+    assert.ok(
+      calls.some((args) => args.includes("--remove-assignee")),
+      "the losing claimant releases its own assignment",
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            issueReads += 1;
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: issueReads === 1 ? [] : [{ login: "bob" }, { login: "alice" }],
+                }),
+              ),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("releases only the viewer's canonical ticket claim", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    yield* tracker.releaseIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.ok(calls.some((args) => args.includes("--remove-assignee")));
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            return Effect.succeed(
+              output(JSON.stringify({ state: "OPEN", assignees: [{ login: "alice" }] })),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("claims separate frontier tickets independently", () => {
+  const assignees = new Map<number, string>();
+  const assignedIssues: number[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claims = yield* Effect.all(
+      [43, 44].map((issueNumber) =>
+        tracker.claimIssue({
+          cwd: "/project",
+          repository: project,
+          issueNumber,
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+
+    assert.deepStrictEqual(claims, [{ viewerLogin: "alice" }, { viewerLogin: "alice" }]);
+    assert.deepStrictEqual(
+      assignedIssues.sort((left, right) => left - right),
+      [43, 44],
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            const issueNumber = Number(args[2]);
+            const assignee = assignees.get(issueNumber);
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: assignee ? [{ login: assignee }] : [],
+                }),
+              ),
+            );
+          }
+          if (args[0] === "issue" && args[1] === "edit" && args.includes("--add-assignee")) {
+            const issueNumber = Number(args[2]);
+            assignees.set(issueNumber, "alice");
+            assignedIssues.push(issueNumber);
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
 it.effect("resolves a GitHub project and reads its native issue capabilities", () =>
   Effect.gen(function* () {
     const tracker = yield* IssueTracker.IssueTracker;

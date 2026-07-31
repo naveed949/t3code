@@ -3,9 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyOptimisticWayfinderMutation,
   createWayfinderTicketAction,
+  deriveWayfinderTicketClaimActions,
   deriveWayfinderWorkbenchModel,
   isWayfinderMutationInFlight,
 } from "./wayfinderWorkbench.ts";
+import { ThreadId } from "@t3tools/contracts";
 
 const map = {
   canonicalReference: {
@@ -79,6 +81,62 @@ describe("deriveWayfinderWorkbenchModel", () => {
   });
 });
 
+describe("deriveWayfinderTicketClaimActions", () => {
+  const ticket = map.tickets.find((candidate) => candidate.number === 43)!;
+
+  it("starts only an unclaimed frontier ticket", () => {
+    expect(
+      deriveWayfinderTicketClaimActions({
+        ticket,
+        frontier: map.frontier,
+        linkedThreadId: null,
+        mutation: null,
+      }),
+    ).toEqual({
+      canClaim: true,
+      claimLabel: "Start work",
+      canRetry: false,
+      canRelease: false,
+      linkedThreadId: null,
+    });
+  });
+
+  it("returns to and releases an existing linked claim", () => {
+    const linkedThreadId = ThreadId.make("wayfinder-ticket:workstream:release:43");
+    expect(
+      deriveWayfinderTicketClaimActions({
+        ticket: { ...ticket, claimedBy: "alice" },
+        frontier: [],
+        linkedThreadId,
+        mutation: null,
+      }),
+    ).toEqual({
+      canClaim: false,
+      claimLabel: "Reclaim",
+      canRetry: false,
+      canRelease: true,
+      linkedThreadId,
+    });
+  });
+
+  it("offers recovery when GitHub claimed the ticket but thread linkage failed", () => {
+    expect(
+      deriveWayfinderTicketClaimActions({
+        ticket: { ...ticket, claimedBy: "alice" },
+        frontier: [],
+        linkedThreadId: null,
+        mutation: {
+          actionId: "claim:43",
+          action: { kind: "claim-ticket", ticketNumber: ticket.number },
+          status: "failed",
+          error: "The linked thread is incomplete.",
+          updatedAt: "2026-01-02T00:01:00.000Z",
+        },
+      }),
+    ).toMatchObject({ canClaim: false, canRetry: true, canRelease: true });
+  });
+});
+
 describe("applyOptimisticWayfinderMutation", () => {
   it("scopes optimistic state to the active action and corrects on failure", () => {
     const mutation = {
@@ -113,6 +171,18 @@ describe("applyOptimisticWayfinderMutation", () => {
         ?.state,
     ).toBe("closed");
     expect(isWayfinderMutationInFlight({ ...mutation, status: "synchronized" })).toBe(false);
+  });
+
+  it("keeps canonical tickets intact while claim linkage is in flight", () => {
+    const mutation = {
+      actionId: "action:claim",
+      action: { kind: "claim-ticket" as const, ticketNumber: 43 },
+      status: "mutating" as const,
+      error: null,
+      updatedAt: "2026-01-02T00:01:00.000Z",
+    };
+
+    expect(applyOptimisticWayfinderMutation(map, mutation).tickets).toEqual(map.tickets);
   });
 });
 

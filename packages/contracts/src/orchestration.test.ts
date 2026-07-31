@@ -27,6 +27,7 @@ import {
   WayfinderSynchronizationState,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { SkillRunId } from "./baseSchemas.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -381,6 +382,48 @@ it.effect("decodes a pinned server skill invocation", () =>
     });
     assert.strictEqual(parsed.skillInvocation?.skill.name, "wayfinder");
     assert.strictEqual(parsed.skillInvocation?.execution.mode, "native");
+  }),
+);
+
+it.effect("decodes a pinned linked-ticket invocation", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-ticket",
+      threadId: "thread-ticket-43",
+      message: {
+        messageId: "msg-wayfinder-ticket",
+        role: "user",
+        text: "Work canonical Wayfinder ticket #43.",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        action: {
+          id: "work-ticket",
+          ticketNumber: 43,
+          sourceSkillRunId: SkillRunId.make("skill-run:map"),
+        },
+        execution: {
+          mode: "native",
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+        reconnectWorkstreamId: "workstream:release",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.skillInvocation?.action, {
+      id: "work-ticket",
+      ticketNumber: 43,
+      sourceSkillRunId: SkillRunId.make("skill-run:map"),
+    });
+    assert.strictEqual(parsed.skillInvocation?.reconnectWorkstreamId, "workstream:release");
   }),
 );
 

@@ -189,7 +189,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -1735,6 +1735,16 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, activeWayfinderInvocation, reconcileWayfinderMapCommand],
+  );
+  const returnToWayfinderTicketThread = useCallback(
+    (linkedThreadId: ThreadId) => {
+      if (!activeThread) return;
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, linkedThreadId)),
+      });
+    },
+    [activeThread, navigate],
   );
   const handleReconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
@@ -5074,11 +5084,11 @@ function ChatViewContent(props: ChatViewProps) {
       action: WayfinderMutationAction,
       options?: { readonly actionId?: string; readonly confirmed?: boolean },
     ) => {
-      if (!activeThreadId || !activeWayfinderInvocation) return;
+      if (!activeWayfinderInvocation) return;
       const result = await mutateWayfinderCommand({
         environmentId,
         input: {
-          threadId: activeThreadId,
+          threadId: activeWayfinderInvocation.threadId,
           skillRunId: activeWayfinderInvocation.skillRunId,
           action,
           ...(options?.actionId ? { actionId: options.actionId } : {}),
@@ -5088,18 +5098,12 @@ function ChatViewContent(props: ChatViewProps) {
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         setThreadError(
-          activeThreadId,
+          activeWayfinderInvocation.threadId,
           error instanceof Error ? error.message : "Failed to update the Wayfinder map.",
         );
       }
     },
-    [
-      activeThreadId,
-      activeWayfinderInvocation,
-      environmentId,
-      mutateWayfinderCommand,
-      setThreadError,
-    ],
+    [activeWayfinderInvocation, environmentId, mutateWayfinderCommand, setThreadError],
   );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
@@ -5789,6 +5793,8 @@ function ChatViewContent(props: ChatViewProps) {
         map={activeWayfinderMap}
         mutation={activeWayfinderMutation}
         onMutate={onMutateWayfinder}
+        ticketThreads={activeWayfinderWorkstream?.ticketThreads ?? []}
+        onReturnToThread={returnToWayfinderTicketThread}
         synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
