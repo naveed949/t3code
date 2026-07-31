@@ -11,7 +11,9 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  SkillRunId,
   ThreadId,
+  WorkstreamId,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 
@@ -163,6 +165,120 @@ effectIt.layer(
         },
       });
       expect("skillInvocationRequest" in normalized).toBe(false);
+    }),
+  );
+
+  it.effect("resolves a historical Wayfinder run into durable to-spec provenance", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDirectory = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-normalizer-to-spec-",
+      });
+      const skillPath = path.join(tempDirectory, "SKILL.md");
+      yield* fileSystem.writeFileString(skillPath, "# test to-spec");
+      const sourceSkillRunId = SkillRunId.make("skill-run:wayfinder");
+      const sourceThreadId = ThreadId.make("thread-wayfinder");
+      const synchronizedAt = "2026-01-02T00:00:00.000Z";
+
+      const normalized = yield* normalizeDispatchCommand(
+        {
+          type: "thread.turn.start",
+          commandId: CommandId.make("command-to-spec"),
+          threadId: ThreadId.make("thread-to-spec"),
+          message: {
+            messageId: MessageId.make("message-to-spec"),
+            role: "user",
+            text: "Create the specification.",
+            attachments: [],
+          },
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          skillInvocationRequest: {
+            skillName: "to-spec",
+            skillPath,
+            arguments: "Create the specification.",
+            action: {
+              id: "handoff-to-spec",
+              sourceSkillRunId,
+              sourceThreadId,
+              canonicalReference: { number: 42, url: "https://example.test/issues/42" },
+              wayfinderSynchronizedAt: synchronizedAt,
+              acknowledgedIncomplete: false,
+            },
+            executionPreference: "generic",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          createdAt: clientCreatedAt,
+        },
+        {
+          providers: [
+            {
+              driver: ProviderDriverKind.make("codex"),
+              instanceId: ProviderInstanceId.make("codex"),
+              enabled: true,
+              installed: true,
+              version: "1.0.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: synchronizedAt,
+              models: [],
+              slashCommands: [],
+              skills: [{ name: "to-spec", path: skillPath, enabled: true }],
+            },
+          ],
+          getWayfinderHandoffSource: () =>
+            Effect.succeed({
+              threadId: sourceThreadId,
+              invocation: {
+                workstreamId: WorkstreamId.make("workstream:release"),
+                skillRunId: sourceSkillRunId,
+                projectId: ProjectId.make("project-1"),
+                threadId: sourceThreadId,
+                skill: {
+                  name: "wayfinder",
+                  path: "/skills/wayfinder/SKILL.md",
+                  contentDigest:
+                    "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+                },
+                execution: { mode: "native", adapterId: "wayfinder", adapterVersion: 1 },
+                wayfinderMap: {
+                  canonicalReference: {
+                    number: 42,
+                    title: "Release map",
+                    url: "https://example.test/issues/42",
+                    state: "open",
+                  },
+                  destination: "Ship a release.",
+                  notes: "",
+                  decisionsSoFar: [],
+                  fogOfWar: [],
+                  outOfScope: [],
+                  tickets: [],
+                  frontier: [],
+                  lastSynchronizedAt: synchronizedAt,
+                },
+                wayfinderSynchronization: {
+                  status: "healthy",
+                  reason: "manual",
+                  lastAttemptedAt: synchronizedAt,
+                  lastSuccessfulAt: synchronizedAt,
+                  canMutate: true,
+                },
+                createdAt: synchronizedAt,
+              },
+              activeLinkedTicketNumbers: [],
+            }),
+        },
+      );
+
+      expect(normalized.type).toBe("thread.turn.start");
+      if (normalized.type !== "thread.turn.start") return;
+      expect(normalized.skillInvocation).toMatchObject({
+        reconnectWorkstreamId: "workstream:release",
+        execution: { mode: "generic" },
+        action: { id: "handoff-to-spec", sourceSkillRunId },
+      });
     }),
   );
 });

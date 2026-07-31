@@ -9,6 +9,10 @@ import type {
   WayfinderSynchronizationState,
   WorkstreamId,
 } from "@t3tools/contracts";
+import {
+  deriveWayfinderReadiness,
+  type WayfinderReadiness,
+} from "@t3tools/shared/wayfinderReadiness";
 
 export interface ProjectSkillWorkstream {
   readonly id: WorkstreamId;
@@ -25,6 +29,7 @@ export interface ProjectSkillWorkstream {
   readonly skillRuns: ReadonlyArray<SkillInvocation>;
   readonly wayfinderMap: WayfinderMapProjection | null;
   readonly wayfinderSynchronization: WayfinderSynchronizationState | null;
+  readonly readiness: WayfinderReadiness;
 }
 
 export interface EnvironmentProjectSkillWorkstream extends ProjectSkillWorkstream {
@@ -139,30 +144,32 @@ export const deriveProjectWorkstreams = (
           left.threadId.localeCompare(right.threadId) ||
           left.skillRunId.localeCompare(right.skillRunId),
       );
-    const hasActiveLinkedThread = threads.some(
-      (thread) =>
-        workstream.linkedThreadIds.has(thread.id) &&
-        (thread.latestTurn?.state === "running" ||
-          thread.session?.status === "starting" ||
-          thread.session?.status === "running"),
+    const ticketNumberByThreadId = new Map(
+      ticketThreads.map((ticketThread) => [ticketThread.threadId, ticketThread.ticketNumber]),
     );
-    const completed =
-      wayfinderMap !== null &&
-      (wayfinderSynchronization === null || wayfinderSynchronization.status === "healthy") &&
-      !hasActiveLinkedThread &&
-      (wayfinderMap.canonicalReference.state === "closed" ||
-        (wayfinderMap.destination.length > 0 &&
-          wayfinderMap.fogOfWar.length === 0 &&
-          wayfinderMap.tickets.every((ticket) => ticket.state === "closed")));
+    const activeLinkedTicketNumbers = threads.flatMap((thread) => {
+      const ticketNumber = ticketNumberByThreadId.get(thread.id);
+      const active =
+        thread.latestTurn?.state === "running" ||
+        thread.session?.status === "starting" ||
+        thread.session?.status === "running";
+      return ticketNumber !== undefined && active ? [ticketNumber] : [];
+    });
+    const readiness = deriveWayfinderReadiness({
+      map: wayfinderMap,
+      synchronization: wayfinderSynchronization,
+      activeLinkedTicketNumbers,
+    });
     return {
       id,
       projectId,
-      status: completed ? ("completed" as const) : ("active" as const),
+      status: readiness.ready ? ("completed" as const) : ("active" as const),
       linkedThreadIds: Array.from(workstream.linkedThreadIds).sort(),
       ticketThreads,
       skillRuns: sortedRuns,
       wayfinderMap,
       wayfinderSynchronization,
+      readiness,
     };
   }).sort((left, right) => left.id.localeCompare(right.id));
 };

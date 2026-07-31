@@ -13,6 +13,35 @@ import type {
   WayfinderResearchState,
   WayfinderDraftTicketClassification,
 } from "@t3tools/contracts";
+import {
+  describeWayfinderReadinessBlocker,
+  type WayfinderReadiness,
+} from "@t3tools/shared/wayfinderReadiness";
+
+export function buildMobileWayfinderCompletionPresentation(readiness: WayfinderReadiness) {
+  const blockers = readiness.blockers.map(describeWayfinderReadinessBlocker);
+  return {
+    title: readiness.ready ? "Ready for specification" : "Wayfinder is not complete",
+    actionLabel: readiness.ready ? "Start to-spec" : "Start to-spec early",
+    blockers,
+    warning: readiness.ready
+      ? null
+      : `This Wayfinder map is incomplete:\n\n${blockers.join("\n")}\n\nStart to-spec early anyway?`,
+  };
+}
+
+export function requestMobileWayfinderToSpecStart(input: {
+  readonly readiness: WayfinderReadiness;
+  readonly requestIncompleteAcknowledgement: (warning: string, onAcknowledge: () => void) => void;
+  readonly onStart: (acknowledgedIncomplete: boolean) => void;
+}) {
+  if (input.readiness.ready) {
+    input.onStart(false);
+    return;
+  }
+  const { warning } = buildMobileWayfinderCompletionPresentation(input.readiness);
+  input.requestIncompleteAcknowledgement(warning ?? "", () => input.onStart(true));
+}
 
 export function buildMobileTicketClaimActions(
   ticket: WayfinderMapProjection["tickets"][number],

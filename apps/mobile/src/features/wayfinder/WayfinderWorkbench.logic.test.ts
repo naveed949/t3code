@@ -9,6 +9,8 @@ import {
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
+  buildMobileWayfinderCompletionPresentation,
+  requestMobileWayfinderToSpecStart,
 } from "./WayfinderWorkbench.logic";
 import {
   createWayfinderTicketAction,
@@ -218,5 +220,65 @@ describe("buildMobileWayfinderPresentation", () => {
         { kind: "graduated", key: "relay-policy" },
       ],
     });
+  });
+});
+
+describe("buildMobileWayfinderCompletionPresentation", () => {
+  it("presents every blocker and an explicit early-handoff warning", () => {
+    expect(
+      buildMobileWayfinderCompletionPresentation({
+        ready: false,
+        blockers: [
+          { kind: "open-decision-tickets", ticketNumbers: [43, 44] },
+          { kind: "fog-of-war", entries: ["Deployment ownership"] },
+        ],
+      }),
+    ).toEqual({
+      title: "Wayfinder is not complete",
+      actionLabel: "Start to-spec early",
+      blockers: [
+        "Close every decision ticket. Open: #43, #44.",
+        "Resolve or move every in-scope unknown: Deployment ownership.",
+      ],
+      warning:
+        "This Wayfinder map is incomplete:\n\nClose every decision ticket. Open: #43, #44.\nResolve or move every in-scope unknown: Deployment ownership.\n\nStart to-spec early anyway?",
+    });
+  });
+
+  it("presents the normal explicit action when ready", () => {
+    expect(buildMobileWayfinderCompletionPresentation({ ready: true, blockers: [] })).toEqual({
+      title: "Ready for specification",
+      actionLabel: "Start to-spec",
+      blockers: [],
+      warning: null,
+    });
+  });
+
+  it("starts ready handoffs directly and only starts early after acknowledgement", () => {
+    const starts: boolean[] = [];
+    requestMobileWayfinderToSpecStart({
+      readiness: { ready: true, blockers: [] },
+      requestIncompleteAcknowledgement: () => undefined,
+      onStart: (acknowledgedIncomplete) => starts.push(acknowledgedIncomplete),
+    });
+
+    const acknowledgements: Array<() => void> = [];
+    let warning = "";
+    requestMobileWayfinderToSpecStart({
+      readiness: {
+        ready: false,
+        blockers: [{ kind: "fog-of-war", entries: ["Deployment ownership"] }],
+      },
+      requestIncompleteAcknowledgement: (message, onAcknowledge) => {
+        warning = message;
+        acknowledgements.push(onAcknowledge);
+      },
+      onStart: (acknowledgedIncomplete) => starts.push(acknowledgedIncomplete),
+    });
+
+    expect(starts).toEqual([false]);
+    expect(warning).toContain("Deployment ownership");
+    acknowledgements[0]?.();
+    expect(starts).toEqual([false, true]);
   });
 });

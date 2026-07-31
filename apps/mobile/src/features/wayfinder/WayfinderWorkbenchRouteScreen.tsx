@@ -11,6 +11,7 @@ import {
   findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   advanceWayfinderReconciliationLifecycle,
   WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
@@ -35,12 +36,16 @@ import {
   type StaticScreenProps,
 } from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AppState, Pressable, ScrollView, TextInput, View } from "react-native";
+import { Alert, AppState, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
+import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { makeTurnCommandMetadata } from "../../lib/commandMetadata";
+import { buildProjectThreadStartTurnInput } from "../../lib/projectThreadStartTurn";
 import { useEnvironments } from "../../state/environments";
+import { useEnvironmentServerConfig, useProject } from "../../state/entities";
 import {
   environmentThreadDetails,
   environmentThreadShells,
@@ -49,9 +54,11 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   buildMobileDependencyAction,
+  buildMobileWayfinderCompletionPresentation,
   buildMobileGraduatedFogTicket,
   buildMobileHitlResolutionAction,
   buildMobileResearchPresentation,
+  requestMobileWayfinderToSpecStart,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
@@ -579,6 +586,7 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.reconcileWayfinderMap,
     "reconcile Wayfinder map",
   );
+  const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
   const workstreams = useAtomValue(
@@ -587,6 +595,8 @@ function WayfinderWorkbenchContent(props: {
     ) ?? EMPTY_WORKSTREAMS_ATOM,
   );
   const workstream = findThreadWayfinderWorkstream(props.threadId, workstreams);
+  const project = useProject(scopeProjectRef(props.environmentId, props.projectId));
+  const serverConfig = useEnvironmentServerConfig(props.environmentId);
   const thread = useAtomValue(
     environmentThreadDetails.detailAtom(scopeThreadRef(props.environmentId, props.threadId)),
   );
@@ -731,6 +741,73 @@ function WayfinderWorkbenchContent(props: {
   const synchronization = workstream?.wayfinderSynchronization ?? null;
   const synchronizationStatus = synchronization?.status ?? "healthy";
   const lastSuccessfulAt = synchronization?.lastSuccessfulAt ?? map.lastSynchronizedAt;
+  const readiness =
+    workstream?.readiness ??
+    deriveWayfinderReadiness({
+      map,
+      synchronization,
+      activeLinkedTicketNumbers: [],
+    });
+  const completion = buildMobileWayfinderCompletionPresentation(readiness);
+  const toSpecSkill =
+    serverConfig?.providers
+      .find((provider) => provider.instanceId === thread?.modelSelection.instanceId)
+      ?.skills.find((skill) => skill.name === "to-spec" && skill.enabled) ?? null;
+  const startToSpec = async (acknowledgedIncomplete: boolean) => {
+    if (!project || !thread || !invocation || !toSpecSkill) return;
+    const request = createWayfinderToSpecInvocationRequest({
+      skill: toSpecSkill,
+      sourceSkillRunId: invocation.skillRunId,
+      sourceThreadId: invocation.threadId,
+      destination: map.destination,
+      canonicalReference: {
+        number: map.canonicalReference.number,
+        url: map.canonicalReference.url,
+      },
+      wayfinderSynchronizedAt: invocation.wayfinderSynchronizedAt ?? map.lastSynchronizedAt,
+      acknowledgedIncomplete,
+    });
+    if (request === null) return;
+    const metadata = makeTurnCommandMetadata();
+    const result = await startTurn({
+      environmentId: props.environmentId,
+      input: buildProjectThreadStartTurnInput({
+        projectId: project.id,
+        projectCwd: project.workspaceRoot,
+        threadId: metadata.threadId,
+        commandId: metadata.commandId,
+        messageId: metadata.messageId,
+        createdAt: metadata.createdAt,
+        text: request.arguments ?? "Create a specification from Wayfinder.",
+        attachments: [],
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        skillInvocationRequest: request,
+        workspaceMode: "local",
+        branch: thread.branch,
+        worktreePath: thread.worktreePath,
+        startFromOrigin: false,
+        worktreeBranchName: "unused-to-spec-handoff",
+      }),
+    });
+    if (result._tag === "Failure") {
+      Alert.alert("Could not start to-spec", "The generic Skill Run could not be created.");
+      return;
+    }
+    props.onReturnToThread(ThreadId.make(metadata.threadId));
+  };
+  const requestToSpec = () => {
+    requestMobileWayfinderToSpecStart({
+      readiness,
+      onStart: (acknowledgedIncomplete) => void startToSpec(acknowledgedIncomplete),
+      requestIncompleteAcknowledgement: (warning, onAcknowledge) =>
+        Alert.alert("Wayfinder is incomplete", warning, [
+          { text: "Cancel", style: "cancel" },
+          { text: "Start early", onPress: onAcknowledge },
+        ]),
+    });
+  };
 
   return (
     <ScrollView
@@ -781,6 +858,29 @@ function WayfinderWorkbenchContent(props: {
             GitHub #{map.canonicalReference.number}
           </Text>
         </Pressable>
+      </View>
+
+      <View className="gap-2 rounded-lg border border-border p-3">
+        <Text className="text-sm font-semibold text-foreground">{completion.title}</Text>
+        {completion.blockers.map((blocker) => (
+          <Text key={blocker} className="text-xs leading-5 text-foreground-muted">
+            • {blocker}
+          </Text>
+        ))}
+        {toSpecSkill ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={completion.actionLabel}
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={requestToSpec}
+          >
+            <Text className="text-xs font-semibold text-foreground">{completion.actionLabel}</Text>
+          </Pressable>
+        ) : (
+          <Text className="text-xs text-foreground-muted">
+            Enable the to-spec skill for this provider to start the handoff.
+          </Text>
+        )}
       </View>
 
       {linkedTicketAction === null ? (

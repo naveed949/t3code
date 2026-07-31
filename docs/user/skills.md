@@ -53,6 +53,20 @@ preflight reloads GitHub and the project Workstream snapshot; the new run record
 `resume` synchronization result. Active linked runtime work and synchronization health are included
 when the shared clients recompute whether the Workstream is complete.
 
+Completion is derived from the synchronized artifacts, never from assistant narration or the parent
+issue's closed state. The Workbench lists every unmet invariant: a missing destination, open decision
+tickets, active linked ticket threads, remaining in-scope fog, closed tickets whose classification is
+still unknown, and tracker synchronization that is not healthy. When none remain, web, desktop, and
+mobile offer **Start to-spec**. This is an explicit action only; T3 never advances automatically.
+
+The action creates a separate, generic `to-spec` Skill Run in the same project Workstream and opens
+its ordinary conversation and activity experience. Its durable invocation retains the source
+Wayfinder Skill Run, thread, canonical issue, and synchronization receipt time. If the map is not
+complete, **Start to-spec early** first shows the full blocker list and requires explicit warning
+acknowledgement. The server reloads historical Skill Run provenance before dispatch, so the link
+survives restart and remains trustworthy even when a later turn has replaced the source thread's
+latest-turn view.
+
 A native **New** run starts with a visible unpublished draft. The draft is explicitly non-canonical:
 T3 does not create or change GitHub issues, labels, assignments, comments, or relationships while
 the map is being charted. Wayfinder presents one Decision Card at a time, including its recommended

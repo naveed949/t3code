@@ -39,6 +39,7 @@ import {
   findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
@@ -5163,6 +5164,119 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeWayfinderInvocation, controlWayfinderResearchCommand, environmentId, setThreadError],
   );
+  const toSpecSkill = activeThread
+    ? (providerStatuses
+        .find((provider) => provider.instanceId === activeThread.modelSelection.instanceId)
+        ?.skills.find((skill) => skill.name === "to-spec" && skill.enabled) ?? null)
+    : null;
+  const onStartWayfinderToSpec = useCallback(
+    async (acknowledgedIncomplete: boolean) => {
+      if (
+        !activeThread ||
+        !activeProject ||
+        !activeWayfinderInvocation ||
+        !activeWayfinderMap ||
+        !toSpecSkill ||
+        activeEnvironmentUnavailable
+      ) {
+        return;
+      }
+      const skillInvocationRequest = createWayfinderToSpecInvocationRequest({
+        skill: toSpecSkill,
+        sourceSkillRunId: activeWayfinderInvocation.skillRunId,
+        sourceThreadId: activeWayfinderInvocation.threadId,
+        destination: activeWayfinderMap.destination,
+        canonicalReference: {
+          number: activeWayfinderMap.canonicalReference.number,
+          url: activeWayfinderMap.canonicalReference.url,
+        },
+        wayfinderSynchronizedAt:
+          activeWayfinderInvocation.wayfinderSynchronizedAt ??
+          activeWayfinderMap.lastSynchronizedAt,
+        acknowledgedIncomplete,
+      });
+      if (skillInvocationRequest === null) return;
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const title = truncate(`Specification for ${activeWayfinderMap.canonicalReference.title}`);
+      const createResult = await createThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          projectId: activeProject.id,
+          title,
+          modelSelection: activeThread.modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          createdAt,
+        },
+      });
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === "Failure" ? createResult : null;
+
+      if (failure === null) {
+        const startResult = await startThreadTurn({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: skillInvocationRequest.arguments ?? "Create a specification from Wayfinder.",
+              attachments: [],
+            },
+            modelSelection: activeThread.modelSelection,
+            titleSeed: title,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            skillInvocationRequest,
+            createdAt,
+          },
+        });
+        failure = startResult._tag === "Failure" ? startResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: { environmentId: activeThread.environmentId, threadId: nextThreadId },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        await deleteThread({ environmentId, input: { threadId: nextThreadId } });
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start to-spec",
+              description: error instanceof Error ? error.message : "The handoff could not start.",
+            }),
+          );
+        }
+      }
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeProject,
+      activeThread,
+      activeWayfinderInvocation,
+      activeWayfinderMap,
+      createThread,
+      deleteThread,
+      environmentId,
+      navigate,
+      startThreadTurn,
+      toSpecSkill,
+    ],
+  );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -5858,6 +5972,9 @@ function ChatViewContent(props: ChatViewProps) {
         assignedTicketNumber={activeLinkedTicketAction?.ticketNumber ?? null}
         {...(activeLinkedTicketInvocation ? { onCompleteHitl: onCompleteWayfinderHitl } : {})}
         synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
+        {...(activeWayfinderWorkstream ? { readiness: activeWayfinderWorkstream.readiness } : {})}
+        toSpecAvailable={toSpecSkill !== null}
+        onStartToSpec={onStartWayfinderToSpec}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
       />

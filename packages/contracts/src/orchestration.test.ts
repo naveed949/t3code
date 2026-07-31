@@ -27,7 +27,7 @@ import {
   WayfinderSynchronizationState,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { SkillRunId } from "./baseSchemas.ts";
+import { SkillRunId, ThreadId } from "./baseSchemas.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -449,6 +449,58 @@ it.effect("decodes a pinned linked-ticket invocation", () =>
       sourceSkillRunId: SkillRunId.make("skill-run:map"),
     });
     assert.strictEqual(parsed.skillInvocation?.reconnectWorkstreamId, "workstream:release");
+  }),
+);
+
+it.effect("decodes a generic to-spec invocation with canonical Wayfinder provenance", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-to-spec",
+      threadId: "thread-to-spec",
+      message: {
+        messageId: "msg-to-spec",
+        role: "user",
+        text: "Turn the completed Wayfinder map into a specification.",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "to-spec",
+          path: "/skills/to-spec/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        action: {
+          id: "handoff-to-spec",
+          sourceSkillRunId: "skill-run:wayfinder",
+          sourceThreadId: "thread-wayfinder",
+          canonicalReference: {
+            number: 42,
+            url: "https://github.com/t3tools/t3code/issues/42",
+          },
+          wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+          acknowledgedIncomplete: false,
+        },
+        execution: {
+          mode: "generic",
+          reason: "user-selected-generic",
+        },
+        reconnectWorkstreamId: "workstream:release",
+      },
+      createdAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.skillInvocation?.action, {
+      id: "handoff-to-spec",
+      sourceSkillRunId: SkillRunId.make("skill-run:wayfinder"),
+      sourceThreadId: ThreadId.make("thread-wayfinder"),
+      canonicalReference: {
+        number: 42,
+        url: "https://github.com/t3tools/t3code/issues/42",
+      },
+      wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+      acknowledgedIncomplete: false,
+    });
   }),
 );
 

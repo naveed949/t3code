@@ -46,6 +46,13 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
       skillRuns: [invocation],
       wayfinderMap: null,
       wayfinderSynchronization: null,
+      readiness: {
+        ready: false,
+        blockers: [
+          { kind: "canonical-map-missing" },
+          { kind: "tracker-synchronization-unhealthy", status: "unknown" },
+        ],
+      },
     },
   ]);
 });
@@ -163,6 +170,13 @@ it("marks a reconciled map completed and keeps its canonical projection discover
         skillRunId: SkillRunId.make("skill-run:2"),
         createdAt: refreshedAt,
         wayfinderSynchronizedAt: refreshedAt,
+        wayfinderSynchronization: {
+          status: "healthy" as const,
+          reason: "manual" as const,
+          lastAttemptedAt: refreshedAt,
+          lastSuccessfulAt: refreshedAt,
+          canMutate: true,
+        },
       },
     ]),
   ).toMatchObject([
@@ -362,6 +376,10 @@ it("does not report completion until reconciliation is healthy and reactivates r
     },
   ]);
   expect(unavailableWorkstream?.status).toBe("active");
+  expect(unavailableWorkstream?.readiness.blockers).toContainEqual({
+    kind: "tracker-synchronization-unhealthy",
+    status: "unavailable",
+  });
 });
 
 it("recomputes completion only after linked runtime work is no longer active", () => {
@@ -392,8 +410,19 @@ it("recomputes completion only after linked runtime work is no longer active", (
       canMutate: true,
     },
   };
+  const linkedInvocation = {
+    ...completedInvocation,
+    wayfinderMap: undefined,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("thread-ticket-43"),
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: completedInvocation.skillRunId,
+    },
+  };
   const runningThread = {
-    id: invocation.threadId,
+    id: linkedInvocation.threadId,
     projectId: invocation.projectId,
     title: "Linked Wayfinder run",
     modelSelection: {
@@ -406,6 +435,86 @@ it("recomputes completion only after linked runtime work is no longer active", (
     worktreePath: null,
     latestTurn: {
       turnId: TurnId.make("turn:linked"),
+      state: "running" as const,
+      requestedAt: synchronizedAt,
+      startedAt: synchronizedAt,
+      completedAt: null,
+      assistantMessageId: null,
+    },
+    createdAt: synchronizedAt,
+    updatedAt: synchronizedAt,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    session: null,
+    latestUserMessageAt: synchronizedAt,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+  };
+
+  expect(
+    deriveProjectWorkstreams(
+      invocation.projectId,
+      [completedInvocation, linkedInvocation],
+      [runningThread],
+    )[0]?.status,
+  ).toBe("active");
+  expect(
+    deriveProjectWorkstreams(
+      invocation.projectId,
+      [completedInvocation, linkedInvocation],
+      [runningThread],
+    )[0]?.readiness.blockers,
+  ).toContainEqual({ kind: "active-linked-ticket-threads", ticketNumbers: [43] });
+  expect(
+    deriveProjectWorkstreams(
+      invocation.projectId,
+      [completedInvocation, linkedInvocation],
+      [{ ...runningThread, latestTurn: { ...runningThread.latestTurn, state: "completed" } }],
+    )[0]?.status,
+  ).toBe("completed");
+});
+
+it("does not let an active non-ticket run block Wayfinder readiness", () => {
+  const synchronizedAt = "2026-01-04T00:00:00.000Z";
+  const completedInvocation = {
+    ...invocation,
+    wayfinderMap: {
+      canonicalReference: {
+        number: 42,
+        title: "Release map",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "A release plan.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: synchronizedAt,
+    },
+    wayfinderSynchronization: {
+      status: "healthy" as const,
+      reason: "resume" as const,
+      lastAttemptedAt: synchronizedAt,
+      lastSuccessfulAt: synchronizedAt,
+      canMutate: true,
+    },
+  };
+  const runningMapThread = {
+    id: invocation.threadId,
+    projectId: invocation.projectId,
+    title: "Shared map",
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    branch: null,
+    worktreePath: null,
+    latestTurn: {
+      turnId: TurnId.make("turn:map"),
       state: "running" as const,
       requestedAt: synchronizedAt,
       startedAt: synchronizedAt,
@@ -426,16 +535,63 @@ it("recomputes completion only after linked runtime work is no longer active", (
   };
 
   expect(
-    deriveProjectWorkstreams(invocation.projectId, [completedInvocation], [runningThread])[0]
-      ?.status,
-  ).toBe("active");
-  expect(
-    deriveProjectWorkstreams(
-      invocation.projectId,
-      [completedInvocation],
-      [{ ...runningThread, latestTurn: { ...runningThread.latestTurn, state: "completed" } }],
-    )[0]?.status,
-  ).toBe("completed");
+    deriveProjectWorkstreams(invocation.projectId, [completedInvocation], [runningMapThread])[0]
+      ?.readiness,
+  ).toEqual({ ready: true, blockers: [] });
+});
+
+it("recovers a provenance-linked to-spec run in the source Workstream", () => {
+  const source = {
+    ...invocation,
+    wayfinderMap: {
+      canonicalReference: {
+        number: 42,
+        title: "Release map",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "A release plan.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [],
+      frontier: [],
+      lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
+    },
+    wayfinderSynchronization: {
+      status: "healthy" as const,
+      reason: "manual" as const,
+      lastAttemptedAt: "2026-01-02T00:00:00.000Z",
+      lastSuccessfulAt: "2026-01-02T00:00:00.000Z",
+      canMutate: true,
+    },
+  };
+  const handoff = {
+    ...invocation,
+    skillRunId: SkillRunId.make("skill-run:to-spec"),
+    threadId: ThreadId.make("thread-to-spec"),
+    skill: {
+      ...invocation.skill,
+      name: "to-spec",
+      path: "/skills/to-spec/SKILL.md",
+    },
+    execution: { mode: "generic" as const, reason: "user-selected-generic" as const },
+    action: {
+      id: "handoff-to-spec" as const,
+      sourceSkillRunId: source.skillRunId,
+      sourceThreadId: source.threadId,
+      canonicalReference: { number: 42, url: source.wayfinderMap.canonicalReference.url },
+      wayfinderSynchronizedAt: source.wayfinderMap.lastSynchronizedAt,
+      acknowledgedIncomplete: false,
+    },
+  };
+
+  const [workstream] = deriveProjectWorkstreams(source.projectId, [source, handoff]);
+
+  expect(workstream?.skillRuns.map((run) => run.skill.name)).toEqual(["wayfinder", "to-spec"]);
+  expect(workstream?.wayfinderMap?.canonicalReference.number).toBe(42);
+  expect(workstream?.status).toBe("completed");
 });
 
 it("scopes project Workstreams to their owning environment", () => {
