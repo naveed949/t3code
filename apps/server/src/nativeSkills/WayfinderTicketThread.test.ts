@@ -20,6 +20,7 @@ describe("Wayfinder ticket thread bootstrap", () => {
     const seed = buildWayfinderTicketThreadSeed({
       workstreamId: WorkstreamId.make("workstream:release"),
       sourceSkillRunId: SkillRunId.make("skill-run:map"),
+      sourceThreadId: ThreadId.make("thread:map"),
       skill: {
         name: "wayfinder",
         path: "/skills/wayfinder/SKILL.md",
@@ -69,5 +70,8 @@ describe("Wayfinder ticket thread bootstrap", () => {
     expect(seed.message).toContain("workstream:release");
     expect(seed.message).toContain("skill-run:map");
     expect(seed.message).toContain("sha256:257e4066");
+    expect(seed.message).toContain("Work only this assigned ticket");
+    expect(seed.message).toContain("Present one user decision at a time");
+    expect(seed.message).toContain("complete-hitl-ticket");
   });
 });

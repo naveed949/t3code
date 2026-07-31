@@ -108,13 +108,22 @@ child tickets that are ready to advance. Starting work claims a frontier ticket 
 deterministic linked ticket thread; retry, return, release, and reclaim expose the reverse and
 recovery states on every client.
 
+#### HITL resolution
+
+The receipt-backed completion of one claimed Wayfinder decision in its dedicated linked thread.
+It records the canonical issue comment and context pointer before closing the assigned ticket.
+Newly specifiable fog may graduate into child tickets and native blocking relationships; work beyond
+the destination is classified and represented as out of scope instead of becoming a route decision.
+Verified artifacts and the claim survive interruption for explicit resume or release.
+
 #### Wayfinder mutation
 
 One closed, structured action against a published Wayfinder map: edit a map field; create, rename,
-classify, resolve, close, reopen, claim, or release a decision ticket; or add or remove a blocking relationship. Its
-persisted state identifies the active action and whether it is awaiting approval, mutating, failed,
-or synchronized. GitHub receipts and reconciliation, rather than client optimism or assistant
-prose, confirm the canonical result.
+classify, resolve, close, reopen, claim, release, or complete a HITL decision ticket; or add or remove
+a blocking relationship. Its persisted state identifies the active action and whether it is
+awaiting approval, mutating, failed, or synchronized. A resumable HITL mutation also retains
+verified artifacts and its exact next step. GitHub receipts and reconciliation, rather than client
+optimism or assistant prose, confirm the canonical result.
 
 #### Wayfinder reconciliation
 

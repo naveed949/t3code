@@ -20,6 +20,7 @@ export interface ProjectSkillWorkstream {
     readonly threadId: ThreadId;
     readonly skillRunId: SkillRunId;
     readonly sourceSkillRunId: SkillRunId;
+    readonly status: "active" | "resolved" | "out-of-scope";
   }>;
   readonly skillRuns: ReadonlyArray<SkillInvocation>;
   readonly wayfinderMap: WayfinderMapProjection | null;
@@ -111,18 +112,27 @@ export const deriveProjectWorkstreams = (
         )
         .at(-1)?.synchronization ?? null;
     const ticketThreads = sortedRuns
-      .flatMap((run) =>
-        run.action?.id === "work-ticket"
-          ? [
-              {
-                ticketNumber: run.action.ticketNumber,
-                threadId: run.threadId,
-                skillRunId: run.skillRunId,
-                sourceSkillRunId: run.action.sourceSkillRunId,
-              },
-            ]
-          : [],
-      )
+      .flatMap((run) => {
+        const action = run.action?.id === "work-ticket" ? run.action : null;
+        if (action === null) return [];
+        const ticket = wayfinderMap?.tickets.find(
+          (candidate) => candidate.number === action.ticketNumber,
+        );
+        return [
+          {
+            ticketNumber: action.ticketNumber,
+            threadId: run.threadId,
+            skillRunId: run.skillRunId,
+            sourceSkillRunId: action.sourceSkillRunId,
+            status:
+              ticket?.classification === "out-of-scope"
+                ? ("out-of-scope" as const)
+                : ticket?.state === "closed"
+                  ? ("resolved" as const)
+                  : ("active" as const),
+          },
+        ];
+      })
       .sort(
         (left, right) =>
           left.ticketNumber - right.ticketNumber ||

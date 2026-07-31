@@ -29,6 +29,84 @@ export function createWayfinderTicketAction(
     : { kind: "create-ticket", title: trimmedTitle, classification };
 }
 
+type CompleteHitlTicketAction = Extract<
+  WayfinderMutationAction,
+  { readonly kind: "complete-hitl-ticket" }
+>;
+
+export function createWayfinderGraduatedFogTicket(input: {
+  readonly fog: string;
+  readonly title: string;
+  readonly classification: WayfinderTicketClassification;
+  readonly blockers: string;
+}): CompleteHitlTicketAction["graduatedFog"][number] | null {
+  const fog = input.fog.trim();
+  const title = input.title.trim();
+  const key = title
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
+  if (fog === "" || title === "" || key === "") return null;
+  return {
+    key,
+    fog,
+    title,
+    classification: input.classification,
+    blockedBy: input.blockers
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .flatMap((entry): CompleteHitlTicketAction["graduatedFog"][number]["blockedBy"] =>
+        entry.startsWith("key:")
+          ? [{ kind: "graduated", key: entry.slice(4).trim() }]
+          : Number(entry.replace(/^#/u, "")) > 0
+            ? [{ kind: "ticket", ticketNumber: Number(entry.replace(/^#/u, "")) }]
+            : [],
+      ),
+  };
+}
+
+export function createWayfinderHitlResolutionAction(input: {
+  readonly ticketNumber: number;
+  readonly outcome: CompleteHitlTicketAction["outcome"];
+  readonly resolution: string;
+  readonly contextPointer: string;
+  readonly graduatedFog: CompleteHitlTicketAction["graduatedFog"];
+}): CompleteHitlTicketAction | null {
+  const resolution = input.resolution.trim();
+  const contextPointer = input.contextPointer.trim();
+  if (input.ticketNumber <= 0 || resolution === "" || contextPointer === "") return null;
+  const graduatedFog: CompleteHitlTicketAction["graduatedFog"][number][] = [];
+  if (input.outcome === "resolved") {
+    const keys = new Set<string>();
+    for (const ticket of input.graduatedFog) {
+      const key = ticket.key.trim();
+      const fog = ticket.fog.trim();
+      const title = ticket.title.trim();
+      if (key === "" || fog === "" || title === "") return null;
+      if (keys.has(key)) return null;
+      keys.add(key);
+      graduatedFog.push({
+        ...ticket,
+        key,
+        fog,
+        title,
+        blockedBy: ticket.blockedBy.map((blocker) =>
+          blocker.kind === "graduated" ? { ...blocker, key: blocker.key.trim() } : blocker,
+        ),
+      });
+    }
+  }
+  return {
+    kind: "complete-hitl-ticket",
+    ticketNumber: input.ticketNumber,
+    outcome: input.outcome,
+    resolution,
+    contextPointer,
+    graduatedFog,
+  };
+}
+
 export function deriveWayfinderTicketClaimActions(input: {
   readonly ticket: WayfinderMapProjection["tickets"][number];
   readonly frontier: ReadonlyArray<number>;
@@ -149,6 +227,7 @@ export function applyOptimisticWayfinderMutation(
           case "resolve-ticket":
           case "claim-ticket":
           case "release-ticket":
+          case "complete-hitl-ticket":
             return ticket;
         }
       }),

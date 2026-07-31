@@ -89,3 +89,17 @@ that partial state visible and offers **Retry thread linkage**. Retrying reuses 
 **Return to thread** opens an existing link, **Release** removes the current GitHub user's
 assignment, and **Reclaim** reconnects a released ticket without creating a duplicate. These
 controls and their persisted links survive reconnect on web, desktop, and mobile.
+
+Inside a linked human-in-the-loop ticket thread, Wayfinder works only that assigned ticket and asks
+for one structured user decision at a time. **Resolve assigned decision** records a verified
+resolution and context pointer. A resolved route decision may graduate newly understood fog into
+fresh decision tickets and native blocking relationships. Work found to be beyond the destination
+is instead recorded under **Out of scope** and closed without becoming a route decision.
+
+T3 updates **Decisions so far** with the context pointer rather than copying the full resolution
+into the map. The assigned issue is closed only after its canonical resolution comment and map
+updates land. Each verified comment, ticket, child link, blocker, fog update, decision pointer, and
+closure is retained as a receipt. If the flow is interrupted, **Resume resolution** continues from
+the exact next step while **Release** remains available; the canonical claim and verified artifacts
+are not discarded. The resulting close, reopen, comment, and relationship receipts reconcile both
+the linked thread and the shared Workstream on web, desktop, mobile, and reconnect.

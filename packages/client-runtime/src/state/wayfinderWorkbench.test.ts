@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   applyOptimisticWayfinderMutation,
+  createWayfinderHitlResolutionAction,
   createWayfinderTicketAction,
   deriveWayfinderTicketClaimActions,
   deriveWayfinderWorkbenchModel,
@@ -194,5 +195,101 @@ describe("createWayfinderTicketAction", () => {
       classification: "research",
     });
     expect(createWayfinderTicketAction("  ", "task")).toBeNull();
+  });
+});
+
+describe("createWayfinderHitlResolutionAction", () => {
+  it("builds one assigned resolution with structured fog graduation", () => {
+    expect(
+      createWayfinderHitlResolutionAction({
+        ticketNumber: 43,
+        outcome: "resolved",
+        resolution: "  Use the environment-owned path. ",
+        contextPointer: " https://github.com/t3tools/t3code/issues/43#issuecomment-1 ",
+        graduatedFog: [
+          {
+            key: " relay-policy ",
+            fog: " Relay ownership ",
+            title: " Choose relay ownership ",
+            classification: "grilling",
+            blockedBy: [
+              { kind: "ticket", ticketNumber: 42 },
+              { kind: "graduated", key: " transport-policy " },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      kind: "complete-hitl-ticket",
+      ticketNumber: 43,
+      outcome: "resolved",
+      resolution: "Use the environment-owned path.",
+      contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+      graduatedFog: [
+        {
+          key: "relay-policy",
+          fog: "Relay ownership",
+          title: "Choose relay ownership",
+          classification: "grilling",
+          blockedBy: [
+            { kind: "ticket", ticketNumber: 42 },
+            { kind: "graduated", key: "transport-policy" },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("keeps beyond-destination work out of the route and requires canonical context", () => {
+    expect(
+      createWayfinderHitlResolutionAction({
+        ticketNumber: 43,
+        outcome: "out-of-scope",
+        resolution: "This is beyond the destination.",
+        contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-2",
+        graduatedFog: [
+          {
+            key: "ignored",
+            fog: "Ignored",
+            title: "Ignored",
+            classification: "task",
+            blockedBy: [],
+          },
+        ],
+      })?.graduatedFog,
+    ).toEqual([]);
+    expect(
+      createWayfinderHitlResolutionAction({
+        ticketNumber: 43,
+        outcome: "resolved",
+        resolution: " ",
+        contextPointer: "https://github.com/t3tools/t3code/issues/43",
+        graduatedFog: [],
+      }),
+    ).toBeNull();
+    expect(
+      createWayfinderHitlResolutionAction({
+        ticketNumber: 43,
+        outcome: "resolved",
+        resolution: "Use the native relay.",
+        contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-3",
+        graduatedFog: [
+          {
+            key: "relay-policy",
+            fog: "Relay ownership",
+            title: "Choose relay ownership",
+            classification: "grilling",
+            blockedBy: [],
+          },
+          {
+            key: " relay-policy ",
+            fog: "Relay failure behavior",
+            title: "Choose relay failure behavior",
+            classification: "grilling",
+            blockedBy: [],
+          },
+        ],
+      }),
+    ).toBeNull();
   });
 });

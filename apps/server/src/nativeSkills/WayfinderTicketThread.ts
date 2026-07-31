@@ -21,6 +21,7 @@ export function wayfinderTicketMessageId(threadId: ThreadId): MessageId {
 export function buildWayfinderTicketThreadSeed(input: {
   readonly workstreamId: WorkstreamId;
   readonly sourceSkillRunId: SkillRunId;
+  readonly sourceThreadId: ThreadId;
   readonly skill: PinnedSkillIdentity;
   readonly map: WayfinderMapProjection;
   readonly ticket: WayfinderMapProjection["tickets"][number];
@@ -52,9 +53,15 @@ export function buildWayfinderTicketThreadSeed(input: {
       `Canonical ticket: ${input.ticket.url}`,
       `Canonical map: ${input.map.canonicalReference.url}`,
       "",
+      "HITL working agreement",
+      `Work only this assigned ticket (#${input.ticket.number}); do not resolve unrelated Wayfinder work.`,
+      "Present one user decision at a time through structured input.",
+      "When the answer is verified, use the complete-hitl-ticket action so T3 records the canonical resolution before advancing the shared map.",
+      "",
       "Provenance",
       `Workstream: ${input.workstreamId}`,
       `Source Skill Run: ${input.sourceSkillRunId}`,
+      `Source Thread: ${input.sourceThreadId}`,
       `Pinned skill: ${input.skill.name}`,
       `Skill path: ${input.skill.path}`,
       `Skill digest: ${input.skill.contentDigest}`,

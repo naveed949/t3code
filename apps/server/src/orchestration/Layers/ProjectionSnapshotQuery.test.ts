@@ -1535,6 +1535,12 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           draftInvocation.skillRunId,
         ]),
       );
+      const locatedSkillRun = yield* snapshotQuery.getSkillRunById!(skillInvocation.skillRunId);
+      assert.equal(locatedSkillRun._tag, "Some");
+      if (locatedSkillRun._tag === "Some") {
+        assert.equal(locatedSkillRun.value.threadId, ThreadId.make("thread-1"));
+        assert.equal(locatedSkillRun.value.skillInvocation.skillRunId, skillInvocation.skillRunId);
+      }
 
       const fullSnapshot = yield* snapshotQuery.getSnapshot();
       assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));

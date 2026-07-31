@@ -89,6 +89,37 @@ function sameWayfinderMutationAction(
     case "claim-ticket":
     case "release-ticket":
       return right.kind === left.kind && left.ticketNumber === right.ticketNumber;
+    case "complete-hitl-ticket":
+      return (
+        right.kind === left.kind &&
+        left.ticketNumber === right.ticketNumber &&
+        left.outcome === right.outcome &&
+        left.resolution === right.resolution &&
+        left.contextPointer === right.contextPointer &&
+        left.graduatedFog.length === right.graduatedFog.length &&
+        left.graduatedFog.every((ticket, ticketIndex) => {
+          const candidate = right.graduatedFog[ticketIndex];
+          return (
+            candidate !== undefined &&
+            ticket.key === candidate.key &&
+            ticket.fog === candidate.fog &&
+            ticket.title === candidate.title &&
+            ticket.classification === candidate.classification &&
+            ticket.blockedBy.length === candidate.blockedBy.length &&
+            ticket.blockedBy.every((blocker, blockerIndex) => {
+              const candidateBlocker = candidate.blockedBy[blockerIndex];
+              return (
+                candidateBlocker !== undefined &&
+                blocker.kind === candidateBlocker.kind &&
+                (blocker.kind === "ticket"
+                  ? candidateBlocker.kind === "ticket" &&
+                    blocker.ticketNumber === candidateBlocker.ticketNumber
+                  : candidateBlocker.kind === "graduated" && blocker.key === candidateBlocker.key)
+              );
+            })
+          );
+        })
+      );
   }
 }
 
@@ -1091,11 +1122,77 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         const payload = decodePublishedWayfinderPayload(activity.payload);
         return Option.isSome(payload) && payload.value.skillRunId === command.skillRunId;
       });
-      if (!published) {
+      const workTicketAction = invocation?.action?.id === "work-ticket" ? invocation.action : null;
+      if (!published && workTicketAction === null) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "Wayfinder editing requires a published canonical map.",
         });
+      }
+      if (
+        workTicketAction !== null &&
+        command.action.kind !== "complete-hitl-ticket" &&
+        !(
+          command.action.kind === "release-ticket" &&
+          command.action.ticketNumber === workTicketAction.ticketNumber
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `A linked HITL thread can work only its assigned ticket #${workTicketAction.ticketNumber}.`,
+        });
+      }
+      if (command.action.kind === "complete-hitl-ticket") {
+        if (workTicketAction === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder HITL completion requires a dedicated linked ticket thread.",
+          });
+        }
+        if (command.action.ticketNumber !== workTicketAction.ticketNumber) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `This linked thread can resolve only its assigned ticket #${workTicketAction.ticketNumber}.`,
+          });
+        }
+        const assignedTicket = map?.tickets.find(
+          (ticket) => ticket.number === workTicketAction.ticketNumber,
+        );
+        if (assignedTicket?.state !== "open" || assignedTicket.claimedBy === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder HITL completion requires the assigned canonical ticket claim.",
+          });
+        }
+        if (command.action.outcome === "out-of-scope" && command.action.graduatedFog.length > 0) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "An out-of-scope ticket cannot graduate new route decisions.",
+          });
+        }
+        if (
+          new Set(command.action.graduatedFog.map((graduated) => graduated.key)).size !==
+          command.action.graduatedFog.length
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Each graduated fog ticket requires a unique key.",
+          });
+        }
+        if (
+          command.action.graduatedFog.some((graduated) => !map?.fogOfWar.includes(graduated.fog))
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Graduated fog must exist in the synchronized canonical map.",
+          });
+        }
+        if (hasOpenBlockingRequest(thread)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Resolve the current user decision before completing this HITL ticket.",
+          });
+        }
       }
       if (command.action.kind === "claim-ticket") {
         const action = command.action;

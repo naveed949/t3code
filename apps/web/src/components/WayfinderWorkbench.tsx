@@ -1,5 +1,7 @@
 import {
   applyOptimisticWayfinderMutation,
+  createWayfinderHitlResolutionAction,
+  createWayfinderGraduatedFogTicket,
   createWayfinderTicketAction,
   deriveWayfinderTicketClaimActions,
   deriveWayfinderWorkbenchModel,
@@ -319,6 +321,187 @@ function EditingControls(props: {
   );
 }
 
+function HitlResolutionControls(props: {
+  readonly map: WayfinderMapProjection;
+  readonly ticketNumber: number;
+  readonly mutation: WayfinderMutation | null;
+  readonly disabled: boolean;
+  readonly onComplete: (
+    action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+    options?: { readonly actionId?: string; readonly confirmed?: boolean },
+  ) => void;
+}) {
+  type CompletionAction = Extract<
+    WayfinderMutationAction,
+    { readonly kind: "complete-hitl-ticket" }
+  >;
+  const ticket = props.map.tickets.find((candidate) => candidate.number === props.ticketNumber);
+  const [outcome, setOutcome] = useState<CompletionAction["outcome"]>("resolved");
+  const [resolution, setResolution] = useState("");
+  const [contextPointer, setContextPointer] = useState(ticket?.url ?? "");
+  const [fog, setFog] = useState(props.map.fogOfWar[0] ?? "");
+  const [graduatedTitle, setGraduatedTitle] = useState("");
+  const [graduatedClassification, setGraduatedClassification] =
+    useState<WayfinderTicketClassification>("grilling");
+  const [graduatedBlockers, setGraduatedBlockers] = useState("");
+  const [graduatedFog, setGraduatedFog] = useState<CompletionAction["graduatedFog"]>([]);
+  if (!ticket) return null;
+  const activeResolution =
+    props.mutation?.action.kind === "complete-hitl-ticket" &&
+    props.mutation.action.ticketNumber === props.ticketNumber
+      ? props.mutation
+      : null;
+  const addGraduatedFog = () => {
+    const ticket = createWayfinderGraduatedFogTicket({
+      fog,
+      title: graduatedTitle,
+      classification: graduatedClassification,
+      blockers: graduatedBlockers,
+    });
+    if (!ticket) return;
+    setGraduatedFog((current) => [...current, ticket]);
+    setGraduatedTitle("");
+    setGraduatedBlockers("");
+  };
+  const submit = () => {
+    const action = createWayfinderHitlResolutionAction({
+      ticketNumber: props.ticketNumber,
+      outcome,
+      resolution,
+      contextPointer,
+      graduatedFog,
+    });
+    if (action) props.onComplete(action);
+  };
+
+  return (
+    <section
+      aria-labelledby="wayfinder-hitl-resolution"
+      className="space-y-3 rounded-lg border p-3"
+    >
+      <div>
+        <h3 id="wayfinder-hitl-resolution" className="text-xs font-semibold">
+          Resolve assigned decision
+        </h3>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Complete only #{props.ticketNumber} {ticket.title}. The canonical receipt lands before the
+          shared map advances.
+        </p>
+      </div>
+      {activeResolution ? (
+        <p role={activeResolution.status === "failed" ? "alert" : "status"} className="text-xs">
+          {activeResolution.status === "failed"
+            ? `${activeResolution.error} Next: ${activeResolution.nextStep ?? "resume resolution"}.`
+            : activeResolution.status === "synchronized"
+              ? "Canonical resolution synchronized."
+              : `Resolution ${activeResolution.status.replace("-", " ")}.`}
+        </p>
+      ) : null}
+      {activeResolution?.status === "failed" ? (
+        <button
+          type="button"
+          disabled={props.disabled}
+          className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+          onClick={() => {
+            const resolutionAction = activeResolution.action;
+            if (resolutionAction.kind !== "complete-hitl-ticket") return;
+            props.onComplete(resolutionAction, {
+              actionId: activeResolution.actionId,
+              confirmed: true,
+            });
+          }}
+        >
+          Resume resolution
+        </button>
+      ) : null}
+      <label className="block text-xs">
+        Outcome
+        <select
+          aria-label="Assigned ticket outcome"
+          className="ml-2 rounded-md border border-border bg-background px-2 py-1.5"
+          value={outcome}
+          onChange={(event) => setOutcome(event.target.value as CompletionAction["outcome"])}
+        >
+          <option value="resolved">Resolved decision</option>
+          <option value="out-of-scope">Beyond destination</option>
+        </select>
+      </label>
+      <textarea
+        aria-label="Verified resolution"
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+        value={resolution}
+        onChange={(event) => setResolution(event.target.value)}
+      />
+      <input
+        aria-label="Resolution context pointer"
+        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs"
+        value={contextPointer}
+        onChange={(event) => setContextPointer(event.target.value)}
+      />
+      {outcome === "resolved" && props.map.fogOfWar.length > 0 ? (
+        <details>
+          <summary className="cursor-pointer text-xs font-medium">
+            Graduate fog into a ticket
+          </summary>
+          <div className="mt-2 grid gap-2">
+            <select
+              aria-label="Fog to graduate"
+              value={fog}
+              onChange={(event) => setFog(event.target.value)}
+            >
+              {props.map.fogOfWar.map((entry) => (
+                <option key={entry} value={entry}>
+                  {entry}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Graduated ticket title"
+              value={graduatedTitle}
+              onChange={(event) => setGraduatedTitle(event.target.value)}
+            />
+            <select
+              aria-label="Graduated ticket classification"
+              value={graduatedClassification}
+              onChange={(event) =>
+                setGraduatedClassification(event.target.value as WayfinderTicketClassification)
+              }
+            >
+              {WAYFINDER_TICKET_CLASSIFICATIONS.map((classification) => (
+                <option key={classification} value={classification}>
+                  {classification}
+                </option>
+              ))}
+            </select>
+            <input
+              aria-label="Graduated ticket blockers"
+              placeholder="#42, key:other-ticket"
+              value={graduatedBlockers}
+              onChange={(event) => setGraduatedBlockers(event.target.value)}
+            />
+            <button type="button" onClick={addGraduatedFog}>
+              Add graduated ticket
+            </button>
+            {graduatedFog.map((entry) => (
+              <p key={entry.key} className="text-[11px] text-muted-foreground">
+                {entry.title}
+              </p>
+            ))}
+          </div>
+        </details>
+      ) : null}
+      <button
+        type="button"
+        disabled={props.disabled || !resolution.trim() || !contextPointer.trim()}
+        className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+        onClick={submit}
+      >
+        Record canonical resolution
+      </button>
+    </section>
+  );
+}
+
 export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly map: WayfinderMapProjection;
   readonly mutation?: WayfinderMutation | null;
@@ -331,6 +514,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     readonly threadId: ThreadId;
   }>;
   readonly onReturnToThread?: (threadId: ThreadId) => void;
+  readonly assignedTicketNumber?: number | null;
+  readonly onCompleteHitl?: (
+    action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+    options?: { readonly actionId?: string; readonly confirmed?: boolean },
+  ) => void;
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly connected: boolean;
   readonly onReconcile: (reason: WayfinderReconcileReason) => void;
@@ -458,8 +646,18 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           </ReferenceLink>
         </header>
 
-        {props.onMutate ? (
+        {props.onMutate && props.assignedTicketNumber == null ? (
           <EditingControls map={map} mutation={props.mutation ?? null} onMutate={props.onMutate} />
+        ) : null}
+
+        {props.assignedTicketNumber && props.onCompleteHitl ? (
+          <HitlResolutionControls
+            map={map}
+            ticketNumber={props.assignedTicketNumber}
+            mutation={props.mutation ?? null}
+            disabled={!mutationsEnabled}
+            onComplete={props.onCompleteHitl}
+          />
         ) : null}
 
         <section aria-labelledby="wayfinder-destination">
@@ -541,6 +739,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           ) : (
             <ol className="space-y-2">
               {model.tickets.map((ticket) => {
+                const ticketIsAssigned =
+                  props.assignedTicketNumber == null ||
+                  ticket.number === props.assignedTicketNumber;
                 const linkedThreadId = ticketThreadIdsByNumber.get(ticket.number) ?? null;
                 const claimActions = deriveWayfinderTicketClaimActions({
                   ticket,
@@ -564,9 +765,10 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                         ? ` · Blocked by ${ticket.blockedBy.map((number) => `#${number}`).join(", ")}`
                         : ""}
                     </p>
-                    {props.onMutate || (linkedThreadId && props.onReturnToThread) ? (
+                    {(ticketIsAssigned && props.onMutate) ||
+                    (ticketIsAssigned && linkedThreadId && props.onReturnToThread) ? (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {claimActions.canClaim && props.onMutate ? (
+                        {ticketIsAssigned && claimActions.canClaim && props.onMutate ? (
                           <button
                             type="button"
                             disabled={!mutationsEnabled}
@@ -581,7 +783,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                             {claimActions.claimLabel}
                           </button>
                         ) : null}
-                        {claimActions.canRetry && props.onMutate ? (
+                        {ticketIsAssigned && claimActions.canRetry && props.onMutate ? (
                           <button
                             type="button"
                             disabled={!mutationsEnabled}
@@ -596,7 +798,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                             Retry thread linkage
                           </button>
                         ) : null}
-                        {linkedThreadId && props.onReturnToThread ? (
+                        {ticketIsAssigned && linkedThreadId && props.onReturnToThread ? (
                           <button
                             type="button"
                             className="rounded-md border px-2 py-1 text-xs font-medium"
@@ -605,7 +807,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                             Return to thread
                           </button>
                         ) : null}
-                        {claimActions.canRelease && props.onMutate ? (
+                        {ticketIsAssigned && claimActions.canRelease && props.onMutate ? (
                           <button
                             type="button"
                             disabled={!mutationsEnabled}

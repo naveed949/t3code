@@ -129,6 +129,27 @@ export const OptionalWayfinderPublication = Schema.optional(WayfinderPublication
 
 const WayfinderTicketNumber = Schema.Int.check(Schema.isGreaterThan(0));
 
+export const WayfinderGraduatedFogBlocker = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("ticket"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("graduated"),
+    key: TrimmedNonEmptyString,
+  }),
+]);
+export type WayfinderGraduatedFogBlocker = typeof WayfinderGraduatedFogBlocker.Type;
+
+export const WayfinderGraduatedFogTicket = Schema.Struct({
+  key: TrimmedNonEmptyString,
+  fog: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  classification: WayfinderDraftTicketClassification,
+  blockedBy: Schema.Array(WayfinderGraduatedFogBlocker),
+});
+export type WayfinderGraduatedFogTicket = typeof WayfinderGraduatedFogTicket.Type;
+
 export const WayfinderMapField = Schema.Literals([
   "destination",
   "notes",
@@ -189,13 +210,52 @@ export const WayfinderMutationAction = Schema.Union([
     kind: Schema.Literal("release-ticket"),
     ticketNumber: WayfinderTicketNumber,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("complete-hitl-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+    outcome: Schema.Literals(["resolved", "out-of-scope"]),
+    resolution: TrimmedNonEmptyString,
+    contextPointer: TrimmedNonEmptyString,
+    graduatedFog: Schema.Array(WayfinderGraduatedFogTicket),
+  }),
 ]);
 export type WayfinderMutationAction = typeof WayfinderMutationAction.Type;
+
+export const WayfinderResolutionArtifact = Schema.Union([
+  WayfinderPublicationArtifact,
+  Schema.Struct({
+    kind: Schema.Literal("resolution-comment"),
+    ticketNumber: WayfinderTicketNumber,
+    contextPointer: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("decision-pointer"),
+    ticketNumber: WayfinderTicketNumber,
+    contextPointer: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("fog-graduated"),
+    key: TrimmedNonEmptyString,
+    fog: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("out-of-scope"),
+    ticketNumber: WayfinderTicketNumber,
+    contextPointer: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("ticket-closed"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
+]);
+export type WayfinderResolutionArtifact = typeof WayfinderResolutionArtifact.Type;
 
 export const WayfinderMutation = Schema.Struct({
   actionId: TrimmedNonEmptyString,
   action: WayfinderMutationAction,
   status: Schema.Literals(["awaiting-approval", "mutating", "failed", "synchronized"]),
+  artifacts: Schema.optional(Schema.Array(WayfinderResolutionArtifact)),
+  nextStep: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
   error: Schema.NullOr(TrimmedNonEmptyString),
   updatedAt: IsoDateTime,
 });
