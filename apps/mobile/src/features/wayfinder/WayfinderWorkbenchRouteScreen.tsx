@@ -25,7 +25,13 @@ import {
   type WayfinderMutationAction,
   type WayfinderReconcileReason,
 } from "@t3tools/contracts";
-import { useFocusEffect, useIsFocused, type StaticScreenProps } from "@react-navigation/native";
+import {
+  StackActions,
+  useFocusEffect,
+  useIsFocused,
+  useNavigation,
+  type StaticScreenProps,
+} from "@react-navigation/native";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppState, Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
@@ -41,6 +47,7 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   buildMobileDependencyAction,
+  buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
 } from "./WayfinderWorkbench.logic";
@@ -141,41 +148,101 @@ function TicketActions(props: {
 
 function TicketList(props: {
   readonly map: WayfinderMapProjection;
+  readonly mutation: WayfinderMutation | null;
+  readonly ticketThreads: ProjectSkillWorkstream["ticketThreads"];
   readonly disabled: boolean;
   readonly onMutate: (action: WayfinderMutationAction) => void;
+  readonly onReturnToThread: (threadId: ThreadId) => void;
 }) {
   const presentation = buildMobileWayfinderPresentation(props.map);
   return (
     <View className="gap-2">
-      {presentation.tickets.map((ticket) => (
-        <View key={ticket.number} className="rounded-xl border border-border bg-card p-4">
-          <View className="flex-row items-start justify-between gap-3">
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel={`${ticket.title}, ${ticket.state}, ${ticket.classification}`}
-              onPress={() => void tryOpenExternalUrl(ticket.url, "wayfinder")}
-            >
-              <Text className="min-w-0 flex-1 text-sm font-semibold text-foreground underline">
-                {ticket.title}
-              </Text>
-            </Pressable>
-            <Text className="text-xs capitalize text-foreground-muted">{ticket.state}</Text>
-          </View>
-          <Text className="mt-1 text-xs capitalize text-foreground-muted">
-            {ticket.classification}
-            {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
-            {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
-          </Text>
-          {ticket.blockedBy.length > 0 ? (
-            <Text className="mt-1 text-xs text-foreground-muted">
-              Blocked by {ticket.blockedBy.map((number) => `#${number}`).join(", ")}
+      {presentation.tickets.map((ticket) => {
+        const linkedThreadId =
+          props.ticketThreads.find((link) => link.ticketNumber === ticket.number)?.threadId ?? null;
+        const claimActions = buildMobileTicketClaimActions(
+          ticket,
+          props.map.frontier,
+          linkedThreadId,
+          props.mutation,
+        );
+        return (
+          <View key={ticket.number} className="rounded-xl border border-border bg-card p-4">
+            <View className="flex-row items-start justify-between gap-3">
+              <Pressable
+                accessibilityRole="link"
+                accessibilityLabel={`${ticket.title}, ${ticket.state}, ${ticket.classification}`}
+                onPress={() => void tryOpenExternalUrl(ticket.url, "wayfinder")}
+              >
+                <Text className="min-w-0 flex-1 text-sm font-semibold text-foreground underline">
+                  {ticket.title}
+                </Text>
+              </Pressable>
+              <Text className="text-xs capitalize text-foreground-muted">{ticket.state}</Text>
+            </View>
+            <Text className="mt-1 text-xs capitalize text-foreground-muted">
+              {ticket.classification}
+              {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
+              {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
             </Text>
-          ) : props.map.frontier.includes(ticket.number) ? (
-            <Text className="mt-1 text-xs font-semibold text-foreground">Frontier</Text>
-          ) : null}
-          <TicketActions ticket={ticket} disabled={props.disabled} onMutate={props.onMutate} />
-        </View>
-      ))}
+            {ticket.blockedBy.length > 0 ? (
+              <Text className="mt-1 text-xs text-foreground-muted">
+                Blocked by {ticket.blockedBy.map((number) => `#${number}`).join(", ")}
+              </Text>
+            ) : props.map.frontier.includes(ticket.number) ? (
+              <Text className="mt-1 text-xs font-semibold text-foreground">Frontier</Text>
+            ) : null}
+            <View className="mt-3 flex-row flex-wrap gap-2">
+              {claimActions.canClaim ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onMutate({ kind: "claim-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">{claimActions.claimLabel}</Text>
+                </Pressable>
+              ) : null}
+              {claimActions.canRetry ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onMutate({ kind: "claim-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">Retry thread linkage</Text>
+                </Pressable>
+              ) : null}
+              {claimActions.linkedThreadId ? (
+                <Pressable
+                  accessibilityRole="button"
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() => props.onReturnToThread(claimActions.linkedThreadId!)}
+                >
+                  <Text className="text-xs font-semibold">Return to thread</Text>
+                </Pressable>
+              ) : null}
+              {claimActions.canRelease ? (
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={props.disabled}
+                  className="rounded-lg border border-border px-3 py-2"
+                  onPress={() =>
+                    props.onMutate({ kind: "release-ticket", ticketNumber: ticket.number })
+                  }
+                >
+                  <Text className="text-xs font-semibold">Release</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            <TicketActions ticket={ticket} disabled={props.disabled} onMutate={props.onMutate} />
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -216,6 +283,7 @@ function WayfinderWorkbenchContent(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly projectId: Parameters<typeof scopeProjectRef>[1];
+  readonly onReturnToThread: (threadId: ThreadId) => void;
 }) {
   const [showGraph, setShowGraph] = useState(false);
   const mutateWayfinder = useAtomCommand(threadEnvironment.mutateWayfinder, "update Wayfinder");
@@ -595,7 +663,14 @@ function WayfinderWorkbenchContent(props: {
 
       <View>
         <Text className="mb-2 text-sm font-semibold text-foreground">Frontier and tickets</Text>
-        <TicketList map={map} disabled={working} onMutate={onMutate} />
+        <TicketList
+          map={map}
+          mutation={mutation}
+          ticketThreads={workstream?.ticketThreads ?? []}
+          disabled={working || !connected || synchronization?.canMutate === false}
+          onMutate={onMutate}
+          onReturnToThread={props.onReturnToThread}
+        />
       </View>
 
       <View className="gap-4">
@@ -619,6 +694,7 @@ function WayfinderWorkbenchContent(props: {
 export function WayfinderWorkbenchRouteScreen({
   route,
 }: StaticScreenProps<WayfinderWorkbenchRouteParams>) {
+  const navigation = useNavigation();
   const environmentId = EnvironmentId.make(route.params.environmentId);
   const threadId = ThreadId.make(route.params.threadId);
   const thread = useAtomValue(
@@ -636,6 +712,14 @@ export function WayfinderWorkbenchRouteScreen({
       environmentId={environmentId}
       threadId={threadId}
       projectId={thread.projectId}
+      onReturnToThread={(linkedThreadId) =>
+        navigation.dispatch(
+          StackActions.replace("Thread", {
+            environmentId: String(environmentId),
+            threadId: String(linkedThreadId),
+          }),
+        )
+      }
     />
   );
 }

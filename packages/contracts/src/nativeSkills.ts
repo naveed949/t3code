@@ -181,6 +181,14 @@ export const WayfinderMutationAction = Schema.Union([
     kind: Schema.Literal("reopen-ticket"),
     ticketNumber: WayfinderTicketNumber,
   }),
+  Schema.Struct({
+    kind: Schema.Literal("claim-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("release-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
 ]);
 export type WayfinderMutationAction = typeof WayfinderMutationAction.Type;
 

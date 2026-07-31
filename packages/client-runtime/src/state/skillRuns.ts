@@ -15,6 +15,12 @@ export interface ProjectSkillWorkstream {
   readonly projectId: ProjectId;
   readonly status: "active" | "completed";
   readonly linkedThreadIds: ReadonlyArray<ThreadId>;
+  readonly ticketThreads: ReadonlyArray<{
+    readonly ticketNumber: number;
+    readonly threadId: ThreadId;
+    readonly skillRunId: SkillRunId;
+    readonly sourceSkillRunId: SkillRunId;
+  }>;
   readonly skillRuns: ReadonlyArray<SkillInvocation>;
   readonly wayfinderMap: WayfinderMapProjection | null;
   readonly wayfinderSynchronization: WayfinderSynchronizationState | null;
@@ -104,6 +110,25 @@ export const deriveProjectWorkstreams = (
             left.run.skillRunId.localeCompare(right.run.skillRunId),
         )
         .at(-1)?.synchronization ?? null;
+    const ticketThreads = sortedRuns
+      .flatMap((run) =>
+        run.action?.id === "work-ticket"
+          ? [
+              {
+                ticketNumber: run.action.ticketNumber,
+                threadId: run.threadId,
+                skillRunId: run.skillRunId,
+                sourceSkillRunId: run.action.sourceSkillRunId,
+              },
+            ]
+          : [],
+      )
+      .sort(
+        (left, right) =>
+          left.ticketNumber - right.ticketNumber ||
+          left.threadId.localeCompare(right.threadId) ||
+          left.skillRunId.localeCompare(right.skillRunId),
+      );
     const hasActiveLinkedThread = threads.some(
       (thread) =>
         workstream.linkedThreadIds.has(thread.id) &&
@@ -124,6 +149,7 @@ export const deriveProjectWorkstreams = (
       projectId,
       status: completed ? ("completed" as const) : ("active" as const),
       linkedThreadIds: Array.from(workstream.linkedThreadIds).sort(),
+      ticketThreads,
       skillRuns: sortedRuns,
       wayfinderMap,
       wayfinderSynchronization,

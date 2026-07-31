@@ -42,6 +42,7 @@ function workstream(
     status,
     linkedThreadIds: [thread.id],
     skillRuns: [],
+    ticketThreads: [],
     wayfinderMap: {
       canonicalReference: {
         number: status === "active" ? 42 : 43,

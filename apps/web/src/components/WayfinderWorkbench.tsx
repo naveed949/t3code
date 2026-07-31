@@ -1,6 +1,7 @@
 import {
   applyOptimisticWayfinderMutation,
   createWayfinderTicketAction,
+  deriveWayfinderTicketClaimActions,
   deriveWayfinderWorkbenchModel,
   isWayfinderMutationInFlight,
   WAYFINDER_TICKET_CLASSIFICATIONS,
@@ -12,6 +13,7 @@ import {
   type WayfinderReconciliationLifecycleEvent,
 } from "@t3tools/client-runtime/state/wayfinder-reconciliation";
 import type {
+  ThreadId,
   WayfinderMapProjection,
   WayfinderMutation,
   WayfinderMutationAction,
@@ -324,6 +326,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     action: WayfinderMutationAction,
     options?: { readonly actionId?: string; readonly confirmed?: boolean },
   ) => void;
+  readonly ticketThreads?: ReadonlyArray<{
+    readonly ticketNumber: number;
+    readonly threadId: ThreadId;
+  }>;
+  readonly onReturnToThread?: (threadId: ThreadId) => void;
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly connected: boolean;
   readonly onReconcile: (reason: WayfinderReconcileReason) => void;
@@ -382,6 +389,10 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   const synchronizationMessage =
     props.synchronization?.message ??
     (synchronizationStatus === "synchronizing" ? "Refreshing canonical GitHub state…" : null);
+  const mutationsEnabled =
+    props.connected &&
+    props.synchronization?.canMutate !== false &&
+    !isWayfinderMutationInFlight(props.mutation ?? null);
 
   return (
     <section
@@ -526,24 +537,93 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
             <p className="text-xs text-muted-foreground">No decision tickets.</p>
           ) : (
             <ol className="space-y-2">
-              {model.tickets.map((ticket) => (
-                <li key={ticket.number} className="rounded-md border border-border/70 p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <ReferenceLink href={ticket.url}>{ticket.title}</ReferenceLink>
-                    <span className="text-[10px] capitalize text-muted-foreground">
-                      {ticket.state}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {ticket.classification}
-                    {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
-                    {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
-                    {ticket.blockedBy.length > 0
-                      ? ` · Blocked by ${ticket.blockedBy.map((number) => `#${number}`).join(", ")}`
-                      : ""}
-                  </p>
-                </li>
-              ))}
+              {model.tickets.map((ticket) => {
+                const linkedThreadId =
+                  props.ticketThreads?.find((link) => link.ticketNumber === ticket.number)
+                    ?.threadId ?? null;
+                const claimActions = deriveWayfinderTicketClaimActions({
+                  ticket,
+                  frontier: map.frontier,
+                  linkedThreadId,
+                  mutation: props.mutation ?? null,
+                });
+                return (
+                  <li key={ticket.number} className="rounded-md border border-border/70 p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <ReferenceLink href={ticket.url}>{ticket.title}</ReferenceLink>
+                      <span className="text-[10px] capitalize text-muted-foreground">
+                        {ticket.state}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {ticket.classification}
+                      {ticket.claimedBy ? ` · Claimed by ${ticket.claimedBy}` : " · Unclaimed"}
+                      {ticket.commentCount ? ` · ${ticket.commentCount} comments` : ""}
+                      {ticket.blockedBy.length > 0
+                        ? ` · Blocked by ${ticket.blockedBy.map((number) => `#${number}`).join(", ")}`
+                        : ""}
+                    </p>
+                    {props.onMutate || (linkedThreadId && props.onReturnToThread) ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {claimActions.canClaim && props.onMutate ? (
+                          <button
+                            type="button"
+                            disabled={!mutationsEnabled}
+                            className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                            onClick={() =>
+                              props.onMutate?.({
+                                kind: "claim-ticket",
+                                ticketNumber: ticket.number,
+                              })
+                            }
+                          >
+                            {claimActions.claimLabel}
+                          </button>
+                        ) : null}
+                        {claimActions.canRetry && props.onMutate ? (
+                          <button
+                            type="button"
+                            disabled={!mutationsEnabled}
+                            className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                            onClick={() =>
+                              props.onMutate?.({
+                                kind: "claim-ticket",
+                                ticketNumber: ticket.number,
+                              })
+                            }
+                          >
+                            Retry thread linkage
+                          </button>
+                        ) : null}
+                        {linkedThreadId && props.onReturnToThread ? (
+                          <button
+                            type="button"
+                            className="rounded-md border px-2 py-1 text-xs font-medium"
+                            onClick={() => props.onReturnToThread?.(linkedThreadId)}
+                          >
+                            Return to thread
+                          </button>
+                        ) : null}
+                        {claimActions.canRelease && props.onMutate ? (
+                          <button
+                            type="button"
+                            disabled={!mutationsEnabled}
+                            className="rounded-md border px-2 py-1 text-xs font-medium disabled:opacity-50"
+                            onClick={() =>
+                              props.onMutate?.({
+                                kind: "release-ticket",
+                                ticketNumber: ticket.number,
+                              })
+                            }
+                          >
+                            Release
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ol>
           )}
         </section>

@@ -34,6 +34,8 @@ import {
 
 const unusedMutationTrackerMethods = {
   reconcileWayfinderMap: () => Effect.die("unexpected tracker read"),
+  claimIssue: () => Effect.die("unexpected tracker write"),
+  releaseIssue: () => Effect.die("unexpected tracker write"),
   updateWayfinderMapField: () => Effect.die("unexpected tracker write"),
   updateWayfinderDecisions: () => Effect.die("unexpected tracker write"),
   updateIssueTitle: () => Effect.die("unexpected tracker write"),

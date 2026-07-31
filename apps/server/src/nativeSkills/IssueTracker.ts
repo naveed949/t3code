@@ -34,6 +34,11 @@ export interface IssueTrackerIssue {
   readonly url: string;
 }
 
+export interface IssueTrackerClaim {
+  readonly viewerLogin: string;
+  readonly alreadyOwned: boolean;
+}
+
 export type WayfinderMapLoadResult =
   | { readonly kind: "loaded"; readonly map: WayfinderMapProjection }
   | { readonly kind: "not-wayfinder-map" }
@@ -71,6 +76,16 @@ export class IssueTracker extends Context.Service<
       readonly synchronizedAt: string;
       readonly currentRevision?: string;
     }) => Effect.Effect<WayfinderMapReconciliationResult, GitHubCli.GitHubCliError>;
+    readonly claimIssue: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+    }) => Effect.Effect<IssueTrackerClaim, GitHubCli.GitHubCliError>;
+    readonly releaseIssue: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
     readonly ensureLabel: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
@@ -157,6 +172,11 @@ const RepositoryProbe = Schema.Struct({
 const LabelsProbe = Schema.Array(Schema.Struct({ name: Schema.String }));
 const IssueProbe = Schema.Struct({ number: Schema.Number, url: Schema.String });
 const IssueBodyProbe = Schema.Struct({ body: Schema.String });
+const ViewerProbe = Schema.Struct({ login: Schema.String });
+const IssueClaimProbe = Schema.Struct({
+  state: Schema.Literals(["OPEN", "CLOSED"]),
+  assignees: Schema.Array(Schema.Struct({ login: Schema.String })),
+});
 const IssueTypeFieldsProbe = Schema.Struct({
   data: Schema.Struct({
     __type: Schema.Struct({ fields: Schema.Array(Schema.Struct({ name: Schema.String })) }),
@@ -232,6 +252,8 @@ const decodeRepositoryProbe = Schema.decodeUnknownOption(Schema.fromJsonString(R
 const decodeLabelsProbe = Schema.decodeUnknownOption(Schema.fromJsonString(LabelsProbe));
 const decodeIssueProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueProbe));
 const decodeIssueBodyProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueBodyProbe));
+const decodeViewerProbe = Schema.decodeUnknownOption(Schema.fromJsonString(ViewerProbe));
+const decodeIssueClaimProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueClaimProbe));
 const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(IssueTypeFieldsProbe),
 );
@@ -653,6 +675,62 @@ export const GitHubIssueTrackerLive = Layer.effect(
           : { kind: "not-wayfinder-map" as const };
       },
     );
+    const loadViewerLogin = Effect.fn("IssueTracker.loadViewerLogin")(function* (cwd: string) {
+      const output = yield* github.execute({ cwd, args: ["api", "user"] });
+      const viewer = decodeViewerProbe(output.stdout);
+      if (Option.isSome(viewer) && viewer.value.login.trim() !== "") {
+        return viewer.value.login;
+      }
+      return yield* new GitHubCli.GitHubCliCommandError({
+        command: "gh",
+        cwd,
+        cause: new Error("GitHub returned no authenticated viewer login."),
+      });
+    });
+    const loadIssueClaim = Effect.fn("IssueTracker.loadIssueClaim")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+    }) {
+      const output = yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "view",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--json",
+          "state,assignees",
+        ],
+      });
+      const claim = decodeIssueClaimProbe(output.stdout);
+      if (Option.isSome(claim)) return claim.value;
+      return yield* new GitHubCli.GitHubCliCommandError({
+        command: "gh",
+        cwd: input.cwd,
+        cause: new Error(`GitHub returned no claim state for issue #${input.issueNumber}.`),
+      });
+    });
+    const editViewerAssignment = Effect.fn("IssueTracker.editViewerAssignment")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly operation: "add" | "remove";
+    }) {
+      yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "edit",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          input.operation === "add" ? "--add-assignee" : "--remove-assignee",
+          "@me",
+        ],
+      });
+    });
 
     return IssueTracker.of({
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
@@ -798,6 +876,54 @@ export const GitHubIssueTrackerLive = Layer.effect(
           }
         }
         return yield* loadWayfinderMapEffect(input);
+      }),
+      claimIssue: Effect.fn("IssueTracker.claimIssue")(function* (input) {
+        const viewerLogin = yield* loadViewerLogin(input.cwd);
+        const before = yield* loadIssueClaim(input);
+        if (before.state !== "OPEN") {
+          return yield* new GitHubCli.GitHubCliCommandError({
+            command: "gh",
+            cwd: input.cwd,
+            cause: new Error(`Issue #${input.issueNumber} is closed and cannot be claimed.`),
+          });
+        }
+        const currentOwner = before.assignees[0]?.login;
+        if (currentOwner === viewerLogin) {
+          return { viewerLogin, alreadyOwned: true };
+        }
+        if (currentOwner !== undefined) {
+          return yield* new GitHubCli.GitHubCliCommandError({
+            command: "gh",
+            cwd: input.cwd,
+            cause: new Error(`Issue #${input.issueNumber} is already claimed by ${currentOwner}.`),
+          });
+        }
+
+        yield* editViewerAssignment({ ...input, operation: "add" });
+        const after = yield* loadIssueClaim(input);
+        if (after.state === "OPEN" && after.assignees[0]?.login === viewerLogin) {
+          return { viewerLogin, alreadyOwned: false };
+        }
+        if (after.assignees.some((assignee) => assignee.login === viewerLogin)) {
+          yield* editViewerAssignment({ ...input, operation: "remove" });
+        }
+        return yield* new GitHubCli.GitHubCliCommandError({
+          command: "gh",
+          cwd: input.cwd,
+          cause: new Error(`Issue #${input.issueNumber} was claimed concurrently.`),
+        });
+      }),
+      releaseIssue: Effect.fn("IssueTracker.releaseIssue")(function* (input) {
+        const viewerLogin = yield* loadViewerLogin(input.cwd);
+        const claim = yield* loadIssueClaim(input);
+        if (!claim.assignees.some((assignee) => assignee.login === viewerLogin)) {
+          return yield* new GitHubCli.GitHubCliCommandError({
+            command: "gh",
+            cwd: input.cwd,
+            cause: new Error(`Issue #${input.issueNumber} is not claimed by ${viewerLogin}.`),
+          });
+        }
+        yield* editViewerAssignment({ ...input, operation: "remove" });
       }),
       ensureLabel: Effect.fn("IssueTracker.ensureLabel")(function* (input) {
         const existingOutput = yield* github.execute({

@@ -189,7 +189,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -1735,6 +1735,16 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, activeWayfinderInvocation, reconcileWayfinderMapCommand],
+  );
+  const returnToWayfinderTicketThread = useCallback(
+    (linkedThreadId: ThreadId) => {
+      if (!activeThread) return;
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, linkedThreadId)),
+      });
+    },
+    [activeThread, navigate],
   );
   const handleReconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
@@ -5789,6 +5799,8 @@ function ChatViewContent(props: ChatViewProps) {
         map={activeWayfinderMap}
         mutation={activeWayfinderMutation}
         onMutate={onMutateWayfinder}
+        ticketThreads={activeWayfinderWorkstream?.ticketThreads ?? []}
+        onReturnToThread={returnToWayfinderTicketThread}
         synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}

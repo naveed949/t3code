@@ -15,6 +15,7 @@ it("lists active and completed Workstreams with their project context", () => {
           status: "completed",
           linkedThreadIds: [ThreadId.make("thread:1")],
           skillRuns: [],
+          ticketThreads: [],
           wayfinderMap: {
             canonicalReference: {
               number: 42,

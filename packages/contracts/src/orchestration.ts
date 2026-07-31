@@ -191,6 +191,11 @@ export type UploadChatAttachment = typeof UploadChatAttachment.Type;
 export const SkillInvocationAction = Schema.Union([
   Schema.Struct({ id: Schema.Literal("new-map") }),
   Schema.Struct({ id: Schema.Literal("continue-map"), reference: TrimmedNonEmptyString }),
+  Schema.Struct({
+    id: Schema.Literal("work-ticket"),
+    ticketNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+    sourceSkillRunId: SkillRunId,
+  }),
 ]);
 export type SkillInvocationAction = typeof SkillInvocationAction.Type;
 

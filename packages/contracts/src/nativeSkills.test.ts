@@ -96,4 +96,26 @@ describe("WayfinderMutation", () => {
       }),
     ).toThrow();
   });
+
+  it("decodes claim and release actions for a canonical ticket", () => {
+    expect(
+      decodeWayfinderMutation({
+        actionId: "claim:43",
+        action: { kind: "claim-ticket", ticketNumber: 43 },
+        status: "mutating",
+        error: null,
+        updatedAt: "2026-01-02T00:00:00.000Z",
+      }).action,
+    ).toEqual({ kind: "claim-ticket", ticketNumber: 43 });
+
+    expect(
+      decodeWayfinderMutation({
+        actionId: "release:43",
+        action: { kind: "release-ticket", ticketNumber: 43 },
+        status: "synchronized",
+        error: null,
+        updatedAt: "2026-01-02T00:01:00.000Z",
+      }).action,
+    ).toEqual({ kind: "release-ticket", ticketNumber: 43 });
+  });
 });

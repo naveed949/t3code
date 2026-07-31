@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
+import { ThreadId } from "@t3tools/contracts";
 
 import {
   buildMobileDependencyAction,
+  buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
 } from "./WayfinderWorkbench.logic";
@@ -99,5 +101,21 @@ describe("buildMobileWayfinderPresentation", () => {
       blockedNumber: 44,
     });
     expect(buildMobileDependencyAction("remove-dependency", "", "44")).toBeNull();
+  });
+
+  it("derives mobile claim and linked-thread actions from shared Workstream state", () => {
+    const linkedThreadId = ThreadId.make("wayfinder-ticket:workstream:release:43");
+    expect(
+      buildMobileTicketClaimActions(
+        { ...map.tickets[1]!, claimedBy: "alice" },
+        [],
+        linkedThreadId,
+        null,
+      ),
+    ).toMatchObject({
+      canClaim: false,
+      canRelease: true,
+      linkedThreadId,
+    });
   });
 });

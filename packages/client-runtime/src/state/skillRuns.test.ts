@@ -42,9 +42,35 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
       projectId: ProjectId.make("project-1"),
       status: "active",
       linkedThreadIds: [ThreadId.make("thread-1")],
+      ticketThreads: [],
       skillRuns: [invocation],
       wayfinderMap: null,
       wayfinderSynchronization: null,
+    },
+  ]);
+});
+
+it("derives durable ticket-to-thread links from pinned linked-ticket runs", () => {
+  const linkedInvocation = {
+    ...invocation,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("wayfinder-ticket:workstream:1:43"),
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: invocation.skillRunId,
+    },
+  };
+
+  expect(
+    deriveProjectWorkstreams(invocation.projectId, [invocation, linkedInvocation])[0]
+      ?.ticketThreads,
+  ).toEqual([
+    {
+      ticketNumber: 43,
+      threadId: linkedInvocation.threadId,
+      skillRunId: linkedInvocation.skillRunId,
+      sourceSkillRunId: invocation.skillRunId,
     },
   ]);
 });

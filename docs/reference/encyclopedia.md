@@ -104,15 +104,18 @@ time. Reconnecting to the same canonical map creates a new Skill Run in the exis
 
 The client view of a synchronized Wayfinder map. Web and desktop expose it as a right-panel surface;
 mobile exposes a full-screen route. Both prioritize the **frontier**: open, unblocked, unclaimed
-child tickets that are ready to advance.
+child tickets that are ready to advance. Starting work claims a frontier ticket and opens its
+deterministic linked ticket thread; retry, return, release, and reclaim expose the reverse and
+recovery states on every client.
 
 #### Wayfinder mutation
 
 One closed, structured action against a published Wayfinder map: edit a map field; create, rename,
-classify, resolve, close, or reopen a decision ticket; or add or remove a blocking relationship. Its
+classify, resolve, close, reopen, claim, or release a decision ticket; or add or remove a blocking relationship. Its
 persisted state identifies the active action and whether it is awaiting approval, mutating, failed,
 or synchronized. GitHub receipts and reconciliation, rather than client optimism or assistant
 prose, confirm the canonical result.
+
 #### Wayfinder reconciliation
 
 The server-owned refresh flow that keeps a published Wayfinder projection aligned with GitHub. It
