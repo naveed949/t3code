@@ -2,6 +2,7 @@ import {
   createWayfinderGraduatedFogTicket,
   createWayfinderHitlResolutionAction,
   deriveWayfinderTicketClaimActions,
+  deriveWayfinderResearchModel,
   deriveWayfinderWorkbenchModel,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
 import type {
@@ -9,6 +10,7 @@ import type {
   WayfinderMapProjection,
   WayfinderMutation,
   WayfinderMutationAction,
+  WayfinderResearchState,
   WayfinderDraftTicketClassification,
 } from "@t3tools/contracts";
 
@@ -111,4 +113,15 @@ export function buildMobileWayfinderPresentation(map: WayfinderMapProjection) {
         : "Dependency graph. No dependencies.",
     accessibilitySummary: model.accessibilitySummary,
   };
+}
+
+export function buildMobileResearchPresentation(input: {
+  readonly map: WayfinderMapProjection;
+  readonly research: WayfinderResearchState | null;
+  readonly ticketThreads: ReadonlyArray<{
+    readonly ticketNumber: number;
+    readonly threadId: ThreadId;
+  }>;
+}) {
+  return deriveWayfinderResearchModel(input);
 }

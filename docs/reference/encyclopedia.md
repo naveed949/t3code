@@ -116,6 +116,15 @@ Newly specifiable fog may graduate into child tickets and native blocking relati
 the destination is classified and represented as out of scope instead of becoming a route decision.
 Verified artifacts and the claim survive interruption for explicit resume or release.
 
+#### Wayfinder research run
+
+The visible background lifecycle for one agent-only `research` ticket. Only an open, unblocked,
+unclaimed research ticket may launch automatically; grilling, prototypes, and manual tasks always
+require the user. The Workstream projection retains its automatic/manual launch mode, queue,
+activity, output, cancellation, failure, retry, and resolution state. A checkpoint-backed structured
+result starts canonical resolution, while GitHub receipts and reconciliation confirm completion and
+frontier changes. See [WayfinderResearchReactor.ts][29].
+
 #### Wayfinder mutation
 
 One closed, structured action against a published Wayfinder map: edit a map field; create, rename,
@@ -267,3 +276,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [26]: ../../packages/contracts/src/nativeSkills.ts
 [27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts
 [28]: ../../apps/server/src/orchestration/Layers/WayfinderReconciliationReactor.ts
+[29]: ../../apps/server/src/orchestration/Layers/WayfinderResearchReactor.ts

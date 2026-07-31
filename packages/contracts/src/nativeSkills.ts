@@ -262,3 +262,49 @@ export const WayfinderMutation = Schema.Struct({
 export type WayfinderMutation = typeof WayfinderMutation.Type;
 
 export const OptionalWayfinderMutation = Schema.optional(WayfinderMutation);
+
+export const WayfinderResearchLaunchMode = Schema.Literals(["automatic", "manual"]);
+export type WayfinderResearchLaunchMode = typeof WayfinderResearchLaunchMode.Type;
+
+export const WayfinderResearchTicketStatus = Schema.Literals([
+  "queued",
+  "claiming",
+  "active",
+  "cancelling",
+  "cancelled",
+  "failed",
+  "resolving",
+  "resolved",
+]);
+export type WayfinderResearchTicketStatus = typeof WayfinderResearchTicketStatus.Type;
+
+export const WayfinderResearchTicketRun = Schema.Struct({
+  ticketNumber: WayfinderTicketNumber,
+  launchMode: WayfinderResearchLaunchMode,
+  retrying: Schema.optional(Schema.Boolean),
+  status: WayfinderResearchTicketStatus,
+  threadId: Schema.optional(TrimmedNonEmptyString),
+  output: Schema.optional(TrimmedNonEmptyString),
+  error: Schema.optional(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type WayfinderResearchTicketRun = typeof WayfinderResearchTicketRun.Type;
+
+export const WayfinderResearchState = Schema.Struct({
+  automaticLaunchesPaused: Schema.Boolean,
+  concurrencyLimit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(8)),
+  tickets: Schema.Array(WayfinderResearchTicketRun),
+  updatedAt: IsoDateTime,
+});
+export type WayfinderResearchState = typeof WayfinderResearchState.Type;
+
+export const OptionalWayfinderResearchState = Schema.optional(WayfinderResearchState);
+
+export const WayfinderResearchAction = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("pause-automatic-launches") }),
+  Schema.Struct({ kind: Schema.Literal("resume-automatic-launches") }),
+  Schema.Struct({ kind: Schema.Literal("start-ticket"), ticketNumber: WayfinderTicketNumber }),
+  Schema.Struct({ kind: Schema.Literal("cancel-ticket"), ticketNumber: WayfinderTicketNumber }),
+  Schema.Struct({ kind: Schema.Literal("retry-ticket"), ticketNumber: WayfinderTicketNumber }),
+]);
+export type WayfinderResearchAction = typeof WayfinderResearchAction.Type;

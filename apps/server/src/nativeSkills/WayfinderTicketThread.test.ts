@@ -70,8 +70,9 @@ describe("Wayfinder ticket thread bootstrap", () => {
     expect(seed.message).toContain("workstream:release");
     expect(seed.message).toContain("skill-run:map");
     expect(seed.message).toContain("sha256:257e4066");
-    expect(seed.message).toContain("Work only this assigned ticket");
-    expect(seed.message).toContain("Present one user decision at a time");
-    expect(seed.message).toContain("complete-hitl-ticket");
+    expect(seed.message).toContain("Research only this assigned factual ticket");
+    expect(seed.message).toContain("<wayfinder-research-result>");
+    expect(seed.message).toContain('"status":"resolved"');
+    expect(seed.message).not.toContain("Present one user decision at a time");
   });
 });

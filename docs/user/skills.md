@@ -90,6 +90,29 @@ that partial state visible and offers **Retry thread linkage**. Retrying reuses 
 assignment, and **Reclaim** reconnects a released ticket without creating a duplicate. These
 controls and their persisted links survive reconnect on web, desktop, and mobile.
 
+Agent-only `research` frontier tickets use the same canonical claim and dedicated-thread path, with
+an additional visible background lifecycle. Automatic launches are enabled by default with a
+Workbench limit of two concurrent research tickets. They run only while T3's background-activity
+policy permits scoped work and never launch `grilling`, `prototype`, or `task` tickets. An
+approval-required source thread keeps both automatic and manual requests queued instead of
+manufacturing a user approval in the background.
+
+The Workbench shows whether each research ticket is eligible, queued, claiming, active, cancelling,
+cancelled, failed, resolving, or resolved, along with its latest structured output or error.
+**Pause automatic launches** stops new automatic work without interrupting active threads.
+**Start research** remains available for an eligible ticket while paused; before canonical
+resolution begins, **Cancel research** interrupts its provider turn and releases the canonical
+claim; **Retry research** reuses the linked thread after a failed or cancelled attempt. Manual
+starts and retries still respect T3's scoped background policy and visible provider limit, remaining
+queued until a slot is available. These controls and states are shared by web, desktop, mobile, and
+remote clients.
+
+Research completion requires more than assistant narration. The linked provider turn must finish
+with a checkpoint and a structured resolved result. T3 then records that conclusion through the
+same canonical comment, context-pointer, issue-close, reconciliation, and frontier-recomputation
+flow as other Wayfinder decisions. Missing, failed, interrupted, or cancelled result receipts stay
+visible but leave the issue open and its dependents blocked.
+
 Inside a linked human-in-the-loop ticket thread, Wayfinder works only that assigned ticket and asks
 for one structured user decision at a time. **Resolve assigned decision** records a verified
 resolution and context pointer. A resolved route decision may graduate newly understood fog into

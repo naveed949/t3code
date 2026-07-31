@@ -80,6 +80,31 @@ it.effect("decodes a revision-scoped Wayfinder reconciliation request", () =>
   }),
 );
 
+it.effect("decodes user-controlled Wayfinder research actions", () =>
+  Effect.gen(function* () {
+    for (const action of [
+      { kind: "pause-automatic-launches" },
+      { kind: "resume-automatic-launches" },
+      { kind: "start-ticket", ticketNumber: 43 },
+      { kind: "cancel-ticket", ticketNumber: 43 },
+      { kind: "retry-ticket", ticketNumber: 43 },
+    ] as const) {
+      const parsed = yield* decodeClientOrchestrationCommand({
+        type: "thread.wayfinder.research",
+        commandId: `research:${action.kind}`,
+        threadId: "thread-1",
+        skillRunId: "skill-run-1",
+        action,
+        createdAt: "2026-07-31T10:00:00.000Z",
+      });
+      assert.strictEqual(parsed.type, "thread.wayfinder.research");
+      if (parsed.type === "thread.wayfinder.research") {
+        assert.strictEqual(parsed.action.kind, action.kind);
+      }
+    }
+  }),
+);
+
 it.effect("decodes structured Wayfinder conflict and outage states", () =>
   Effect.gen(function* () {
     const conflict = yield* decodeWayfinderSynchronizationState({

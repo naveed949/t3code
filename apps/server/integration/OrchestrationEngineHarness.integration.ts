@@ -62,6 +62,7 @@ import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDelet
 import { WayfinderPublicationReactor } from "../src/orchestration/Services/WayfinderPublicationReactor.ts";
 import { WayfinderMutationReactor } from "../src/orchestration/Services/WayfinderMutationReactor.ts";
 import { WayfinderReconciliationReactor } from "../src/orchestration/Services/WayfinderReconciliationReactor.ts";
+import { WayfinderResearchReactor } from "../src/orchestration/Services/WayfinderResearchReactor.ts";
 import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
 import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
@@ -383,6 +384,12 @@ export const makeOrchestrationIntegrationHarness = (
       ),
       Layer.provideMerge(
         Layer.succeed(WayfinderReconciliationReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(WayfinderResearchReactor, {
           start: () => Effect.void,
           drain: Effect.void,
         }),

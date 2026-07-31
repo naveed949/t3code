@@ -5,6 +5,7 @@ import {
   buildMobileGraduatedFogTicket,
   buildMobileDependencyAction,
   buildMobileHitlResolutionAction,
+  buildMobileResearchPresentation,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
@@ -132,6 +133,36 @@ describe("buildMobileWayfinderPresentation", () => {
       canRetry: false,
       canRelease: false,
       linkedThreadId: null,
+    });
+  });
+
+  it("presents paused and recoverable background research on mobile", () => {
+    const presentation = buildMobileResearchPresentation({
+      map,
+      research: {
+        automaticLaunchesPaused: true,
+        concurrencyLimit: 2,
+        tickets: [
+          {
+            ticketNumber: 43,
+            launchMode: "automatic",
+            status: "failed",
+            output: "The API supports conditional requests.",
+            error: "Canonical resolution failed.",
+            updatedAt: "2026-07-31T10:00:00.000Z",
+          },
+        ],
+        updatedAt: "2026-07-31T10:00:00.000Z",
+      },
+      ticketThreads: [],
+    });
+
+    expect(presentation.automaticLaunchesPaused).toBe(true);
+    expect(presentation.concurrencyLimit).toBe(2);
+    expect(presentation.tickets.find((ticket) => ticket.ticketNumber === 43)).toMatchObject({
+      status: "failed",
+      output: "The API supports conditional requests.",
+      canRetry: true,
     });
   });
 
