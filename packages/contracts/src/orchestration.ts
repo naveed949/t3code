@@ -195,6 +195,7 @@ export const SkillInvocationAction = Schema.Union([
     id: Schema.Literal("work-ticket"),
     ticketNumber: Schema.Int.check(Schema.isGreaterThan(0)),
     sourceSkillRunId: SkillRunId,
+    sourceThreadId: Schema.optional(ThreadId),
   }),
 ]);
 export type SkillInvocationAction = typeof SkillInvocationAction.Type;
@@ -244,6 +245,7 @@ export const WayfinderTicketClassification = Schema.Literals([
   "prototype",
   "grilling",
   "task",
+  "out-of-scope",
   "unknown",
 ]);
 export type WayfinderTicketClassification = typeof WayfinderTicketClassification.Type;

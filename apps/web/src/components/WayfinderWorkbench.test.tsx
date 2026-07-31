@@ -148,4 +148,57 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain("Release");
     expect(markup).toContain("Retry thread linkage");
   });
+
+  it("renders focused completion and resumable artifact state only for the assigned HITL ticket", () => {
+    const action = {
+      kind: "complete-hitl-ticket" as const,
+      ticketNumber: 43,
+      outcome: "resolved" as const,
+      resolution: "Use the environment-owned path.",
+      contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+      graduatedFog: [],
+    };
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={{
+          ...map,
+          tickets: map.tickets.map((ticket) =>
+            ticket.number === 43 ? { ...ticket, claimedBy: "alice" } : ticket,
+          ),
+          frontier: [44],
+        }}
+        mutation={{
+          actionId: "resolve:43",
+          action,
+          status: "failed",
+          artifacts: [
+            {
+              kind: "resolution-comment",
+              ticketNumber: 43,
+              contextPointer: action.contextPointer,
+            },
+          ],
+          nextStep: "record decision context pointer",
+          error: "The HITL resolution is partially applied.",
+          updatedAt: "2026-01-02T00:01:00.000Z",
+        }}
+        assignedTicketNumber={43}
+        onMutate={() => undefined}
+        onCompleteHitl={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Resolve assigned decision");
+    expect(markup).toContain("Complete only #43 Research hosting");
+    expect(markup).toContain('aria-label="Verified resolution"');
+    expect(markup).toContain('aria-label="Resolution context pointer"');
+    expect(markup).toContain("Graduate fog into a ticket");
+    expect(markup).toContain("Resume resolution");
+    expect(markup).toContain("Next: record decision context pointer");
+    expect(markup).not.toContain("Structured actions");
+    expect(markup).not.toContain("Start work");
+  });
 });

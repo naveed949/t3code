@@ -11,6 +11,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
+  SkillRunId,
   SkillInvocation,
   TurnId,
   type OrchestrationCheckpointSummary,
@@ -122,6 +123,9 @@ const ProjectIdLookupInput = Schema.Struct({
 });
 const ThreadIdLookupInput = Schema.Struct({
   threadId: ThreadId,
+});
+const SkillRunIdLookupInput = Schema.Struct({
+  skillRunId: SkillRunId,
 });
 const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema;
 const ProjectionThreadIdLookupRowSchema = Schema.Struct({
@@ -762,6 +766,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ) != 'synchronized'
           )
         ORDER BY ranked."threadId" ASC
+      `,
+  });
+
+  const getSkillRunRowById = SqlSchema.findOneOption({
+    Request: SkillRunIdLookupInput,
+    Result: ProjectionSkillRunDbRowSchema,
+    execute: ({ skillRunId }) =>
+      sql`
+        SELECT
+          turns.thread_id AS "threadId",
+          turns.skill_invocation_json AS "skillInvocation"
+        FROM projection_turns turns
+        INNER JOIN projection_threads threads
+          ON threads.thread_id = turns.thread_id
+        WHERE json_extract(turns.skill_invocation_json, '$.skillRunId') = ${skillRunId}
+          AND threads.deleted_at IS NULL
+        ORDER BY turns.requested_at DESC, turns.turn_id DESC
+        LIMIT 1
       `,
   });
 
@@ -2305,6 +2327,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ),
   );
 
+  const getSkillRunById: NonNullable<ProjectionSnapshotQueryShape["getSkillRunById"]> = Effect.fn(
+    "ProjectionSnapshotQuery.getSkillRunById",
+  )(
+    function* (skillRunId) {
+      const row = yield* getSkillRunRowById({ skillRunId });
+      return Option.map(row, ({ threadId, skillInvocation }) => ({ threadId, skillInvocation }));
+    },
+    (effect) =>
+      effect.pipe(
+        Effect.mapError(
+          toPersistenceSqlOrDecodeError(
+            "ProjectionSnapshotQuery.getSkillRunById:query",
+            "ProjectionSnapshotQuery.getSkillRunById:decodeRow",
+          ),
+        ),
+      ),
+  );
+
   return {
     getCommandReadModel,
     getSnapshot,
@@ -2319,6 +2359,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getFullThreadDiffContext,
     getThreadShellById,
     getSkillRunsByThreadId,
+    getSkillRunById,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

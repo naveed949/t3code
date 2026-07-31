@@ -47,6 +47,8 @@ import {
 import { useAtomCommand } from "../../state/use-atom-command";
 import {
   buildMobileDependencyAction,
+  buildMobileGraduatedFogTicket,
+  buildMobileHitlResolutionAction,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
@@ -150,6 +152,7 @@ function TicketList(props: {
   readonly map: WayfinderMapProjection;
   readonly mutation: WayfinderMutation | null;
   readonly ticketThreads: ProjectSkillWorkstream["ticketThreads"];
+  readonly assignedTicketNumber: number | null;
   readonly disabled: boolean;
   readonly onMutate: (action: WayfinderMutationAction) => void;
   readonly onReturnToThread: (threadId: ThreadId) => void;
@@ -167,7 +170,10 @@ function TicketList(props: {
           props.map.frontier,
           linkedThreadId,
           props.mutation,
+          props.assignedTicketNumber,
         );
+        const ticketIsAssigned =
+          props.assignedTicketNumber === null || ticket.number === props.assignedTicketNumber;
         return (
           <View key={ticket.number} className="rounded-xl border border-border bg-card p-4">
             <View className="flex-row items-start justify-between gap-3">
@@ -241,7 +247,9 @@ function TicketList(props: {
                 </Pressable>
               ) : null}
             </View>
-            <TicketActions ticket={ticket} disabled={props.disabled} onMutate={props.onMutate} />
+            {props.assignedTicketNumber === null && ticketIsAssigned ? (
+              <TicketActions ticket={ticket} disabled={props.disabled} onMutate={props.onMutate} />
+            ) : null}
           </View>
         );
       })}
@@ -281,6 +289,181 @@ function CompactGraph(props: { readonly map: WayfinderMapProjection }) {
   );
 }
 
+function HitlResolutionCard(props: {
+  readonly map: WayfinderMapProjection;
+  readonly ticketNumber: number;
+  readonly mutation: WayfinderMutation | null;
+  readonly disabled: boolean;
+  readonly onComplete: (
+    action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+    resumeActionId?: string,
+  ) => void;
+}) {
+  const ticket = props.map.tickets.find((candidate) => candidate.number === props.ticketNumber);
+  const [outcome, setOutcome] = useState<"resolved" | "out-of-scope">("resolved");
+  const [resolution, setResolution] = useState("");
+  const [contextPointer, setContextPointer] = useState(ticket?.url ?? "");
+  const [selectedFog, setSelectedFog] = useState(props.map.fogOfWar[0] ?? "");
+  const [graduatedTitle, setGraduatedTitle] = useState("");
+  const [classification, setClassification] = useState<WayfinderTicketClassification>("grilling");
+  const [blockerNumbers, setBlockerNumbers] = useState("");
+  const [graduatedFog, setGraduatedFog] = useState<
+    Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>["graduatedFog"]
+  >([]);
+  if (!ticket) return null;
+  const activeResolution =
+    props.mutation?.action.kind === "complete-hitl-ticket" &&
+    props.mutation.action.ticketNumber === props.ticketNumber
+      ? props.mutation
+      : null;
+  const submit = () => {
+    const action = buildMobileHitlResolutionAction({
+      ticketNumber: props.ticketNumber,
+      outcome,
+      resolution,
+      contextPointer,
+      graduatedFog,
+    });
+    if (action) props.onComplete(action);
+  };
+
+  return (
+    <View className="gap-3 rounded-xl border border-border bg-card p-4">
+      <Text className="text-sm font-semibold text-foreground">Resolve assigned decision</Text>
+      <Text className="text-xs text-foreground-muted">
+        Complete only #{props.ticketNumber} {ticket.title}. T3 records the canonical receipt before
+        advancing the shared map.
+      </Text>
+      {activeResolution ? (
+        <Text
+          accessibilityRole={activeResolution.status === "failed" ? "alert" : "summary"}
+          className="text-xs text-foreground-muted"
+        >
+          {activeResolution.status === "failed"
+            ? `${activeResolution.error} Next: ${activeResolution.nextStep ?? "resume resolution"}.`
+            : activeResolution.status}
+        </Text>
+      ) : null}
+      {activeResolution?.status === "failed" ? (
+        <Pressable
+          accessibilityRole="button"
+          disabled={props.disabled}
+          className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-50"
+          onPress={() => {
+            const action = activeResolution.action;
+            if (action.kind === "complete-hitl-ticket") {
+              props.onComplete(action, activeResolution.actionId);
+            }
+          }}
+        >
+          <Text className="text-xs font-semibold">Resume resolution</Text>
+        </Pressable>
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Assigned ticket outcome: ${outcome}`}
+        className="self-start rounded-lg border border-border px-3 py-2"
+        onPress={() =>
+          setOutcome((current) => (current === "resolved" ? "out-of-scope" : "resolved"))
+        }
+      >
+        <Text className="text-xs font-semibold">
+          {outcome === "resolved" ? "Resolved decision" : "Beyond destination"}
+        </Text>
+      </Pressable>
+      <TextInput
+        accessibilityLabel="Verified resolution"
+        multiline
+        className="rounded-lg border border-border px-3 py-2 text-foreground"
+        value={resolution}
+        onChangeText={setResolution}
+      />
+      <TextInput
+        accessibilityLabel="Resolution context pointer"
+        autoCapitalize="none"
+        className="rounded-lg border border-border px-3 py-2 text-foreground"
+        value={contextPointer}
+        onChangeText={setContextPointer}
+      />
+      {outcome === "resolved" && props.map.fogOfWar.length > 0 ? (
+        <View className="gap-2 border-t border-border pt-3">
+          <Text className="text-xs font-semibold">Optional fog graduation</Text>
+          <View className="flex-row flex-wrap gap-2">
+            {props.map.fogOfWar.map((fog) => (
+              <Pressable
+                key={fog}
+                accessibilityRole="button"
+                accessibilityState={{ selected: fog === selectedFog }}
+                className="rounded-lg border border-border px-3 py-2"
+                onPress={() => setSelectedFog(fog)}
+              >
+                <Text className="text-xs">{fog}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            accessibilityLabel="Graduated ticket title"
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={graduatedTitle}
+            onChangeText={setGraduatedTitle}
+          />
+          <View className="flex-row flex-wrap gap-2">
+            {WAYFINDER_TICKET_CLASSIFICATIONS.map((candidate) => (
+              <Pressable
+                key={candidate}
+                accessibilityRole="button"
+                accessibilityState={{ selected: candidate === classification }}
+                className="rounded-lg border border-border px-3 py-2"
+                onPress={() => setClassification(candidate)}
+              >
+                <Text className="text-xs">{candidate}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <TextInput
+            accessibilityLabel="Graduated ticket blockers"
+            placeholder="#42, key:transport-policy"
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={blockerNumbers}
+            onChangeText={setBlockerNumbers}
+          />
+          <Pressable
+            accessibilityRole="button"
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => {
+              const graduated = buildMobileGraduatedFogTicket({
+                fog: selectedFog,
+                title: graduatedTitle,
+                classification,
+                blockers: blockerNumbers,
+              });
+              if (!graduated) return;
+              setGraduatedFog((current) => [...current, graduated]);
+              setGraduatedTitle("");
+              setBlockerNumbers("");
+            }}
+          >
+            <Text className="text-xs font-semibold">Add graduated ticket</Text>
+          </Pressable>
+          {graduatedFog.map((graduated) => (
+            <Text key={graduated.key} className="text-xs text-foreground-muted">
+              {graduated.title} · {graduated.classification}
+            </Text>
+          ))}
+        </View>
+      ) : null}
+      <Pressable
+        accessibilityRole="button"
+        disabled={props.disabled || !resolution.trim() || !contextPointer.trim()}
+        className="self-start rounded-lg border border-border px-3 py-2 disabled:opacity-50"
+        onPress={submit}
+      >
+        <Text className="text-xs font-semibold">Record canonical resolution</Text>
+      </Pressable>
+    </View>
+  );
+}
+
 function WayfinderWorkbenchContent(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
@@ -309,6 +492,12 @@ function WayfinderWorkbenchContent(props: {
     workstream,
     thread?.latestTurn?.skillInvocation ?? null,
   );
+  const linkedTicketAction =
+    thread?.latestTurn?.skillInvocation?.action?.id === "work-ticket"
+      ? thread.latestTurn.skillInvocation.action
+      : null;
+  const linkedTicketInvocation =
+    linkedTicketAction === null ? null : (thread?.latestTurn?.skillInvocation ?? null);
   const canonicalMap = workstream?.wayfinderMap ?? invocation?.wayfinderMap ?? null;
   const mutation: WayfinderMutation | null = invocation?.wayfinderMutation ?? null;
   const map = canonicalMap ? applyOptimisticWayfinderMutation(canonicalMap, mutation) : null;
@@ -339,6 +528,22 @@ function WayfinderWorkbenchContent(props: {
         action,
         ...(confirmed && mutation ? { actionId: mutation.actionId } : {}),
         confirmed,
+      },
+    });
+  };
+  const onCompleteHitl = (
+    action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+    resumeActionId?: string,
+  ) => {
+    if (!linkedTicketInvocation) return;
+    void mutateWayfinder({
+      environmentId: props.environmentId,
+      input: {
+        threadId: linkedTicketInvocation.threadId,
+        skillRunId: linkedTicketInvocation.skillRunId,
+        action,
+        ...(resumeActionId ? { actionId: resumeActionId } : {}),
+        confirmed: resumeActionId !== undefined,
       },
     });
   };
@@ -465,161 +670,173 @@ function WayfinderWorkbenchContent(props: {
         </Pressable>
       </View>
 
-      <View className="gap-3 rounded-xl border border-border bg-card p-4">
-        <Text className="text-sm font-semibold">Structured actions</Text>
-        {mutation ? (
-          <Text accessibilityRole="summary" className="text-xs text-foreground-muted">
-            {mutation.status === "failed" ? mutation.error : mutation.status.replace("-", " ")}
-          </Text>
-        ) : null}
-        {mutation?.status === "awaiting-approval" ? (
-          <Pressable
-            accessibilityRole="button"
-            className="rounded-lg border border-border px-3 py-2"
-            onPress={() => onMutate(mutation.action, true)}
-          >
-            <Text className="text-xs font-semibold">Confirm GitHub change</Text>
-          </Pressable>
-        ) : null}
-        <TextInput
-          accessibilityLabel="Wayfinder destination"
-          multiline
-          className="rounded-lg border border-border px-3 py-2 text-foreground"
-          value={destination}
-          onChangeText={setDestination}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={working}
-          className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            onMutate({ kind: "update-map-field", field: "destination", value: destination })
-          }
-        >
-          <Text className="text-xs font-semibold">Save destination</Text>
-        </Pressable>
-        <TextInput
-          accessibilityLabel="Wayfinder notes"
-          multiline
-          className="rounded-lg border border-border px-3 py-2 text-foreground"
-          value={notes}
-          onChangeText={setNotes}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={working}
-          className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() => onMutate({ kind: "update-map-field", field: "notes", value: notes })}
-        >
-          <Text className="text-xs font-semibold">Save notes</Text>
-        </Pressable>
-        <TextInput
-          accessibilityLabel="Wayfinder fog of war"
-          multiline
-          className="rounded-lg border border-border px-3 py-2 text-foreground"
-          value={fog}
-          onChangeText={setFog}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={working}
-          className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() => onMutate({ kind: "update-map-field", field: "fog-of-war", value: fog })}
-        >
-          <Text className="text-xs font-semibold">Save fog of war</Text>
-        </Pressable>
-        <TextInput
-          accessibilityLabel="Wayfinder out of scope"
-          multiline
-          className="rounded-lg border border-border px-3 py-2 text-foreground"
-          value={outOfScope}
-          onChangeText={setOutOfScope}
-        />
-        <Pressable
-          accessibilityRole="button"
-          disabled={working}
-          className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() =>
-            onMutate({ kind: "update-map-field", field: "out-of-scope", value: outOfScope })
-          }
-        >
-          <Text className="text-xs font-semibold">Save out of scope</Text>
-        </Pressable>
-        <TextInput
-          accessibilityLabel="New decision ticket title"
-          className="rounded-lg border border-border px-3 py-2 text-foreground"
-          value={newTicketTitle}
-          onChangeText={setNewTicketTitle}
-        />
-        <View
-          accessibilityLabel={`New ticket classification: ${newTicketClassification}`}
-          className="flex-row flex-wrap gap-2"
-        >
-          {WAYFINDER_TICKET_CLASSIFICATIONS.map((classification) => (
+      {linkedTicketAction === null ? (
+        <View className="gap-3 rounded-xl border border-border bg-card p-4">
+          <Text className="text-sm font-semibold">Structured actions</Text>
+          {mutation ? (
+            <Text accessibilityRole="summary" className="text-xs text-foreground-muted">
+              {mutation.status === "failed" ? mutation.error : mutation.status.replace("-", " ")}
+            </Text>
+          ) : null}
+          {mutation?.status === "awaiting-approval" ? (
             <Pressable
-              key={classification}
               accessibilityRole="button"
-              accessibilityState={{ selected: classification === newTicketClassification }}
-              disabled={working}
               className="rounded-lg border border-border px-3 py-2"
-              onPress={() => setNewTicketClassification(classification)}
+              onPress={() => onMutate(mutation.action, true)}
             >
-              <Text className="text-xs font-semibold">{classification}</Text>
+              <Text className="text-xs font-semibold">Confirm GitHub change</Text>
             </Pressable>
-          ))}
-        </View>
-        <Pressable
-          accessibilityRole="button"
-          disabled={working || !newTicketTitle.trim()}
-          className="self-start rounded-lg border border-border px-3 py-2"
-          onPress={() => {
-            const action = createWayfinderTicketAction(newTicketTitle, newTicketClassification);
-            if (action) onMutate(action);
-          }}
-        >
-          <Text className="text-xs font-semibold">Create {newTicketClassification} ticket</Text>
-        </Pressable>
-        <View className="flex-row gap-2">
+          ) : null}
           <TextInput
-            accessibilityLabel="Blocker ticket number"
-            keyboardType="number-pad"
-            className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
-            value={blocker}
-            onChangeText={setBlocker}
+            accessibilityLabel="Wayfinder destination"
+            multiline
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={destination}
+            onChangeText={setDestination}
           />
-          <TextInput
-            accessibilityLabel="Blocked ticket number"
-            keyboardType="number-pad"
-            className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
-            value={blocked}
-            onChangeText={setBlocked}
-          />
-        </View>
-        <View className="flex-row gap-2">
           <Pressable
             accessibilityRole="button"
-            disabled={working || !Number(blocker) || !Number(blocked)}
-            className="rounded-lg border border-border px-3 py-2"
+            disabled={working}
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={() =>
+              onMutate({ kind: "update-map-field", field: "destination", value: destination })
+            }
+          >
+            <Text className="text-xs font-semibold">Save destination</Text>
+          </Pressable>
+          <TextInput
+            accessibilityLabel="Wayfinder notes"
+            multiline
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={notes}
+            onChangeText={setNotes}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={working}
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => onMutate({ kind: "update-map-field", field: "notes", value: notes })}
+          >
+            <Text className="text-xs font-semibold">Save notes</Text>
+          </Pressable>
+          <TextInput
+            accessibilityLabel="Wayfinder fog of war"
+            multiline
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={fog}
+            onChangeText={setFog}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={working}
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => onMutate({ kind: "update-map-field", field: "fog-of-war", value: fog })}
+          >
+            <Text className="text-xs font-semibold">Save fog of war</Text>
+          </Pressable>
+          <TextInput
+            accessibilityLabel="Wayfinder out of scope"
+            multiline
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={outOfScope}
+            onChangeText={setOutOfScope}
+          />
+          <Pressable
+            accessibilityRole="button"
+            disabled={working}
+            className="self-start rounded-lg border border-border px-3 py-2"
+            onPress={() =>
+              onMutate({ kind: "update-map-field", field: "out-of-scope", value: outOfScope })
+            }
+          >
+            <Text className="text-xs font-semibold">Save out of scope</Text>
+          </Pressable>
+          <TextInput
+            accessibilityLabel="New decision ticket title"
+            className="rounded-lg border border-border px-3 py-2 text-foreground"
+            value={newTicketTitle}
+            onChangeText={setNewTicketTitle}
+          />
+          <View
+            accessibilityLabel={`New ticket classification: ${newTicketClassification}`}
+            className="flex-row flex-wrap gap-2"
+          >
+            {WAYFINDER_TICKET_CLASSIFICATIONS.map((classification) => (
+              <Pressable
+                key={classification}
+                accessibilityRole="button"
+                accessibilityState={{ selected: classification === newTicketClassification }}
+                disabled={working}
+                className="rounded-lg border border-border px-3 py-2"
+                onPress={() => setNewTicketClassification(classification)}
+              >
+                <Text className="text-xs font-semibold">{classification}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={working || !newTicketTitle.trim()}
+            className="self-start rounded-lg border border-border px-3 py-2"
             onPress={() => {
-              const action = buildMobileDependencyAction("add-dependency", blocker, blocked);
+              const action = createWayfinderTicketAction(newTicketTitle, newTicketClassification);
               if (action) onMutate(action);
             }}
           >
-            <Text className="text-xs font-semibold">Add dependency</Text>
+            <Text className="text-xs font-semibold">Create {newTicketClassification} ticket</Text>
           </Pressable>
-          <Pressable
-            accessibilityRole="button"
-            disabled={working || !Number(blocker) || !Number(blocked)}
-            className="rounded-lg border border-border px-3 py-2"
-            onPress={() => {
-              const action = buildMobileDependencyAction("remove-dependency", blocker, blocked);
-              if (action) onMutate(action);
-            }}
-          >
-            <Text className="text-xs font-semibold">Remove</Text>
-          </Pressable>
+          <View className="flex-row gap-2">
+            <TextInput
+              accessibilityLabel="Blocker ticket number"
+              keyboardType="number-pad"
+              className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
+              value={blocker}
+              onChangeText={setBlocker}
+            />
+            <TextInput
+              accessibilityLabel="Blocked ticket number"
+              keyboardType="number-pad"
+              className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
+              value={blocked}
+              onChangeText={setBlocked}
+            />
+          </View>
+          <View className="flex-row gap-2">
+            <Pressable
+              accessibilityRole="button"
+              disabled={working || !Number(blocker) || !Number(blocked)}
+              className="rounded-lg border border-border px-3 py-2"
+              onPress={() => {
+                const action = buildMobileDependencyAction("add-dependency", blocker, blocked);
+                if (action) onMutate(action);
+              }}
+            >
+              <Text className="text-xs font-semibold">Add dependency</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              disabled={working || !Number(blocker) || !Number(blocked)}
+              className="rounded-lg border border-border px-3 py-2"
+              onPress={() => {
+                const action = buildMobileDependencyAction("remove-dependency", blocker, blocked);
+                if (action) onMutate(action);
+              }}
+            >
+              <Text className="text-xs font-semibold">Remove</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      ) : null}
+
+      {linkedTicketAction ? (
+        <HitlResolutionCard
+          map={map}
+          ticketNumber={linkedTicketAction.ticketNumber}
+          mutation={mutation}
+          disabled={working || !connected || synchronization?.canMutate === false}
+          onComplete={onCompleteHitl}
+        />
+      ) : null}
 
       <View>
         <Text className="mb-1 text-sm font-semibold text-foreground">Destination</Text>
@@ -669,6 +886,7 @@ function WayfinderWorkbenchContent(props: {
           map={map}
           mutation={mutation}
           ticketThreads={workstream?.ticketThreads ?? []}
+          assignedTicketNumber={linkedTicketAction?.ticketNumber ?? null}
           disabled={working || !connected || synchronization?.canMutate === false}
           onMutate={onMutate}
           onReturnToThread={props.onReturnToThread}

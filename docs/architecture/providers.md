@@ -104,6 +104,20 @@ recognizes either the persisted linked run or an empty deterministic thread and 
 step without duplication. If local dispatch fails after assignment, reconciliation persists the
 canonical claim with a failed, recoverable mutation instead of reporting success.
 
+Human-in-the-loop completion is another specialized mutation and is accepted only from the pinned
+`work-ticket` Skill Run for its assigned claimed ticket. The processor locates that run's source map
+Skill Run, then records an idempotent canonical resolution comment before changing the route. A
+resolved outcome can create idempotent decision issues, child links, and blocking relationships,
+remove the corresponding fog, and append only a context pointer to **Decisions so far**. An
+out-of-scope outcome updates **Out of scope**, applies the `wayfinder:out-of-scope` classification,
+and never appends a route decision.
+
+Every verified step emits a mutation update carrying its artifact receipt and exact next step.
+Failure retains those receipts and the canonical claim for explicit resume or release. Closure is
+the last write before a full reconciliation. Terminal and partial projections are dispatched to
+both the linked ticket run and its source map run, so comment, relationship, close, and reopen
+receipts recompute the shared frontier and linked-thread state without client-side dual authority.
+
 Published maps use a separate queue-backed reconciliation reactor. Clients send a typed,
 Skill Run-scoped reason (`open`, `reconnect`, `focus`, `manual`, `poll`, `mutation`, or `resume`), and
 the environment-owning server performs every GitHub read. A lightweight revision query covers the

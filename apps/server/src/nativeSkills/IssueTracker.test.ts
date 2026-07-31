@@ -1017,3 +1017,60 @@ it.effect("preserves an existing publication label", () => {
     ),
   );
 });
+
+it.effect("does not duplicate a canonically recorded resolution comment on resume", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+
+    yield* tracker.addIssueComment({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+      body: "Resolution: Keep the environment-owned path.",
+      idempotencyKey: "skill-run:43:resolution",
+    });
+    const confirmed = yield* tracker.hasIssueComment!({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+      idempotencyKey: "skill-run:43:resolution",
+    });
+
+    assert.strictEqual(confirmed, true);
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(calls[0], [
+      "issue",
+      "view",
+      "43",
+      "--repo",
+      "t3tools/t3code",
+      "--json",
+      "comments",
+    ]);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              JSON.stringify({
+                comments: [
+                  {
+                    body: [
+                      "Resolution: Keep the environment-owned path.",
+                      "",
+                      "<!-- t3-wayfinder-resolution:skill-run%3A43%3Aresolution -->",
+                    ].join("\n"),
+                  },
+                ],
+              }),
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});

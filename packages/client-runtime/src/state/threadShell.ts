@@ -232,13 +232,17 @@ export function createEnvironmentThreadShellAtoms(input: {
     previousWorkstreamEnvironmentIds = environmentIds;
     previousRunsByEnvironment = runsByEnvironment;
     previousThreadsByEnvironment = threadsByEnvironment;
-    previousWorkstreams = environmentIds.flatMap((environmentId) =>
+    const nextWorkstreams = environmentIds.flatMap((environmentId) =>
       deriveEnvironmentWorkstreams(
         environmentId,
         runsByEnvironment.get(environmentId) ?? EMPTY_SKILL_RUNS,
         threadsByEnvironment.get(environmentId) ?? EMPTY_THREADS,
       ),
     );
+    if (previousWorkstreams.length === 0 && nextWorkstreams.length === 0) {
+      return previousWorkstreams;
+    }
+    previousWorkstreams = nextWorkstreams;
     return previousWorkstreams;
   }).pipe(Atom.withLabel("environment-project-workstreams"));
 

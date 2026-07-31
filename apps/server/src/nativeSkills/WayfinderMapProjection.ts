@@ -94,6 +94,7 @@ function classification(labels: ReadonlyArray<{ readonly name: string }>) {
     "prototype",
     "grilling",
     "task",
+    "out-of-scope",
   ]);
   for (const label of labels) {
     const value = /^wayfinder:(.+)$/u.exec(label.name)?.[1];

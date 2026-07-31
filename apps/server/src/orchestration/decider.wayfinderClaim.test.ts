@@ -20,6 +20,7 @@ const now = "2026-01-02T00:00:00.000Z";
 const projectId = ProjectId.make("project-wayfinder-claim");
 const threadId = ThreadId.make("thread-wayfinder-map");
 const skillRunId = SkillRunId.make("skill-run:map");
+const linkedSkillRunId = SkillRunId.make("skill-run:ticket-43");
 
 const map: WayfinderMapProjection = {
   canonicalReference: {
@@ -189,6 +190,41 @@ function makeReadModel() {
   });
 }
 
+function makeLinkedReadModel() {
+  return Effect.gen(function* () {
+    const readModel = yield* makeReadModel();
+    return {
+      ...readModel,
+      threads: readModel.threads.map((thread) =>
+        thread.id === threadId && thread.latestTurn?.skillInvocation
+          ? {
+              ...thread,
+              latestTurn: {
+                ...thread.latestTurn,
+                skillInvocation: {
+                  ...thread.latestTurn.skillInvocation,
+                  action: {
+                    id: "work-ticket" as const,
+                    ticketNumber: 43,
+                    sourceSkillRunId: skillRunId,
+                  },
+                  wayfinderMap: {
+                    ...map,
+                    tickets: map.tickets.map((ticket) =>
+                      ticket.number === 43 ? { ...ticket, claimedBy: "octocat" } : ticket,
+                    ),
+                    frontier: [],
+                  },
+                  skillRunId: linkedSkillRunId,
+                },
+              },
+            }
+          : thread,
+      ),
+    };
+  });
+}
+
 it.layer(NodeServices.layer)("Wayfinder ticket claim invariants", (it) => {
   it.effect("accepts an open unblocked unclaimed frontier ticket", () =>
     Effect.gen(function* () {
@@ -294,4 +330,166 @@ it.layer(NodeServices.layer)("Wayfinder ticket claim invariants", (it) => {
       }),
     );
   }
+});
+
+it.layer(NodeServices.layer)("Wayfinder HITL resolution invariants", (it) => {
+  const action = {
+    kind: "complete-hitl-ticket" as const,
+    ticketNumber: 43,
+    outcome: "resolved" as const,
+    resolution: "Use the environment-owned synchronization path.",
+    contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+    graduatedFog: [],
+  };
+
+  it.effect("accepts the assigned claimed ticket from its linked work-ticket run", () =>
+    Effect.gen(function* () {
+      const result = yield* decideOrchestrationCommand({
+        readModel: yield* makeLinkedReadModel(),
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("resolve-43"),
+          threadId,
+          skillRunId: linkedSkillRunId,
+          action,
+          confirmed: false,
+          createdAt: now,
+        },
+      });
+
+      const requested = Array.isArray(result) ? result[0] : result;
+      expect(requested).toMatchObject({
+        type: "thread.wayfinder-mutation-requested",
+        payload: { skillRunId: linkedSkillRunId, action },
+      });
+    }),
+  );
+
+  it.effect("rejects completing a ticket other than the linked assignment", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: yield* makeLinkedReadModel(),
+          command: {
+            type: "thread.wayfinder.mutate",
+            commandId: CommandId.make("resolve-44"),
+            threadId,
+            skillRunId: linkedSkillRunId,
+            action: { ...action, ticketNumber: 44 },
+            confirmed: false,
+            createdAt: now,
+          },
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      if ("detail" in failure) expect(failure.detail).toContain("assigned ticket #43");
+    }),
+  );
+
+  it.effect("rejects HITL completion from the shared map run", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: yield* makeReadModel(),
+          command: {
+            type: "thread.wayfinder.mutate",
+            commandId: CommandId.make("resolve-map-43"),
+            threadId,
+            skillRunId,
+            action,
+            confirmed: false,
+            createdAt: now,
+          },
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      if ("detail" in failure) expect(failure.detail).toContain("linked ticket thread");
+    }),
+  );
+
+  it.effect("rejects unrelated map administration from the linked ticket run", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: yield* makeLinkedReadModel(),
+          command: {
+            type: "thread.wayfinder.mutate",
+            commandId: CommandId.make("rename-44-from-ticket-43"),
+            threadId,
+            skillRunId: linkedSkillRunId,
+            action: { kind: "rename-ticket", ticketNumber: 44, title: "Unrelated change" },
+            confirmed: false,
+            createdAt: now,
+          },
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      if ("detail" in failure) expect(failure.detail).toContain("only its assigned ticket");
+    }),
+  );
+
+  it.effect("rejects duplicate graduated fog ticket keys", () =>
+    Effect.gen(function* () {
+      const graduated = {
+        key: "relay-policy",
+        fog: "Relay ownership",
+        title: "Choose relay ownership",
+        classification: "grilling" as const,
+        blockedBy: [],
+      };
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: yield* makeLinkedReadModel(),
+          command: {
+            type: "thread.wayfinder.mutate",
+            commandId: CommandId.make("duplicate-graduated-key"),
+            threadId,
+            skillRunId: linkedSkillRunId,
+            action: { ...action, graduatedFog: [graduated, graduated] },
+            confirmed: false,
+            createdAt: now,
+          },
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      if ("detail" in failure) expect(failure.detail).toContain("unique key");
+    }),
+  );
+
+  it.effect("rejects graduation of fog outside the synchronized map", () =>
+    Effect.gen(function* () {
+      const failure = yield* Effect.flip(
+        decideOrchestrationCommand({
+          readModel: yield* makeLinkedReadModel(),
+          command: {
+            type: "thread.wayfinder.mutate",
+            commandId: CommandId.make("unknown-graduated-fog"),
+            threadId,
+            skillRunId: linkedSkillRunId,
+            action: {
+              ...action,
+              graduatedFog: [
+                {
+                  key: "unknown-policy",
+                  fog: "A made-up uncertainty",
+                  title: "Choose unknown policy",
+                  classification: "grilling",
+                  blockedBy: [],
+                },
+              ],
+            },
+            confirmed: false,
+            createdAt: now,
+          },
+        }),
+      );
+
+      expect(failure).toMatchObject({ _tag: "OrchestrationCommandInvariantError" });
+      if ("detail" in failure) expect(failure.detail).toContain("canonical map");
+    }),
+  );
 });

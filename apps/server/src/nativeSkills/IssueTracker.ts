@@ -7,9 +7,9 @@ import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import type {
-  WayfinderDraftTicketClassification,
   WayfinderMapField,
   WayfinderMapProjection,
+  WayfinderTicketClassification,
 } from "@t3tools/contracts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
@@ -134,8 +134,8 @@ export class IssueTracker extends Context.Service<
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
       readonly issueNumber: number;
-      readonly previous: WayfinderDraftTicketClassification | "unknown";
-      readonly classification: WayfinderDraftTicketClassification;
+      readonly previous: WayfinderTicketClassification;
+      readonly classification: Exclude<WayfinderTicketClassification, "unknown">;
     }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
     readonly removeChild: (input: {
       readonly cwd: string;
@@ -154,7 +154,14 @@ export class IssueTracker extends Context.Service<
       readonly repository: IssueTrackerRepository;
       readonly issueNumber: number;
       readonly body: string;
+      readonly idempotencyKey?: string;
     }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly hasIssueComment?: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly idempotencyKey: string;
+    }) => Effect.Effect<boolean, GitHubCli.GitHubCliError>;
     readonly setIssueState: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
@@ -171,6 +178,12 @@ const RepositoryProbe = Schema.Struct({
 const LabelsProbe = Schema.Array(Schema.Struct({ name: Schema.String }));
 const IssueProbe = Schema.Struct({ number: Schema.Number, url: Schema.String });
 const IssueBodyProbe = Schema.Struct({ body: Schema.String });
+const IssueCommentsProbe = Schema.Struct({
+  comments: Schema.Array(Schema.Struct({ body: Schema.String })),
+});
+const decodeIssueCommentsProbe = Schema.decodeUnknownOption(
+  Schema.fromJsonString(IssueCommentsProbe),
+);
 const ViewerProbe = Schema.Struct({ login: Schema.String });
 const IssueClaimProbe = Schema.Struct({
   state: Schema.Literals(["OPEN", "CLOSED"]),
@@ -1248,6 +1261,31 @@ export const GitHubIssueTrackerLive = Layer.effect(
         });
       }),
       addIssueComment: Effect.fn("IssueTracker.addIssueComment")(function* (input) {
+        const marker =
+          input.idempotencyKey === undefined
+            ? null
+            : `<!-- t3-wayfinder-resolution:${encodeURIComponent(input.idempotencyKey)} -->`;
+        if (marker !== null) {
+          const existingOutput = yield* github.execute({
+            cwd: input.cwd,
+            args: [
+              "issue",
+              "view",
+              String(input.issueNumber),
+              "--repo",
+              repositoryReference(input.repository),
+              "--json",
+              "comments",
+            ],
+          });
+          const existing = decodeIssueCommentsProbe(existingOutput.stdout);
+          if (
+            Option.isSome(existing) &&
+            existing.value.comments.some((comment) => comment.body.includes(marker))
+          ) {
+            return;
+          }
+        }
         yield* github.execute({
           cwd: input.cwd,
           args: [
@@ -1257,9 +1295,29 @@ export const GitHubIssueTrackerLive = Layer.effect(
             "--repo",
             repositoryReference(input.repository),
             "--body",
-            input.body,
+            marker === null ? input.body : `${input.body}\n\n${marker}`,
           ],
         });
+      }),
+      hasIssueComment: Effect.fn("IssueTracker.hasIssueComment")(function* (input) {
+        const marker = `<!-- t3-wayfinder-resolution:${encodeURIComponent(input.idempotencyKey)} -->`;
+        const output = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "view",
+            String(input.issueNumber),
+            "--repo",
+            repositoryReference(input.repository),
+            "--json",
+            "comments",
+          ],
+        });
+        const comments = decodeIssueCommentsProbe(output.stdout);
+        return (
+          Option.isSome(comments) &&
+          comments.value.comments.some((comment) => comment.body.includes(marker))
+        );
       }),
       setIssueState: Effect.fn("IssueTracker.setIssueState")(function* (input) {
         yield* github.execute({

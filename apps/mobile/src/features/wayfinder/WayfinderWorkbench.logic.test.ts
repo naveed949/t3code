@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 
 import {
+  buildMobileGraduatedFogTicket,
   buildMobileDependencyAction,
+  buildMobileHitlResolutionAction,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
   buildMobileWayfinderPresentation,
@@ -116,6 +118,74 @@ describe("buildMobileWayfinderPresentation", () => {
       canClaim: false,
       canRelease: true,
       linkedThreadId,
+    });
+    expect(
+      buildMobileTicketClaimActions(
+        { ...map.tickets[0]!, claimedBy: "alice" },
+        [],
+        ThreadId.make("wayfinder-ticket:workstream:release:44"),
+        null,
+        43,
+      ),
+    ).toMatchObject({
+      canClaim: false,
+      canRetry: false,
+      canRelease: false,
+      linkedThreadId: null,
+    });
+  });
+
+  it("builds the assigned mobile HITL resolution with a graduated fog ticket", () => {
+    expect(
+      buildMobileHitlResolutionAction({
+        ticketNumber: 43,
+        outcome: "resolved",
+        resolution: " Use the native relay. ",
+        contextPointer: " https://github.com/t3tools/t3code/issues/43#issuecomment-1 ",
+        graduatedFog: [
+          buildMobileGraduatedFogTicket({
+            fog: "Relay ownership",
+            title: "Choose relay ownership",
+            classification: "grilling",
+            blockers: "42, #43",
+          })!,
+        ],
+      }),
+    ).toEqual({
+      kind: "complete-hitl-ticket",
+      ticketNumber: 43,
+      outcome: "resolved",
+      resolution: "Use the native relay.",
+      contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+      graduatedFog: [
+        {
+          key: "choose-relay-ownership",
+          fog: "Relay ownership",
+          title: "Choose relay ownership",
+          classification: "grilling",
+          blockedBy: [
+            { kind: "ticket", ticketNumber: 42 },
+            { kind: "ticket", ticketNumber: 43 },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("shares graduated blocker parsing with web and supports key references", () => {
+    expect(
+      buildMobileGraduatedFogTicket({
+        fog: "Transport policy",
+        title: "Choose transport policy",
+        classification: "research",
+        blockers: "#42, key:relay-policy",
+      }),
+    ).toMatchObject({
+      key: "choose-transport-policy",
+      blockedBy: [
+        { kind: "ticket", ticketNumber: 42 },
+        { kind: "graduated", key: "relay-policy" },
+      ],
     });
   });
 });

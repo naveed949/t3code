@@ -71,8 +71,57 @@ it("derives durable ticket-to-thread links from pinned linked-ticket runs", () =
       threadId: linkedInvocation.threadId,
       skillRunId: linkedInvocation.skillRunId,
       sourceSkillRunId: invocation.skillRunId,
+      status: "active",
     },
   ]);
+});
+
+it("recomputes linked HITL thread state from the canonical ticket projection", () => {
+  const source = {
+    ...invocation,
+    wayfinderMap: {
+      canonicalReference: {
+        number: 42,
+        title: "Release map",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open" as const,
+      },
+      destination: "Choose a safe release path.",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: ["Deferred packaging"],
+      tickets: [
+        {
+          number: 43,
+          title: "Choose hosting",
+          url: "https://github.com/t3tools/t3code/issues/43",
+          state: "closed" as const,
+          classification: "out-of-scope" as const,
+          claimedBy: "alice",
+          blockedBy: [],
+          blocks: [],
+        },
+      ],
+      frontier: [],
+      lastSynchronizedAt: "2026-01-02T00:00:00.000Z",
+    },
+  };
+  const linked = {
+    ...source,
+    wayfinderMap: undefined,
+    skillRunId: SkillRunId.make("skill-run:ticket-43"),
+    threadId: ThreadId.make("wayfinder-ticket:workstream:1:43"),
+    action: {
+      id: "work-ticket" as const,
+      ticketNumber: 43,
+      sourceSkillRunId: source.skillRunId,
+    },
+  };
+
+  expect(
+    deriveProjectWorkstreams(source.projectId, [source, linked])[0]?.ticketThreads[0]?.status,
+  ).toBe("out-of-scope");
 });
 
 describe("deriveProjectWorkstreams", () => {

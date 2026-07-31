@@ -1650,6 +1650,12 @@ function ChatViewContent(props: ChatViewProps) {
     activeWayfinderWorkstream,
     activeLatestTurn?.skillInvocation ?? null,
   );
+  const activeLinkedTicketAction =
+    activeLatestTurn?.skillInvocation?.action?.id === "work-ticket"
+      ? activeLatestTurn.skillInvocation.action
+      : null;
+  const activeLinkedTicketInvocation =
+    activeLinkedTicketAction === null ? null : (activeLatestTurn?.skillInvocation ?? null);
   const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
@@ -5105,6 +5111,32 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeWayfinderInvocation, environmentId, mutateWayfinderCommand, setThreadError],
   );
+  const onCompleteWayfinderHitl = useCallback(
+    async (
+      action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+      options?: { readonly actionId?: string; readonly confirmed?: boolean },
+    ) => {
+      if (!activeLinkedTicketInvocation) return;
+      const result = await mutateWayfinderCommand({
+        environmentId,
+        input: {
+          threadId: activeLinkedTicketInvocation.threadId,
+          skillRunId: activeLinkedTicketInvocation.skillRunId,
+          action,
+          ...(options?.actionId ? { actionId: options.actionId } : {}),
+          confirmed: options?.confirmed ?? false,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeLinkedTicketInvocation.threadId,
+          error instanceof Error ? error.message : "Failed to resolve the Wayfinder ticket.",
+        );
+      }
+    },
+    [activeLinkedTicketInvocation, environmentId, mutateWayfinderCommand, setThreadError],
+  );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
@@ -5795,6 +5827,8 @@ function ChatViewContent(props: ChatViewProps) {
         onMutate={onMutateWayfinder}
         ticketThreads={activeWayfinderWorkstream?.ticketThreads ?? []}
         onReturnToThread={returnToWayfinderTicketThread}
+        assignedTicketNumber={activeLinkedTicketAction?.ticketNumber ?? null}
+        {...(activeLinkedTicketInvocation ? { onCompleteHitl: onCompleteWayfinderHitl } : {})}
         synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}

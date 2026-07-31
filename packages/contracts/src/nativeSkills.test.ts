@@ -118,4 +118,54 @@ describe("WayfinderMutation", () => {
       }).action,
     ).toEqual({ kind: "release-ticket", ticketNumber: 43 });
   });
+
+  it("decodes a resumable HITL resolution with graduated fog relationships", () => {
+    const decoded = decodeWayfinderMutation({
+      actionId: "resolve:43",
+      action: {
+        kind: "complete-hitl-ticket",
+        ticketNumber: 43,
+        outcome: "resolved",
+        resolution: "Ship the environment-owned synchronization path.",
+        contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+        graduatedFog: [
+          {
+            key: "relay-failure-policy",
+            fog: "Relay failure behavior",
+            title: "Choose the relay failure policy",
+            classification: "grilling",
+            blockedBy: [{ kind: "ticket", ticketNumber: 42 }],
+          },
+          {
+            key: "mobile-recovery",
+            fog: "Mobile recovery details",
+            title: "Define mobile recovery",
+            classification: "research",
+            blockedBy: [{ kind: "graduated", key: "relay-failure-policy" }],
+          },
+        ],
+      },
+      status: "failed",
+      artifacts: [
+        {
+          kind: "resolution-comment",
+          ticketNumber: 43,
+          contextPointer: "https://github.com/t3tools/t3code/issues/43#issuecomment-1",
+        },
+        {
+          kind: "issue",
+          key: "relay-failure-policy",
+          number: 44,
+          url: "https://github.com/t3tools/t3code/issues/44",
+        },
+      ],
+      nextStep: "link graduated ticket mobile-recovery",
+      error: "GitHub unavailable",
+      updatedAt: "2026-07-30T10:05:00.000Z",
+    });
+
+    expect(decoded.action.kind).toBe("complete-hitl-ticket");
+    expect(decoded.artifacts).toHaveLength(2);
+    expect(decoded.nextStep).toBe("link graduated ticket mobile-recovery");
+  });
 });

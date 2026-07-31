@@ -1,4 +1,6 @@
 import {
+  createWayfinderGraduatedFogTicket,
+  createWayfinderHitlResolutionAction,
   deriveWayfinderTicketClaimActions,
   deriveWayfinderWorkbenchModel,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
@@ -15,7 +17,17 @@ export function buildMobileTicketClaimActions(
   frontier: ReadonlyArray<number>,
   linkedThreadId: ThreadId | null,
   mutation: WayfinderMutation | null,
+  assignedTicketNumber: number | null = null,
 ) {
+  if (assignedTicketNumber !== null && ticket.number !== assignedTicketNumber) {
+    return {
+      canClaim: false,
+      claimLabel: "Start work",
+      canRetry: false,
+      canRelease: false,
+      linkedThreadId: null,
+    };
+  }
   return deriveWayfinderTicketClaimActions({ ticket, frontier, linkedThreadId, mutation });
 }
 
@@ -55,6 +67,27 @@ export function buildMobileDependencyAction(
   const blockerNumber = Number(blocker);
   const blockedNumber = Number(blocked);
   return blockerNumber > 0 && blockedNumber > 0 ? { kind, blockerNumber, blockedNumber } : null;
+}
+
+export const buildMobileGraduatedFogTicket = createWayfinderGraduatedFogTicket;
+
+export function buildMobileHitlResolutionAction(input: {
+  readonly ticketNumber: number;
+  readonly outcome: "resolved" | "out-of-scope";
+  readonly resolution: string;
+  readonly contextPointer: string;
+  readonly graduatedFog: Extract<
+    WayfinderMutationAction,
+    { readonly kind: "complete-hitl-ticket" }
+  >["graduatedFog"];
+}) {
+  return createWayfinderHitlResolutionAction({
+    ticketNumber: input.ticketNumber,
+    outcome: input.outcome,
+    resolution: input.resolution,
+    contextPointer: input.contextPointer,
+    graduatedFog: input.graduatedFog,
+  });
 }
 
 export function buildMobileWayfinderPresentation(map: WayfinderMapProjection) {
