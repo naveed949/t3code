@@ -94,16 +94,17 @@ Agent-only `research` frontier tickets use the same canonical claim and dedicate
 an additional visible background lifecycle. Automatic launches are enabled by default with a
 Workbench limit of two concurrent research tickets. They run only while T3's background-activity
 policy permits scoped work and never launch `grilling`, `prototype`, or `task` tickets. An
-approval-required source thread also waits for an explicit manual start instead of manufacturing a
-user approval in the background.
+approval-required source thread keeps both automatic and manual requests queued instead of
+manufacturing a user approval in the background.
 
 The Workbench shows whether each research ticket is eligible, queued, claiming, active, cancelling,
 cancelled, failed, resolving, or resolved, along with its latest structured output or error.
 **Pause automatic launches** stops new automatic work without interrupting active threads.
 **Start research** remains available for an eligible ticket while paused; **Cancel research**
 interrupts its provider turn and releases the canonical claim; **Retry research** reuses the linked
-thread after a failed or cancelled attempt. These controls and states are shared by web, desktop,
-mobile, and remote clients.
+thread after a failed or cancelled attempt. Manual starts and retries still respect T3's scoped
+background policy and visible provider limit, remaining queued until a slot is available. These
+controls and states are shared by web, desktop, mobile, and remote clients.
 
 Research completion requires more than assistant narration. The linked provider turn must finish
 with a checkpoint and a structured resolved result. T3 then records that conclusion through the

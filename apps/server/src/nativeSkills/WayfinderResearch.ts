@@ -3,16 +3,32 @@ import type {
   WayfinderResearchState,
   WayfinderResearchTicketRun,
 } from "@t3tools/contracts";
+import { TrimmedNonEmptyString } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 export const DEFAULT_WAYFINDER_RESEARCH_CONCURRENCY_LIMIT = 2;
 
 const ACTIVE_STATUSES = new Set<WayfinderResearchTicketRun["status"]>([
-  "queued",
   "claiming",
   "active",
   "cancelling",
   "resolving",
 ]);
+
+export function isWayfinderResearchActive(status: WayfinderResearchTicketRun["status"]): boolean {
+  return ACTIVE_STATUSES.has(status);
+}
+
+export function countActiveWayfinderResearchTickets(
+  research: WayfinderResearchState,
+  exceptTicketNumber?: number,
+): number {
+  return research.tickets.filter(
+    (ticket) =>
+      ticket.ticketNumber !== exceptTicketNumber && isWayfinderResearchActive(ticket.status),
+  ).length;
+}
 
 export function createWayfinderResearchState(updatedAt: string): WayfinderResearchState {
   return {
@@ -43,9 +59,7 @@ export function selectAutomaticWayfinderResearchTickets(input: {
 }): ReadonlyArray<number> {
   if (input.research.automaticLaunchesPaused) return [];
   const launchedTickets = new Set(input.research.tickets.map((ticket) => ticket.ticketNumber));
-  const activeCount = input.research.tickets.filter((ticket) =>
-    ACTIVE_STATUSES.has(ticket.status),
-  ).length;
+  const activeCount = countActiveWayfinderResearchTickets(input.research);
   const availableSlots = Math.max(0, input.research.concurrencyLimit - activeCount);
   return input.map.tickets
     .filter(
@@ -61,37 +75,43 @@ export function selectAutomaticWayfinderResearchTickets(input: {
     .slice(0, availableSlots);
 }
 
-export interface WayfinderResearchResult {
-  readonly status: "resolved" | "failed";
-  readonly summary: string;
+export function selectQueuedWayfinderResearchTickets(input: {
+  readonly map: WayfinderMapProjection;
+  readonly research: WayfinderResearchState;
+}): ReadonlyArray<WayfinderResearchTicketRun> {
+  const availableSlots = Math.max(
+    0,
+    input.research.concurrencyLimit - countActiveWayfinderResearchTickets(input.research),
+  );
+  return input.research.tickets
+    .filter((run) => {
+      const ticket = input.map.tickets.find((candidate) => candidate.number === run.ticketNumber);
+      return (
+        run.status === "queued" &&
+        (run.launchMode === "manual" || !input.research.automaticLaunchesPaused) &&
+        ticket?.state === "open" &&
+        ticket.classification === "research" &&
+        ticket.claimedBy === null &&
+        input.map.frontier.includes(ticket.number)
+      );
+    })
+    .toSorted((left, right) => left.ticketNumber - right.ticketNumber)
+    .slice(0, availableSlots);
 }
+
+const WayfinderResearchResult = Schema.Struct({
+  status: Schema.Literals(["resolved", "failed"]),
+  summary: TrimmedNonEmptyString,
+});
+export type WayfinderResearchResult = typeof WayfinderResearchResult.Type;
+const decodeWayfinderResearchResult = Schema.decodeUnknownOption(
+  Schema.fromJsonString(WayfinderResearchResult),
+);
 
 const RESULT_PATTERN = /<wayfinder-research-result>(\{[\s\S]*?\})<\/wayfinder-research-result>/u;
 
 export function parseWayfinderResearchResult(output: string): WayfinderResearchResult | null {
   const match = RESULT_PATTERN.exec(output);
   if (!match?.[1]) return null;
-  try {
-    const parsed = JSON.parse(match[1]) as unknown;
-    if (
-      typeof parsed !== "object" ||
-      parsed === null ||
-      !("status" in parsed) ||
-      !("summary" in parsed)
-    ) {
-      return null;
-    }
-    const status = parsed.status;
-    const summary = parsed.summary;
-    if (
-      (status !== "resolved" && status !== "failed") ||
-      typeof summary !== "string" ||
-      summary.trim() === ""
-    ) {
-      return null;
-    }
-    return { status, summary: summary.trim() };
-  } catch {
-    return null;
-  }
+  return Option.getOrNull(decodeWayfinderResearchResult(match[1]));
 }

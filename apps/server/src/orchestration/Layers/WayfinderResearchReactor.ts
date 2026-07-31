@@ -17,8 +17,10 @@ import * as Stream from "effect/Stream";
 import { BackgroundPolicy } from "../../background/BackgroundPolicy.ts";
 import {
   createWayfinderResearchState,
+  countActiveWayfinderResearchTickets,
   parseWayfinderResearchResult,
   selectAutomaticWayfinderResearchTickets,
+  selectQueuedWayfinderResearchTickets,
   updateWayfinderResearchTicket,
 } from "../../nativeSkills/WayfinderResearch.ts";
 import {
@@ -195,6 +197,27 @@ export const makeWayfinderResearchProcessor = Effect.gen(function* () {
     }
     const research = invocation.wayfinderResearch ?? createWayfinderResearchState(createdAt);
     if (!(yield* backgroundPolicy.shouldRunScopeWork({ type: "thread", threadId }))) return;
+    const queued = selectQueuedWayfinderResearchTickets({
+      map: invocation.wayfinderMap,
+      research,
+    });
+    if (queued.length > 0) {
+      for (const run of queued) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.wayfinder.research",
+          commandId: yield* serverCommandId("wayfinder-research-queued"),
+          threadId,
+          skillRunId,
+          action: {
+            kind: run.retrying ? "retry-ticket" : "start-ticket",
+            ticketNumber: run.ticketNumber,
+          },
+          ...(run.launchMode === "automatic" ? { launchMode: "automatic" as const } : {}),
+          createdAt,
+        });
+      }
+      return;
+    }
     for (const ticketNumber of selectAutomaticWayfinderResearchTickets({
       map: invocation.wayfinderMap,
       research,
@@ -236,6 +259,9 @@ export const makeWayfinderResearchProcessor = Effect.gen(function* () {
           event.payload.createdAt,
         );
       }
+      return;
+    }
+    if (event.payload.launchMode === "automatic" && current.automaticLaunchesPaused) {
       return;
     }
 
@@ -313,19 +339,16 @@ export const makeWayfinderResearchProcessor = Effect.gen(function* () {
       ticket: queued,
     });
     if (
-      launchMode === "automatic" &&
-      (!(yield* backgroundPolicy.shouldRunScopeWork({
+      !(yield* backgroundPolicy.shouldRunScopeWork({
         type: "thread",
         threadId: event.payload.threadId,
       })) ||
-        thread.runtimeMode === "approval-required")
+      thread.runtimeMode === "approval-required"
     ) {
       return;
     }
-    const activeCount = current.tickets.filter((run) =>
-      ["queued", "claiming", "active", "cancelling", "resolving"].includes(run.status),
-    ).length;
-    if (activeCount >= current.concurrencyLimit && previous === undefined) return;
+    const activeCount = countActiveWayfinderResearchTickets(current, ticket.number);
+    if (activeCount >= current.concurrencyLimit) return;
 
     if (action.kind === "retry-ticket" && ticket.claimedBy !== null) {
       const restarted = yield* startExistingLinkedTurn({
@@ -462,7 +485,9 @@ export const makeWayfinderResearchProcessor = Effect.gen(function* () {
     if (!source || ticket?.classification !== "research") return;
     const current = source.wayfinderResearch ?? createWayfinderResearchState(event.occurredAt);
     const previous = current.tickets.find((run) => run.ticketNumber === ticket.number);
-    if (!previous || previous.status === "cancelled") return;
+    if (!previous || previous.status === "cancelling" || previous.status === "cancelled") {
+      return;
+    }
     const output =
       linkedThread.messages.find((message) => message.id === event.payload.assistantMessageId)
         ?.text ??

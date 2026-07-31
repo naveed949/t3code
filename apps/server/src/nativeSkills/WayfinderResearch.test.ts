@@ -5,6 +5,7 @@ import {
   DEFAULT_WAYFINDER_RESEARCH_CONCURRENCY_LIMIT,
   parseWayfinderResearchResult,
   selectAutomaticWayfinderResearchTickets,
+  selectQueuedWayfinderResearchTickets,
   updateWayfinderResearchTicket,
 } from "./WayfinderResearch.ts";
 
@@ -126,6 +127,55 @@ describe("research result receipts", () => {
       status: "failed",
       summary: "Primary documentation was unavailable.",
     });
+  });
+});
+
+describe("selectQueuedWayfinderResearchTickets", () => {
+  it("promotes queued manual work only when a provider slot is available", () => {
+    const queued = {
+      ticketNumber: 43,
+      launchMode: "manual" as const,
+      status: "queued" as const,
+      updatedAt: "2026-07-31T10:00:00.000Z",
+    };
+    expect(
+      selectQueuedWayfinderResearchTickets({
+        map,
+        research: {
+          automaticLaunchesPaused: true,
+          concurrencyLimit: 2,
+          tickets: [
+            queued,
+            {
+              ticketNumber: 46,
+              launchMode: "automatic",
+              status: "active",
+              updatedAt: "2026-07-31T10:00:00.000Z",
+            },
+          ],
+          updatedAt: "2026-07-31T10:00:00.000Z",
+        },
+      }),
+    ).toEqual([queued]);
+    expect(
+      selectQueuedWayfinderResearchTickets({
+        map,
+        research: {
+          automaticLaunchesPaused: false,
+          concurrencyLimit: 1,
+          tickets: [
+            queued,
+            {
+              ticketNumber: 46,
+              launchMode: "automatic",
+              status: "active",
+              updatedAt: "2026-07-31T10:00:00.000Z",
+            },
+          ],
+          updatedAt: "2026-07-31T10:00:00.000Z",
+        },
+      }),
+    ).toEqual([]);
   });
 });
 

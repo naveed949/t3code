@@ -199,6 +199,34 @@ describe("deriveWayfinderResearchModel", () => {
       canRetry: false,
     });
   });
+
+  it("offers retry without a second start action after a failed run", () => {
+    const derived = deriveWayfinderResearchModel({
+      map,
+      research: {
+        automaticLaunchesPaused: false,
+        concurrencyLimit: 2,
+        tickets: [
+          {
+            ticketNumber: 43,
+            launchMode: "manual",
+            status: "failed",
+            error: "The provider stopped.",
+            updatedAt: "2026-07-31T10:00:00.000Z",
+          },
+        ],
+        updatedAt: "2026-07-31T10:00:00.000Z",
+      },
+      ticketThreads: [],
+    });
+
+    expect(derived.tickets.find((ticket) => ticket.ticketNumber === 43)).toMatchObject({
+      status: "failed",
+      canStart: false,
+      canCancel: false,
+      canRetry: true,
+    });
+  });
 });
 
 describe("applyOptimisticWayfinderMutation", () => {

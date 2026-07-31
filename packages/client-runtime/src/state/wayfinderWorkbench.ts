@@ -159,13 +159,8 @@ export interface WayfinderResearchTicketPresentation {
   readonly canRetry: boolean;
 }
 
-const ACTIVE_RESEARCH_STATUSES = new Set([
-  "queued",
-  "claiming",
-  "active",
-  "cancelling",
-  "resolving",
-]);
+const ACTIVE_RESEARCH_STATUSES = new Set(["claiming", "active", "cancelling", "resolving"]);
+const CANCELLABLE_RESEARCH_STATUSES = new Set(["queued", ...ACTIVE_RESEARCH_STATUSES]);
 
 export function deriveWayfinderResearchModel(input: {
   readonly map: WayfinderMapProjection;
@@ -210,9 +205,7 @@ export function deriveWayfinderResearchModel(input: {
       ticket.classification === "research" &&
       ticket.claimedBy === null &&
       input.map.frontier.includes(ticket.number) &&
-      run?.status !== "active" &&
-      run?.status !== "claiming" &&
-      run?.status !== "resolving";
+      run === undefined;
     if (run) {
       return {
         ticketNumber: ticket.number,
@@ -222,7 +215,7 @@ export function deriveWayfinderResearchModel(input: {
         output: run.output ?? null,
         error: run.error ?? null,
         canStart,
-        canCancel: ACTIVE_RESEARCH_STATUSES.has(run.status),
+        canCancel: CANCELLABLE_RESEARCH_STATUSES.has(run.status),
         canRetry: run.status === "failed" || run.status === "cancelled",
       };
     }

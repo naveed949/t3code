@@ -123,6 +123,7 @@ describe("WayfinderWorkbench", () => {
               number: 45,
               title: "Implement release",
               url: "https://github.com/t3tools/t3code/issues/45",
+              classification: "task",
             },
           ],
           frontier: [45],
@@ -247,5 +248,23 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain("Canonical resolution was interrupted.");
     expect(markup).toContain("The provider supports conditional requests.");
     expect(markup).toContain("Retry research");
+    expect(markup).not.toContain("Start research");
+    expect(markup).not.toContain("Start work");
+  });
+
+  it("routes an eligible research ticket through the research lifecycle only", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        onMutate={() => undefined}
+        onResearch={() => undefined}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain("Start research");
+    expect(markup).not.toContain("Start work");
   });
 });

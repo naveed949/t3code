@@ -876,7 +876,10 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
                     {(ticketIsAssigned && props.onMutate) ||
                     (ticketIsAssigned && linkedThreadId && props.onReturnToThread) ? (
                       <div className="mt-2 flex flex-wrap gap-2">
-                        {ticketIsAssigned && claimActions.canClaim && props.onMutate ? (
+                        {ticketIsAssigned &&
+                        ticket.classification !== "research" &&
+                        claimActions.canClaim &&
+                        props.onMutate ? (
                           <button
                             type="button"
                             disabled={!mutationsEnabled}

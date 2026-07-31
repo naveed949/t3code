@@ -22,6 +22,7 @@ import {
   ThreadId,
   TurnId,
   WayfinderReconcileReason,
+  WayfinderResearchTicketStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -92,16 +93,7 @@ export const WayfinderResearchProgressReceipt = Schema.Struct({
   threadId: ThreadId,
   skillRunId: SkillRunId,
   ticketNumber: Schema.Int,
-  status: Schema.Literals([
-    "queued",
-    "claiming",
-    "active",
-    "cancelling",
-    "cancelled",
-    "failed",
-    "resolving",
-    "resolved",
-  ]),
+  status: WayfinderResearchTicketStatus,
   createdAt: IsoDateTime,
 });
 export type WayfinderResearchProgressReceipt = typeof WayfinderResearchProgressReceipt.Type;

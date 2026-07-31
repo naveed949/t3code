@@ -97,7 +97,9 @@ const sourceInvocation: SkillInvocation = {
   },
 };
 
-function sourceWithResearch(status: "active" | "failed" | "cancelled"): SkillInvocation {
+function sourceWithResearch(
+  status: "active" | "cancelling" | "failed" | "cancelled",
+): SkillInvocation {
   return {
     ...sourceInvocation,
     wayfinderResearch: {
@@ -347,6 +349,168 @@ it.effect("records queue and claim receipts before starting a manual research ti
   }),
 );
 
+it.effect("keeps manual work queued when background work is disabled", () =>
+  Effect.gen(function* () {
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const process = yield* makeWayfinderResearchProcessor.pipe(
+      Effect.provide(
+        dependencies({
+          snapshot: {
+            snapshotSequence: 0,
+            projects: [],
+            threads: [thread(sourceThreadId, sourceInvocation)],
+            updatedAt: now,
+          },
+          source: sourceInvocation,
+          dispatched,
+          receipts,
+          backgroundAllowed: false,
+        }),
+      ),
+    );
+
+    yield* process({
+      ...eventBase("manual-background-disabled"),
+      type: "thread.wayfinder-research-requested",
+      payload: {
+        threadId: sourceThreadId,
+        skillRunId: sourceSkillRunId,
+        action: { kind: "start-ticket", ticketNumber: 43 },
+        launchMode: "manual",
+        createdAt: now,
+      },
+    });
+
+    assert.deepStrictEqual(
+      dispatched.map((command) =>
+        command.type === "thread.wayfinder.research.update"
+          ? [command.type, command.research.tickets[0]?.status]
+          : [command.type],
+      ),
+      [["thread.wayfinder.research.update", "queued"]],
+    );
+  }),
+);
+
+it.effect("promotes queued manual work when a concurrency slot opens", () =>
+  Effect.gen(function* () {
+    const source: SkillInvocation = {
+      ...sourceInvocation,
+      wayfinderResearch: {
+        automaticLaunchesPaused: false,
+        concurrencyLimit: 2,
+        tickets: [
+          {
+            ticketNumber: 43,
+            launchMode: "manual",
+            status: "queued",
+            updatedAt: now,
+          },
+          {
+            ticketNumber: 44,
+            launchMode: "automatic",
+            status: "active",
+            updatedAt: now,
+          },
+        ],
+        updatedAt: now,
+      },
+      wayfinderMap: {
+        ...map,
+        tickets: [
+          map.tickets[0]!,
+          { ...map.tickets[1]!, classification: "research", claimedBy: "alice" },
+        ],
+        frontier: [43],
+      },
+    };
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const process = yield* makeWayfinderResearchProcessor.pipe(
+      Effect.provide(
+        dependencies({
+          snapshot: {
+            snapshotSequence: 0,
+            projects: [],
+            threads: [thread(sourceThreadId, source)],
+            updatedAt: now,
+          },
+          source,
+          dispatched,
+          receipts,
+        }),
+      ),
+    );
+
+    yield* process({
+      ...eventBase("queued-slot-open"),
+      type: "thread.wayfinder-research-updated",
+      payload: {
+        threadId: sourceThreadId,
+        skillRunId: sourceSkillRunId,
+        research: source.wayfinderResearch!,
+      },
+    });
+
+    assert.deepStrictEqual(
+      dispatched.map((command) =>
+        command.type === "thread.wayfinder.research"
+          ? [command.type, command.action, command.launchMode]
+          : [command.type],
+      ),
+      [["thread.wayfinder.research", { kind: "start-ticket", ticketNumber: 43 }, undefined]],
+    );
+  }),
+);
+
+it.effect(
+  "does not start an automatic request that was queued before automatic launches paused",
+  () =>
+    Effect.gen(function* () {
+      const pausedSource: SkillInvocation = {
+        ...sourceInvocation,
+        wayfinderResearch: {
+          automaticLaunchesPaused: true,
+          concurrencyLimit: 2,
+          tickets: [],
+          updatedAt: now,
+        },
+      };
+      const dispatched: OrchestrationCommand[] = [];
+      const receipts: OrchestrationRuntimeReceipt[] = [];
+      const process = yield* makeWayfinderResearchProcessor.pipe(
+        Effect.provide(
+          dependencies({
+            snapshot: {
+              snapshotSequence: 0,
+              projects: [],
+              threads: [thread(sourceThreadId, pausedSource)],
+              updatedAt: now,
+            },
+            source: pausedSource,
+            dispatched,
+            receipts,
+          }),
+        ),
+      );
+
+      yield* process({
+        ...eventBase("automatic-after-pause"),
+        type: "thread.wayfinder-research-requested",
+        payload: {
+          threadId: sourceThreadId,
+          skillRunId: sourceSkillRunId,
+          action: { kind: "start-ticket", ticketNumber: 43 },
+          launchMode: "automatic",
+          createdAt: now,
+        },
+      });
+
+      assert.deepStrictEqual(dispatched, []);
+    }),
+);
+
 it.effect("cancels the provider turn and releases the canonical claim without resolving it", () =>
   Effect.gen(function* () {
     const source = sourceWithResearch("active");
@@ -406,6 +570,129 @@ it.effect("cancels the provider turn and releases the canonical claim without re
           command.action.kind === "complete-hitl-ticket",
       ),
       false,
+    );
+  }),
+);
+
+it.effect("does not resolve a completion receipt racing with cancellation", () =>
+  Effect.gen(function* () {
+    const source = sourceWithResearch("cancelling");
+    const linkedInvocation = linkedInvocationFor(source);
+    const linked = thread(linkedThreadId, linkedInvocation, {
+      output:
+        '<wayfinder-research-result>{"status":"resolved","summary":"This result arrived after cancellation."}</wayfinder-research-result>',
+    });
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const process = yield* makeWayfinderResearchProcessor.pipe(
+      Effect.provide(
+        dependencies({
+          snapshot: {
+            snapshotSequence: 0,
+            projects: [],
+            threads: [thread(sourceThreadId, source), linked],
+            updatedAt: now,
+          },
+          source,
+          linked: linkedInvocation,
+          dispatched,
+          receipts,
+        }),
+      ),
+    );
+
+    yield* process({
+      ...eventBase("completion-after-cancel"),
+      aggregateId: linkedThreadId,
+      type: "thread.turn-diff-completed",
+      payload: {
+        threadId: linkedThreadId,
+        turnId: linked.latestTurn.turnId,
+        completedAt: now,
+        checkpointRef: "refs/t3/checkpoints/research-cancelled" as never,
+        status: "ready",
+        files: [],
+        assistantMessageId: linked.latestTurn.assistantMessageId!,
+        checkpointTurnCount: 1,
+      },
+    });
+
+    assert.deepStrictEqual(dispatched, []);
+  }),
+);
+
+it.effect("does not let a retry exceed the visible concurrency limit", () =>
+  Effect.gen(function* () {
+    const failedSource = sourceWithResearch("failed");
+    const source: SkillInvocation = {
+      ...failedSource,
+      wayfinderMap: {
+        ...failedSource.wayfinderMap!,
+        tickets: [
+          failedSource.wayfinderMap!.tickets[0]!,
+          {
+            ...failedSource.wayfinderMap!.tickets[1]!,
+            classification: "research",
+            claimedBy: "alice",
+          },
+        ],
+      },
+      wayfinderResearch: {
+        ...failedSource.wayfinderResearch!,
+        concurrencyLimit: 1,
+        tickets: [
+          ...failedSource.wayfinderResearch!.tickets,
+          {
+            ticketNumber: 44,
+            launchMode: "automatic",
+            status: "active",
+            updatedAt: now,
+          },
+        ],
+      },
+    };
+    const linkedInvocation = linkedInvocationFor(source);
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const process = yield* makeWayfinderResearchProcessor.pipe(
+      Effect.provide(
+        dependencies({
+          snapshot: {
+            snapshotSequence: 0,
+            projects: [],
+            threads: [
+              thread(sourceThreadId, source),
+              thread(linkedThreadId, linkedInvocation, { state: "completed" }),
+            ],
+            updatedAt: now,
+          },
+          source,
+          linked: linkedInvocation,
+          dispatched,
+          receipts,
+        }),
+      ),
+    );
+
+    yield* process({
+      ...eventBase("retry-at-capacity"),
+      type: "thread.wayfinder-research-requested",
+      payload: {
+        threadId: sourceThreadId,
+        skillRunId: sourceSkillRunId,
+        action: { kind: "retry-ticket", ticketNumber: 43 },
+        launchMode: "manual",
+        createdAt: now,
+      },
+    });
+
+    assert.deepStrictEqual(
+      dispatched.map((command) =>
+        command.type === "thread.wayfinder.research.update"
+          ? [command.type, command.research.tickets[0]?.status]
+          : [command.type],
+      ),
+      [["thread.wayfinder.research.update", "queued"]],
     );
   }),
 );
