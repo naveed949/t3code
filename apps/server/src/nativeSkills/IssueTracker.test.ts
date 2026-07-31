@@ -27,6 +27,35 @@ const repository = {
   name: "t3code",
 };
 
+it("updates one Wayfinder map section without discarding canonical metadata", () => {
+  const body = [
+    "## Destination",
+    "",
+    "Old destination",
+    "",
+    "## Notes",
+    "",
+    "Keep this note",
+    "",
+    "<!-- t3-wayfinder-publication:key -->",
+  ].join("\n");
+
+  assert.strictEqual(
+    IssueTracker.replaceWayfinderMapSection(body, "destination", "New destination"),
+    [
+      "## Destination",
+      "",
+      "New destination",
+      "",
+      "## Notes",
+      "",
+      "Keep this note",
+      "",
+      "<!-- t3-wayfinder-publication:key -->",
+    ].join("\n"),
+  );
+});
+
 function layer(input: { readonly execute: GitHubCli.GitHubCli["Service"]["execute"] }) {
   return IssueTracker.GitHubIssueTrackerLive.pipe(
     Layer.provideMerge(Layer.mock(GitHubCli.GitHubCli)({ execute: input.execute })),
@@ -37,6 +66,52 @@ function layer(input: { readonly execute: GitHubCli.GitHubCli["Service"]["execut
     ),
   );
 }
+
+it.effect("updates a structured map field while preserving the publication marker", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    yield* tracker.updateWayfinderMapField({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 7,
+      field: "destination",
+      value: "New destination",
+    });
+
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(calls[0], [
+      "issue",
+      "view",
+      "7",
+      "--repo",
+      "t3tools/t3code",
+      "--json",
+      "body",
+    ]);
+    assert.ok(
+      calls[1]?.some((argument) => argument.includes("<!-- t3-wayfinder-publication:key -->")),
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              args[1] === "view"
+                ? JSON.stringify({
+                    body: "## Destination\n\nOld\n\n<!-- t3-wayfinder-publication:key -->",
+                  })
+                : "",
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});
 
 it.effect("resolves a GitHub project and reads its native issue capabilities", () =>
   Effect.gen(function* () {

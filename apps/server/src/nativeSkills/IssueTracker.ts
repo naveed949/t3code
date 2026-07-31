@@ -6,7 +6,11 @@ import * as Schema from "effect/Schema";
 import * as SchemaIssue from "effect/SchemaIssue";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
-import type { WayfinderMapProjection } from "@t3tools/contracts";
+import type {
+  WayfinderDraftTicketClassification,
+  WayfinderMapField,
+  WayfinderMapProjection,
+} from "@t3tools/contracts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
 import { projectWayfinderMap } from "./WayfinderMapProjection.ts";
@@ -82,6 +86,56 @@ export class IssueTracker extends Context.Service<
       readonly blockedNumber: number;
       readonly blockerNumber: number;
     }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly updateWayfinderMapField: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly field: WayfinderMapField;
+      readonly value: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly updateWayfinderDecisions: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly value: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly updateIssueTitle: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly title: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly setWayfinderClassification: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly previous: WayfinderDraftTicketClassification | "unknown";
+      readonly classification: WayfinderDraftTicketClassification;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly removeChild: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly parentNumber: number;
+      readonly childNumber: number;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly removeBlockedBy: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly blockedNumber: number;
+      readonly blockerNumber: number;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly addIssueComment: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly body: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly setIssueState: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly state: "open" | "closed";
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
   }
 >()("t3/nativeSkills/IssueTracker") {}
 
@@ -91,6 +145,7 @@ const RepositoryProbe = Schema.Struct({
 });
 const LabelsProbe = Schema.Array(Schema.Struct({ name: Schema.String }));
 const IssueProbe = Schema.Struct({ number: Schema.Number, url: Schema.String });
+const IssueBodyProbe = Schema.Struct({ body: Schema.String });
 const IssueTypeFieldsProbe = Schema.Struct({
   data: Schema.Struct({
     __type: Schema.Struct({ fields: Schema.Array(Schema.Struct({ name: Schema.String })) }),
@@ -151,6 +206,7 @@ const WayfinderMapProbe = Schema.Struct({
 const decodeRepositoryProbe = Schema.decodeUnknownOption(Schema.fromJsonString(RepositoryProbe));
 const decodeLabelsProbe = Schema.decodeUnknownOption(Schema.fromJsonString(LabelsProbe));
 const decodeIssueProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueProbe));
+const decodeIssueBodyProbe = Schema.decodeUnknownOption(Schema.fromJsonString(IssueBodyProbe));
 const decodeIssueTypeFieldsProbe = Schema.decodeUnknownOption(
   Schema.fromJsonString(IssueTypeFieldsProbe),
 );
@@ -211,6 +267,38 @@ const GitHubIssueNumber = Schema.Int.check(Schema.isGreaterThan(0));
 
 function repositoryReference(repository: IssueTrackerRepository): string {
   return `${repository.owner}/${repository.name}`;
+}
+
+const mapFieldHeading: Record<WayfinderMapField, string> = {
+  destination: "Destination",
+  notes: "Notes",
+  "fog-of-war": "Not Yet Specified",
+  "out-of-scope": "Out of Scope",
+};
+
+export function replaceWayfinderMapSection(
+  body: string,
+  field: WayfinderMapField,
+  value: string,
+): string {
+  return replaceMapSection(body, mapFieldHeading[field], value);
+}
+
+function replaceMapSection(body: string, heading: string, value: string): string {
+  const lines = body.split(/\r?\n/u);
+  const headingIndex = lines.findIndex(
+    (line) => line.trim().toLowerCase() === `## ${heading}`.toLowerCase(),
+  );
+  const replacement = [`## ${heading}`, "", value.trim()];
+  if (headingIndex < 0)
+    return [...lines, ...(body.endsWith("\n") ? [] : [""]), ...replacement].join("\n");
+  const nextHeadingOffset = lines
+    .slice(headingIndex + 1)
+    .findIndex(
+      (line) => /^##\s+/u.test(line) || /^\s*<!--\s*t3-wayfinder-publication:/u.test(line),
+    );
+  const end = nextHeadingOffset < 0 ? lines.length : headingIndex + 1 + nextHeadingOffset;
+  return [...lines.slice(0, headingIndex), ...replacement, "", ...lines.slice(end)].join("\n");
 }
 
 function gitHubIssueReferenceSchema(repository: IssueTrackerRepository) {
@@ -290,6 +378,45 @@ export const GitHubIssueTrackerLive = Layer.effect(
         command: "gh",
         cwd: input.cwd,
         cause: new Error(`GitHub returned no node id for issue #${input.issueNumber}.`),
+      });
+    });
+    const updateIssueBody = Effect.fn("IssueTracker.updateIssueBody")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly transform: (body: string) => string;
+    }) {
+      const current = yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "view",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--json",
+          "body",
+        ],
+      });
+      const decoded = decodeIssueBodyProbe(current.stdout);
+      if (Option.isNone(decoded)) {
+        return yield* new GitHubCli.GitHubCliCommandError({
+          command: "gh",
+          cwd: input.cwd,
+          cause: new Error(`GitHub returned no body for map #${input.issueNumber}.`),
+        });
+      }
+      yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "issue",
+          "edit",
+          String(input.issueNumber),
+          "--repo",
+          repositoryReference(input.repository),
+          "--body",
+          input.transform(decoded.value.body),
+        ],
       });
     });
 
@@ -610,6 +737,173 @@ export const GitHubIssueTrackerLive = Layer.effect(
             `issueId=${blockedId}`,
             "-f",
             `blockingIssueId=${blockerId}`,
+          ],
+        });
+      }),
+      updateWayfinderMapField: Effect.fn("IssueTracker.updateWayfinderMapField")(function* (input) {
+        yield* updateIssueBody({
+          cwd: input.cwd,
+          repository: input.repository,
+          issueNumber: input.issueNumber,
+          transform: (body) => replaceWayfinderMapSection(body, input.field, input.value),
+        });
+      }),
+      updateWayfinderDecisions: Effect.fn("IssueTracker.updateWayfinderDecisions")(
+        function* (input) {
+          yield* updateIssueBody({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.issueNumber,
+            transform: (body) => replaceMapSection(body, "Decisions So Far", input.value),
+          });
+        },
+      ),
+      updateIssueTitle: Effect.fn("IssueTracker.updateIssueTitle")(function* (input) {
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "edit",
+            String(input.issueNumber),
+            "--repo",
+            repositoryReference(input.repository),
+            "--title",
+            input.title,
+          ],
+        });
+      }),
+      setWayfinderClassification: Effect.fn("IssueTracker.setWayfinderClassification")(
+        function* (input) {
+          const label = `wayfinder:${input.classification}`;
+          yield* github.execute({
+            cwd: input.cwd,
+            args: [
+              "label",
+              "create",
+              label,
+              "--repo",
+              repositoryReference(input.repository),
+              "--color",
+              "5319E7",
+              "--description",
+              "Managed by the Wayfinder Workbench",
+              "--force",
+            ],
+          });
+          const remove =
+            input.previous === "unknown" ? [] : ["--remove-label", `wayfinder:${input.previous}`];
+          yield* github.execute({
+            cwd: input.cwd,
+            args: [
+              "issue",
+              "edit",
+              String(input.issueNumber),
+              "--repo",
+              repositoryReference(input.repository),
+              ...remove,
+              "--add-label",
+              label,
+            ],
+          });
+        },
+      ),
+      removeChild: Effect.fn("IssueTracker.removeChild")(function* (input) {
+        const [parentId, childId] = yield* Effect.all([
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.parentNumber,
+          }),
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.childNumber,
+          }),
+        ]);
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($issueId:ID!,$subIssueId:ID!){removeSubIssue(input:{issueId:$issueId,subIssueId:$subIssueId}){clientMutationId}}",
+            "-f",
+            `issueId=${parentId}`,
+            "-f",
+            `subIssueId=${childId}`,
+          ],
+        });
+      }),
+      removeBlockedBy: Effect.fn("IssueTracker.removeBlockedBy")(function* (input) {
+        const [blockedId, blockerId] = yield* Effect.all([
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.blockedNumber,
+          }),
+          loadIssueNodeId({
+            cwd: input.cwd,
+            repository: input.repository,
+            issueNumber: input.blockerNumber,
+          }),
+        ]);
+        const existingOutput = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=query($issueId:ID!){node(id:$issueId){... on Issue{blockedBy(first:100){nodes{number}}}}}",
+            "-f",
+            `issueId=${blockedId}`,
+          ],
+        });
+        const existing = decodeBlockerNumbersProbe(existingOutput.stdout);
+        if (
+          Option.isSome(existing) &&
+          !existing.value.data.node.blockedBy.nodes.some(
+            (issue) => issue.number === input.blockerNumber,
+          )
+        ) {
+          return;
+        }
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "api",
+            "graphql",
+            "-f",
+            "query=mutation($issueId:ID!,$blockingIssueId:ID!){removeBlockedBy(input:{issueId:$issueId,blockingIssueId:$blockingIssueId}){clientMutationId}}",
+            "-f",
+            `issueId=${blockedId}`,
+            "-f",
+            `blockingIssueId=${blockerId}`,
+          ],
+        });
+      }),
+      addIssueComment: Effect.fn("IssueTracker.addIssueComment")(function* (input) {
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "comment",
+            String(input.issueNumber),
+            "--repo",
+            repositoryReference(input.repository),
+            "--body",
+            input.body,
+          ],
+        });
+      }),
+      setIssueState: Effect.fn("IssueTracker.setIssueState")(function* (input) {
+        yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            input.state === "closed" ? "close" : "reopen",
+            String(input.issueNumber),
+            "--repo",
+            repositoryReference(input.repository),
           ],
         });
       }),

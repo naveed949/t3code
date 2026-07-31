@@ -1032,4 +1032,27 @@ describe("orchestration projector", () => {
       activities.some((activity) => activity.id === EventId.make("event-wayfinder-old-0")),
     ).toBe(false);
   });
+
+  it("retains published Wayfinder authority beyond the activity window", () => {
+    const published: OrchestrationThreadActivity = {
+      id: EventId.make("event-wayfinder-published"),
+      tone: "info",
+      kind: "wayfinder.draft.published",
+      summary: "Published",
+      payload: { skillRunId: "skill-run:published" },
+      turnId: null,
+      createdAt: "2026-03-01T08:00:00.000Z",
+    };
+    const filler = Array.from({ length: 501 }, (_, index) => ({
+      id: EventId.make(`event-published-filler-${index}`),
+      tone: "info" as const,
+      kind: "tool.completed",
+      summary: "Filler",
+      payload: {},
+      turnId: null,
+      createdAt: `2026-03-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+    }));
+
+    expect(retainThreadActivities([published, ...filler])).toContainEqual(published);
+  });
 });

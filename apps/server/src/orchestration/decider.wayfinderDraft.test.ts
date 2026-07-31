@@ -7,7 +7,6 @@ import {
   SkillRunId,
   ThreadId,
 } from "@t3tools/contracts";
-import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import { expect, it } from "@effect/vitest";
@@ -288,6 +287,151 @@ it.layer(NodeServices.layer)("Wayfinder draft command safety", (it) => {
       expect(confirmed).toMatchObject({
         type: "thread.wayfinder-publication-requested",
         payload: { threadId, skillRunId, confirmed: true },
+      });
+
+      const synchronizedEvents = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.publication.update",
+          commandId: CommandId.make("command-publication-synchronized"),
+          threadId,
+          skillRunId,
+          publication: {
+            status: "synchronized",
+            artifacts: [],
+            nextStep: null,
+            updatedAt: now,
+          },
+          wayfinderMap: {
+            canonicalReference: {
+              number: 7,
+              title: "Wayfinder",
+              url: "https://github.com/t3tools/t3code/issues/7",
+              state: "open",
+            },
+            destination: "Ship safely",
+            notes: "",
+            decisionsSoFar: [],
+            fogOfWar: [],
+            outOfScope: [],
+            tickets: [],
+            frontier: [],
+            lastSynchronizedAt: now,
+          },
+          createdAt: now,
+        },
+      });
+      for (const synchronizedEvent of Array.isArray(synchronizedEvents)
+        ? synchronizedEvents
+        : [synchronizedEvents]) {
+        readModel = yield* projectEvent(readModel, { ...synchronizedEvent, sequence: sequence++ });
+      }
+
+      const action = { kind: "close-ticket" as const, ticketNumber: 8 };
+      const requested = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("command-mutation"),
+          threadId,
+          skillRunId,
+          actionId: "action:close",
+          action,
+          confirmed: false,
+          createdAt: now,
+        },
+      });
+      expect(requested).toMatchObject({
+        type: "thread.wayfinder-mutation-requested",
+        payload: { runtimeMode: "approval-required", confirmed: false },
+      });
+      const mutationApproval = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutation.update",
+          commandId: CommandId.make("command-mutation-awaiting"),
+          threadId,
+          skillRunId,
+          mutation: {
+            actionId: "action:close",
+            action,
+            status: "awaiting-approval",
+            error: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        },
+      });
+      for (const mutationEvent of Array.isArray(mutationApproval)
+        ? mutationApproval
+        : [mutationApproval]) {
+        readModel = yield* projectEvent(readModel, { ...mutationEvent, sequence: sequence++ });
+      }
+      const changedAction = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("command-mutation-changed"),
+          threadId,
+          skillRunId,
+          actionId: "action:close",
+          action: { kind: "reopen-ticket", ticketNumber: 8 },
+          confirmed: true,
+          createdAt: now,
+        },
+      }).pipe(Effect.flip);
+      expect(changedAction).toMatchObject({
+        detail: expect.stringContaining("pending server approval"),
+      });
+      const confirmedMutation = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("command-mutation-confirmed"),
+          threadId,
+          skillRunId,
+          actionId: "action:close",
+          action,
+          confirmed: true,
+          createdAt: now,
+        },
+      });
+      expect(confirmedMutation).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "thread.wayfinder-mutation-requested",
+            payload: expect.objectContaining({ actionId: "action:close", confirmed: true }),
+          }),
+          expect.objectContaining({
+            type: "thread.activity-appended",
+            payload: expect.objectContaining({
+              activity: expect.objectContaining({
+                kind: "wayfinder.mutation.approval-resolved",
+              }),
+            }),
+          }),
+        ]),
+      );
+      for (const confirmedEvent of Array.isArray(confirmedMutation)
+        ? confirmedMutation
+        : [confirmedMutation]) {
+        readModel = yield* projectEvent(readModel, { ...confirmedEvent, sequence: sequence++ });
+      }
+      const replay = yield* decideOrchestrationCommand({
+        readModel,
+        command: {
+          type: "thread.wayfinder.mutate",
+          commandId: CommandId.make("command-mutation-replay"),
+          threadId,
+          skillRunId,
+          actionId: "action:close",
+          action,
+          confirmed: true,
+          createdAt: now,
+        },
+      }).pipe(Effect.flip);
+      expect(replay).toMatchObject({
+        detail: expect.stringContaining("pending server approval"),
       });
     }),
   );

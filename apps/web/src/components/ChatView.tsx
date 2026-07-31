@@ -16,6 +16,7 @@ import {
   type ThreadId,
   type TurnId,
   type KeybindingCommand,
+  type WayfinderMutationAction,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -1194,6 +1195,9 @@ function ChatViewContent(props: ChatViewProps) {
   const publishWayfinderDraftCommand = useAtomCommand(threadEnvironment.publishWayfinderDraft, {
     reportFailure: false,
   });
+  const mutateWayfinderCommand = useAtomCommand(threadEnvironment.mutateWayfinder, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1637,6 +1641,11 @@ function ChatViewContent(props: ChatViewProps) {
     activeWayfinderWorkstream?.wayfinderMap ??
     activeLatestTurn?.skillInvocation?.wayfinderMap ??
     null;
+  const activeWayfinderInvocation =
+    activeWayfinderWorkstream?.skillRuns.toReversed().find((run) => run.wayfinderMap) ??
+    activeLatestTurn?.skillInvocation ??
+    null;
+  const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -5041,6 +5050,39 @@ function ChatViewContent(props: ChatViewProps) {
     wayfinderPublication?.status,
   ]);
 
+  const onMutateWayfinder = useCallback(
+    async (
+      action: WayfinderMutationAction,
+      options?: { readonly actionId?: string; readonly confirmed?: boolean },
+    ) => {
+      if (!activeThreadId || !activeWayfinderInvocation) return;
+      const result = await mutateWayfinderCommand({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          action,
+          ...(options?.actionId ? { actionId: options.actionId } : {}),
+          confirmed: options?.confirmed ?? false,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : "Failed to update the Wayfinder map.",
+        );
+      }
+    },
+    [
+      activeThreadId,
+      activeWayfinderInvocation,
+      environmentId,
+      mutateWayfinderCommand,
+      setThreadError,
+    ],
+  );
+
   const setActivePendingUserInputQuestionIndex = useCallback(
     (nextQuestionIndex: number) => {
       if (!activePendingUserInput) {
@@ -5724,7 +5766,11 @@ function ChatViewContent(props: ChatViewProps) {
         mode="embedded"
       />
     ) : activeRightPanelSurface?.kind === "wayfinder" && activeWayfinderMap ? (
-      <WayfinderWorkbench map={activeWayfinderMap} />
+      <WayfinderWorkbench
+        map={activeWayfinderMap}
+        mutation={activeWayfinderMutation}
+        onMutate={onMutateWayfinder}
+      />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (

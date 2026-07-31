@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   EventId,
+  type OrchestrationCommand,
   type OrchestrationEvent,
   ProjectId,
   ProviderInstanceId,
@@ -25,10 +26,209 @@ import {
   RuntimeReceiptBus,
   type OrchestrationRuntimeReceipt,
 } from "../Services/RuntimeReceiptBus.ts";
+import { makeWayfinderPublicationReactor } from "./WayfinderPublicationReactor.ts";
 import {
   makeWayfinderPublicationProcessor,
-  makeWayfinderPublicationReactor,
-} from "./WayfinderPublicationReactor.ts";
+  makeWayfinderMutationProcessor,
+} from "./WayfinderProcessors.ts";
+
+const unusedMutationTrackerMethods = {
+  updateWayfinderMapField: () => Effect.die("unexpected tracker write"),
+  updateWayfinderDecisions: () => Effect.die("unexpected tracker write"),
+  updateIssueTitle: () => Effect.die("unexpected tracker write"),
+  setWayfinderClassification: () => Effect.die("unexpected tracker write"),
+  removeChild: () => Effect.die("unexpected tracker write"),
+  removeBlockedBy: () => Effect.die("unexpected tracker write"),
+  addIssueComment: () => Effect.die("unexpected tracker write"),
+  setIssueState: () => Effect.die("unexpected tracker write"),
+};
+
+it.effect("corrects optimistic state from GitHub when the initial reconciliation fails", () =>
+  Effect.gen(function* () {
+    const now = "2026-07-30T10:05:00.000Z";
+    const threadId = ThreadId.make("thread:mutation");
+    const skillRunId = SkillRunId.make("skill-run:mutation");
+    const projectId = ProjectId.make("project:mutation");
+    const map = {
+      canonicalReference: {
+        number: 7,
+        title: "Release map",
+        url: "https://github.com/t3tools/t3code/issues/7",
+        state: "open" as const,
+      },
+      destination: "Ship safely",
+      notes: "",
+      decisionsSoFar: [],
+      fogOfWar: [],
+      outOfScope: [],
+      tickets: [
+        {
+          number: 8,
+          title: "Old title",
+          url: "https://github.com/t3tools/t3code/issues/8",
+          state: "open" as const,
+          classification: "grilling" as const,
+          claimedBy: null,
+          blockedBy: [],
+          blocks: [],
+        },
+      ],
+      frontier: [8],
+      lastSynchronizedAt: now,
+    };
+    const invocation = {
+      skill: {
+        name: "wayfinder",
+        path: "/skills/wayfinder/SKILL.md",
+        contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+      },
+      execution: { mode: "native" as const, adapterId: "wayfinder", adapterVersion: 1 },
+      workstreamId: WorkstreamId.make("workstream:mutation"),
+      skillRunId,
+      projectId,
+      threadId,
+      createdAt: now,
+      wayfinderMap: map,
+    };
+    const dispatched: OrchestrationCommand[] = [];
+    const receipts: OrchestrationRuntimeReceipt[] = [];
+    const writes: string[] = [];
+    let reconciliationReads = 0;
+    const dependencies = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(OrchestrationEngineService, {
+        readEvents: () => Stream.empty,
+        dispatch: (command) =>
+          Effect.sync(() => {
+            dispatched.push(command);
+            return { sequence: dispatched.length };
+          }),
+        streamDomainEvents: Stream.empty,
+        latestSequence: Effect.succeed(0),
+      }),
+      Layer.mock(ProjectionSnapshotQuery)({
+        getSkillRunsByThreadId: () => Effect.succeed([invocation]),
+        getSnapshot: () =>
+          Effect.succeed({
+            snapshotSequence: 0,
+            projects: [
+              {
+                id: projectId,
+                title: "Project",
+                workspaceRoot: "/project",
+                defaultModelSelection: null,
+                scripts: [],
+                createdAt: now,
+                updatedAt: now,
+                deletedAt: null,
+              },
+            ],
+            threads: [
+              {
+                id: threadId,
+                projectId,
+                title: "Mutation thread",
+                modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+                interactionMode: "default",
+                runtimeMode: "full-access",
+                branch: null,
+                worktreePath: null,
+                latestTurn: null,
+                createdAt: now,
+                updatedAt: now,
+                archivedAt: null,
+                settledOverride: null,
+                settledAt: null,
+                deletedAt: null,
+                messages: [],
+                proposedPlans: [],
+                activities: [],
+                checkpoints: [],
+                session: null,
+              },
+            ],
+            updatedAt: now,
+          }),
+      }),
+      Layer.succeed(
+        IssueTracker,
+        IssueTracker.of({
+          resolveProjectRepository: () =>
+            Effect.succeed({
+              canonicalKey: "github.com/t3tools/t3code",
+              owner: "t3tools",
+              name: "t3code",
+            }),
+          inspectCapabilities: () => Effect.die("unexpected tracker read"),
+          resolveIssue: () => Effect.die("unexpected tracker read"),
+          loadWayfinderMap: () =>
+            Effect.sync(() => {
+              reconciliationReads += 1;
+              return reconciliationReads === 1
+                ? ({ kind: "truncated" } as const)
+                : ({
+                    kind: "loaded",
+                    map: {
+                      ...map,
+                      tickets: [{ ...map.tickets[0]!, title: "New title" }],
+                    },
+                  } as const);
+            }),
+          ensureLabel: () => Effect.die("unexpected tracker write"),
+          createIssue: () => Effect.die("unexpected tracker write"),
+          addChild: () => Effect.die("unexpected tracker write"),
+          addBlockedBy: () => Effect.die("unexpected tracker write"),
+          ...unusedMutationTrackerMethods,
+          updateIssueTitle: (input) =>
+            Effect.sync(() => writes.push(`rename:${input.issueNumber}:${input.title}`)),
+        }),
+      ),
+      Layer.succeed(
+        RuntimeReceiptBus,
+        RuntimeReceiptBus.of({
+          publish: (receipt) => Effect.sync(() => receipts.push(receipt)),
+          streamEventsForTest: Stream.empty,
+        }),
+      ),
+    );
+    const process = yield* makeWayfinderMutationProcessor.pipe(Effect.provide(dependencies));
+    yield* process({
+      sequence: 1,
+      eventId: EventId.make("event:mutation"),
+      aggregateKind: "thread",
+      aggregateId: threadId,
+      type: "thread.wayfinder-mutation-requested",
+      occurredAt: now,
+      commandId: CommandId.make("command:mutation"),
+      causationEventId: null,
+      correlationId: CommandId.make("command:mutation"),
+      metadata: {},
+      payload: {
+        threadId,
+        skillRunId,
+        actionId: "action:rename",
+        action: { kind: "rename-ticket", ticketNumber: 8, title: "New title" },
+        runtimeMode: "full-access",
+        confirmed: false,
+        createdAt: now,
+      },
+    });
+
+    assert.deepStrictEqual(writes, ["rename:8:New title"]);
+    assert.deepStrictEqual(
+      dispatched.map((command) => command.type),
+      ["thread.wayfinder.mutation.update", "thread.wayfinder.mutation.update"],
+    );
+    assert.deepStrictEqual(
+      receipts.map((receipt) => receipt.type),
+      ["wayfinder.mutation.progress", "wayfinder.mutation.progress"],
+    );
+    const correction = dispatched.at(-1);
+    assert(correction?.type === "thread.wayfinder.mutation.update");
+    assert.strictEqual(correction.mutation.status, "failed");
+    assert.strictEqual(correction.wayfinderMap?.tickets[0]?.title, "New title");
+  }),
+);
 
 it.effect("waits for confirmation in approval-required mode without writing to GitHub", () =>
   Effect.scoped(
@@ -145,6 +345,7 @@ it.effect("waits for confirmation in approval-required mode without writing to G
             createIssue: () => Effect.die("unexpected tracker write"),
             addChild: () => Effect.die("unexpected tracker write"),
             addBlockedBy: () => Effect.die("unexpected tracker write"),
+            ...unusedMutationTrackerMethods,
           }),
         ),
         Layer.succeed(
@@ -315,6 +516,7 @@ it.effect(
               createIssue: () => Effect.die("unexpected tracker write"),
               addChild: () => Effect.die("unexpected tracker write"),
               addBlockedBy: () => Effect.die("unexpected tracker write"),
+              ...unusedMutationTrackerMethods,
             }),
           ),
           Layer.succeed(
@@ -501,6 +703,7 @@ it.effect("publishes, reconciles, and emits progress receipts through the reacto
               }),
             addChild: () => Effect.void,
             addBlockedBy: () => Effect.void,
+            ...unusedMutationTrackerMethods,
             loadWayfinderMap: () =>
               Effect.succeed({
                 kind: "loaded" as const,

@@ -126,3 +126,71 @@ export const WayfinderPublication = Schema.Struct({
 export type WayfinderPublication = typeof WayfinderPublication.Type;
 
 export const OptionalWayfinderPublication = Schema.optional(WayfinderPublication);
+
+const WayfinderTicketNumber = Schema.Int.check(Schema.isGreaterThan(0));
+
+export const WayfinderMapField = Schema.Literals([
+  "destination",
+  "notes",
+  "fog-of-war",
+  "out-of-scope",
+]);
+export type WayfinderMapField = typeof WayfinderMapField.Type;
+
+export const WayfinderMutationAction = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("update-map-field"),
+    field: WayfinderMapField,
+    value: Schema.String,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("create-ticket"),
+    title: TrimmedNonEmptyString,
+    classification: WayfinderDraftTicketClassification,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("rename-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+    title: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("classify-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+    classification: WayfinderDraftTicketClassification,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("add-dependency"),
+    blockedNumber: WayfinderTicketNumber,
+    blockerNumber: WayfinderTicketNumber,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("remove-dependency"),
+    blockedNumber: WayfinderTicketNumber,
+    blockerNumber: WayfinderTicketNumber,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("resolve-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+    resolution: TrimmedNonEmptyString,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("close-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
+  Schema.Struct({
+    kind: Schema.Literal("reopen-ticket"),
+    ticketNumber: WayfinderTicketNumber,
+  }),
+]);
+export type WayfinderMutationAction = typeof WayfinderMutationAction.Type;
+
+export const WayfinderMutation = Schema.Struct({
+  actionId: TrimmedNonEmptyString,
+  action: WayfinderMutationAction,
+  status: Schema.Literals(["awaiting-approval", "mutating", "failed", "synchronized"]),
+  error: Schema.NullOr(TrimmedNonEmptyString),
+  updatedAt: IsoDateTime,
+});
+export type WayfinderMutation = typeof WayfinderMutation.Type;
+
+export const OptionalWayfinderMutation = Schema.optional(WayfinderMutation);

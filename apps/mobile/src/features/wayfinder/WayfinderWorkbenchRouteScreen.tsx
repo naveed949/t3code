@@ -1,19 +1,38 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  applyOptimisticWayfinderMutation,
+  createWayfinderTicketAction,
+  isWayfinderMutationInFlight,
+  WAYFINDER_TICKET_CLASSIFICATIONS,
+  type WayfinderTicketClassification,
+} from "@t3tools/client-runtime/state/wayfinder-workbench";
+import {
   findThreadWayfinderWorkstream,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { EnvironmentId, ThreadId, type WayfinderMapProjection } from "@t3tools/contracts";
+import {
+  EnvironmentId,
+  ThreadId,
+  type WayfinderMapProjection,
+  type WayfinderMutation,
+  type WayfinderMutationAction,
+} from "@t3tools/contracts";
 import type { StaticScreenProps } from "@react-navigation/native";
-import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, ScrollView, TextInput, View } from "react-native";
 import { Atom } from "effect/unstable/reactivity";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { environmentThreadDetails, environmentThreadShells } from "../../state/threads";
-import { buildMobileWayfinderPresentation } from "./WayfinderWorkbench.logic";
+import { threadEnvironment } from "../../state/threads";
+import { useAtomCommand } from "../../state/use-atom-command";
+import {
+  buildMobileDependencyAction,
+  buildMobileTicketAction,
+  buildMobileWayfinderPresentation,
+} from "./WayfinderWorkbench.logic";
 
 const EMPTY_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
 
@@ -22,22 +41,113 @@ type WayfinderWorkbenchRouteParams = {
   threadId: string;
 };
 
-function TicketList(props: { readonly map: WayfinderMapProjection }) {
+function TicketActions(props: {
+  readonly ticket: WayfinderMapProjection["tickets"][number];
+  readonly disabled: boolean;
+  readonly onMutate: (action: WayfinderMutationAction) => void;
+}) {
+  const [value, setValue] = useState(props.ticket.title);
+  const [resolution, setResolution] = useState("");
+  const nextClassification =
+    WAYFINDER_TICKET_CLASSIFICATIONS[
+      (WAYFINDER_TICKET_CLASSIFICATIONS.indexOf(
+        props.ticket.classification as WayfinderTicketClassification,
+      ) +
+        1) %
+        WAYFINDER_TICKET_CLASSIFICATIONS.length
+    ] ?? "research";
+  return (
+    <View className="mt-3 gap-2 border-t border-border pt-3">
+      <TextInput
+        accessibilityLabel={`Rename ${props.ticket.title}`}
+        className="rounded-lg border border-border px-3 py-2 text-foreground"
+        value={value}
+        onChangeText={setValue}
+      />
+      <TextInput
+        accessibilityLabel={`Resolution for ${props.ticket.title}`}
+        className="rounded-lg border border-border px-3 py-2 text-foreground"
+        value={resolution}
+        onChangeText={setResolution}
+      />
+      <View className="flex-row flex-wrap gap-2">
+        <Pressable
+          accessibilityRole="button"
+          disabled={props.disabled || !value.trim()}
+          className="rounded-lg border border-border px-3 py-2"
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, { kind: "rename", value });
+            if (action) props.onMutate(action);
+          }}
+        >
+          <Text className="text-xs font-semibold">Rename</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          disabled={props.disabled}
+          className="rounded-lg border border-border px-3 py-2"
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, {
+              kind: "classify",
+              classification: nextClassification,
+            });
+            if (action) props.onMutate(action);
+          }}
+        >
+          <Text className="text-xs font-semibold">Classify as {nextClassification}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          disabled={props.disabled}
+          className="rounded-lg border border-border px-3 py-2"
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, { kind: "toggle-state" });
+            if (action) props.onMutate(action);
+          }}
+        >
+          <Text className="text-xs font-semibold">
+            {props.ticket.state === "open" ? "Close" : "Reopen"}
+          </Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          disabled={props.disabled || !resolution.trim()}
+          className="rounded-lg border border-border px-3 py-2"
+          onPress={() => {
+            const action = buildMobileTicketAction(props.ticket, {
+              kind: "resolve",
+              value: resolution,
+            });
+            if (action) props.onMutate(action);
+          }}
+        >
+          <Text className="text-xs font-semibold">Record resolution</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function TicketList(props: {
+  readonly map: WayfinderMapProjection;
+  readonly disabled: boolean;
+  readonly onMutate: (action: WayfinderMutationAction) => void;
+}) {
   const presentation = buildMobileWayfinderPresentation(props.map);
   return (
     <View className="gap-2">
       {presentation.tickets.map((ticket) => (
-        <Pressable
-          key={ticket.number}
-          accessibilityRole="link"
-          accessibilityLabel={`${ticket.title}, ${ticket.state}, ${ticket.classification}`}
-          className="rounded-xl border border-border bg-card p-4"
-          onPress={() => void tryOpenExternalUrl(ticket.url, "wayfinder")}
-        >
+        <View key={ticket.number} className="rounded-xl border border-border bg-card p-4">
           <View className="flex-row items-start justify-between gap-3">
-            <Text className="min-w-0 flex-1 text-sm font-semibold text-foreground">
-              {ticket.title}
-            </Text>
+            <Pressable
+              accessibilityRole="link"
+              accessibilityLabel={`${ticket.title}, ${ticket.state}, ${ticket.classification}`}
+              onPress={() => void tryOpenExternalUrl(ticket.url, "wayfinder")}
+            >
+              <Text className="min-w-0 flex-1 text-sm font-semibold text-foreground underline">
+                {ticket.title}
+              </Text>
+            </Pressable>
             <Text className="text-xs capitalize text-foreground-muted">{ticket.state}</Text>
           </View>
           <Text className="mt-1 text-xs capitalize text-foreground-muted">
@@ -51,7 +161,8 @@ function TicketList(props: { readonly map: WayfinderMapProjection }) {
           ) : props.map.frontier.includes(ticket.number) ? (
             <Text className="mt-1 text-xs font-semibold text-foreground">Frontier</Text>
           ) : null}
-        </Pressable>
+          <TicketActions ticket={ticket} disabled={props.disabled} onMutate={props.onMutate} />
+        </View>
       ))}
     </View>
   );
@@ -95,6 +206,7 @@ function WayfinderWorkbenchContent(props: {
   readonly projectId: Parameters<typeof scopeProjectRef>[1];
 }) {
   const [showGraph, setShowGraph] = useState(false);
+  const mutateWayfinder = useAtomCommand(threadEnvironment.mutateWayfinder, "update Wayfinder");
   const workstreams = useAtomValue(
     environmentThreadShells.projectWorkstreamsAtom(
       scopeProjectRef(props.environmentId, props.projectId),
@@ -104,7 +216,43 @@ function WayfinderWorkbenchContent(props: {
   const thread = useAtomValue(
     environmentThreadDetails.detailAtom(scopeThreadRef(props.environmentId, props.threadId)),
   );
-  const map = workstream?.wayfinderMap ?? thread?.latestTurn?.skillInvocation?.wayfinderMap ?? null;
+  const invocation =
+    workstream?.skillRuns.toReversed().find((run) => run.wayfinderMap) ??
+    thread?.latestTurn?.skillInvocation ??
+    null;
+  const canonicalMap = workstream?.wayfinderMap ?? invocation?.wayfinderMap ?? null;
+  const mutation: WayfinderMutation | null = invocation?.wayfinderMutation ?? null;
+  const map = canonicalMap ? applyOptimisticWayfinderMutation(canonicalMap, mutation) : null;
+  const [destination, setDestination] = useState(canonicalMap?.destination ?? "");
+  const [notes, setNotes] = useState(canonicalMap?.notes ?? "");
+  const [fog, setFog] = useState(canonicalMap?.fogOfWar.join("\n") ?? "");
+  const [outOfScope, setOutOfScope] = useState(canonicalMap?.outOfScope.join("\n") ?? "");
+  const [newTicketTitle, setNewTicketTitle] = useState("");
+  const [newTicketClassification, setNewTicketClassification] =
+    useState<WayfinderTicketClassification>("grilling");
+  const [blocker, setBlocker] = useState("");
+  const [blocked, setBlocked] = useState("");
+  useEffect(() => {
+    if (!canonicalMap) return;
+    setDestination(canonicalMap.destination);
+    setNotes(canonicalMap.notes);
+    setFog(canonicalMap.fogOfWar.join("\n"));
+    setOutOfScope(canonicalMap.outOfScope.join("\n"));
+  }, [canonicalMap?.lastSynchronizedAt]);
+  const working = isWayfinderMutationInFlight(mutation);
+  const onMutate = (action: WayfinderMutationAction, confirmed = false) => {
+    if (!invocation) return;
+    void mutateWayfinder({
+      environmentId: props.environmentId,
+      input: {
+        threadId: props.threadId,
+        skillRunId: invocation.skillRunId,
+        action,
+        ...(confirmed && mutation ? { actionId: mutation.actionId } : {}),
+        confirmed,
+      },
+    });
+  };
   if (!map) {
     return (
       <View className="flex-1 items-center justify-center bg-background p-6">
@@ -129,7 +277,7 @@ function WayfinderWorkbenchContent(props: {
         </Text>
         <Text className="text-xl font-bold text-foreground">{map.canonicalReference.title}</Text>
         <Text className="text-xs text-foreground-muted">
-          Read-only · Synchronized {map.lastSynchronizedAt}
+          GitHub canonical · Synchronized {map.lastSynchronizedAt}
         </Text>
         <Pressable
           accessibilityRole="link"
@@ -139,6 +287,162 @@ function WayfinderWorkbenchContent(props: {
             GitHub #{map.canonicalReference.number}
           </Text>
         </Pressable>
+      </View>
+
+      <View className="gap-3 rounded-xl border border-border bg-card p-4">
+        <Text className="text-sm font-semibold">Structured actions</Text>
+        {mutation ? (
+          <Text accessibilityRole="summary" className="text-xs text-foreground-muted">
+            {mutation.status === "failed" ? mutation.error : mutation.status.replace("-", " ")}
+          </Text>
+        ) : null}
+        {mutation?.status === "awaiting-approval" ? (
+          <Pressable
+            accessibilityRole="button"
+            className="rounded-lg border border-border px-3 py-2"
+            onPress={() => onMutate(mutation.action, true)}
+          >
+            <Text className="text-xs font-semibold">Confirm GitHub change</Text>
+          </Pressable>
+        ) : null}
+        <TextInput
+          accessibilityLabel="Wayfinder destination"
+          multiline
+          className="rounded-lg border border-border px-3 py-2 text-foreground"
+          value={destination}
+          onChangeText={setDestination}
+        />
+        <Pressable
+          accessibilityRole="button"
+          disabled={working}
+          className="self-start rounded-lg border border-border px-3 py-2"
+          onPress={() =>
+            onMutate({ kind: "update-map-field", field: "destination", value: destination })
+          }
+        >
+          <Text className="text-xs font-semibold">Save destination</Text>
+        </Pressable>
+        <TextInput
+          accessibilityLabel="Wayfinder notes"
+          multiline
+          className="rounded-lg border border-border px-3 py-2 text-foreground"
+          value={notes}
+          onChangeText={setNotes}
+        />
+        <Pressable
+          accessibilityRole="button"
+          disabled={working}
+          className="self-start rounded-lg border border-border px-3 py-2"
+          onPress={() => onMutate({ kind: "update-map-field", field: "notes", value: notes })}
+        >
+          <Text className="text-xs font-semibold">Save notes</Text>
+        </Pressable>
+        <TextInput
+          accessibilityLabel="Wayfinder fog of war"
+          multiline
+          className="rounded-lg border border-border px-3 py-2 text-foreground"
+          value={fog}
+          onChangeText={setFog}
+        />
+        <Pressable
+          accessibilityRole="button"
+          disabled={working}
+          className="self-start rounded-lg border border-border px-3 py-2"
+          onPress={() => onMutate({ kind: "update-map-field", field: "fog-of-war", value: fog })}
+        >
+          <Text className="text-xs font-semibold">Save fog of war</Text>
+        </Pressable>
+        <TextInput
+          accessibilityLabel="Wayfinder out of scope"
+          multiline
+          className="rounded-lg border border-border px-3 py-2 text-foreground"
+          value={outOfScope}
+          onChangeText={setOutOfScope}
+        />
+        <Pressable
+          accessibilityRole="button"
+          disabled={working}
+          className="self-start rounded-lg border border-border px-3 py-2"
+          onPress={() =>
+            onMutate({ kind: "update-map-field", field: "out-of-scope", value: outOfScope })
+          }
+        >
+          <Text className="text-xs font-semibold">Save out of scope</Text>
+        </Pressable>
+        <TextInput
+          accessibilityLabel="New decision ticket title"
+          className="rounded-lg border border-border px-3 py-2 text-foreground"
+          value={newTicketTitle}
+          onChangeText={setNewTicketTitle}
+        />
+        <View
+          accessibilityLabel={`New ticket classification: ${newTicketClassification}`}
+          className="flex-row flex-wrap gap-2"
+        >
+          {WAYFINDER_TICKET_CLASSIFICATIONS.map((classification) => (
+            <Pressable
+              key={classification}
+              accessibilityRole="button"
+              accessibilityState={{ selected: classification === newTicketClassification }}
+              disabled={working}
+              className="rounded-lg border border-border px-3 py-2"
+              onPress={() => setNewTicketClassification(classification)}
+            >
+              <Text className="text-xs font-semibold">{classification}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          disabled={working || !newTicketTitle.trim()}
+          className="self-start rounded-lg border border-border px-3 py-2"
+          onPress={() => {
+            const action = createWayfinderTicketAction(newTicketTitle, newTicketClassification);
+            if (action) onMutate(action);
+          }}
+        >
+          <Text className="text-xs font-semibold">Create {newTicketClassification} ticket</Text>
+        </Pressable>
+        <View className="flex-row gap-2">
+          <TextInput
+            accessibilityLabel="Blocker ticket number"
+            keyboardType="number-pad"
+            className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
+            value={blocker}
+            onChangeText={setBlocker}
+          />
+          <TextInput
+            accessibilityLabel="Blocked ticket number"
+            keyboardType="number-pad"
+            className="flex-1 rounded-lg border border-border px-3 py-2 text-foreground"
+            value={blocked}
+            onChangeText={setBlocked}
+          />
+        </View>
+        <View className="flex-row gap-2">
+          <Pressable
+            accessibilityRole="button"
+            disabled={working || !Number(blocker) || !Number(blocked)}
+            className="rounded-lg border border-border px-3 py-2"
+            onPress={() => {
+              const action = buildMobileDependencyAction("add-dependency", blocker, blocked);
+              if (action) onMutate(action);
+            }}
+          >
+            <Text className="text-xs font-semibold">Add dependency</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            disabled={working || !Number(blocker) || !Number(blocked)}
+            className="rounded-lg border border-border px-3 py-2"
+            onPress={() => {
+              const action = buildMobileDependencyAction("remove-dependency", blocker, blocked);
+              if (action) onMutate(action);
+            }}
+          >
+            <Text className="text-xs font-semibold">Remove</Text>
+          </Pressable>
+        </View>
       </View>
 
       <View>
@@ -185,7 +489,7 @@ function WayfinderWorkbenchContent(props: {
 
       <View>
         <Text className="mb-2 text-sm font-semibold text-foreground">Frontier and tickets</Text>
-        <TicketList map={map} />
+        <TicketList map={map} disabled={working} onMutate={onMutate} />
       </View>
 
       <View className="gap-4">

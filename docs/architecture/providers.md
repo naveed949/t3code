@@ -86,3 +86,11 @@ canonical relationship first, so recovery is safe even if the process stops betw
 and its receipt. Draft authority clears only after the tracker adapter reloads the canonical map and
 reconciles every expected child and blocker identity. Publication updates also refresh the exact
 Skill Run in the shell stream, even when a later ordinary turn is the thread's latest turn.
+
+Published-map editing reuses that command/event/reactor seam. A closed union of Wayfinder mutation
+actions crosses the wire; arbitrary issue-body administration does not. The decider binds the
+action to the published Skill Run and current runtime permission mode. The drainable worker performs
+one tracker mutation, emits typed in-flight and completion receipts, reloads the canonical graph,
+and persists both the active-action state and reconciled projection on the same Skill Run. Clients
+may project only an awaiting or mutating action optimistically and discard that projection on a
+failed receipt.

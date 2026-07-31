@@ -24,6 +24,7 @@ import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
   createProject,
+  mutateWayfinder,
   publishWayfinderDraft,
   settleThread,
   stopThreadSession,
@@ -193,6 +194,34 @@ describe("environment commands", () => {
           skillRunId: "skill-run:1",
           confirmed: true,
           createdAt: "2026-06-06T00:03:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("uses the command id to scope a structured Wayfinder mutation", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+      yield* mutateWayfinder({
+        commandId: CommandId.make("mutation-command"),
+        threadId: ThreadId.make("thread-1"),
+        skillRunId: SkillRunId.make("skill-run:1"),
+        action: { kind: "close-ticket", ticketNumber: 8 },
+        confirmed: false,
+        createdAt: "2026-06-06T00:04:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.wayfinder.mutate",
+          commandId: "mutation-command",
+          actionId: "mutation-command",
+          threadId: "thread-1",
+          skillRunId: "skill-run:1",
+          action: { kind: "close-ticket", ticketNumber: 8 },
+          confirmed: false,
+          createdAt: "2026-06-06T00:04:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

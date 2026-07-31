@@ -2,11 +2,15 @@ import * as Schema from "effect/Schema";
 import { describe, expect, it } from "vite-plus/test";
 
 import { ApprovalRequestId } from "./baseSchemas.ts";
-import { WayfinderDraft, WayfinderPublication } from "./nativeSkills.ts";
+import { WayfinderDraft, WayfinderMutation, WayfinderPublication } from "./nativeSkills.ts";
+
+const decodeWayfinderDraft = Schema.decodeUnknownSync(WayfinderDraft);
+const decodeWayfinderPublication = Schema.decodeUnknownSync(WayfinderPublication);
+const decodeWayfinderMutation = Schema.decodeUnknownSync(WayfinderMutation);
 
 describe("WayfinderDraft", () => {
   it("represents every unpublished map section without making it canonical", () => {
-    const decoded = Schema.decodeUnknownSync(WayfinderDraft)({
+    const decoded = decodeWayfinderDraft({
       authority: "unpublished-draft",
       canonical: false,
       destination: "Make remote coding handoffs obvious",
@@ -45,7 +49,7 @@ describe("WayfinderDraft", () => {
 
 describe("WayfinderPublication", () => {
   it("keeps verified artifacts and the exact resumable step", () => {
-    const decoded = Schema.decodeUnknownSync(WayfinderPublication)({
+    const decoded = decodeWayfinderPublication({
       status: "failed",
       artifacts: [
         { kind: "label", name: "wayfinder:map" },
@@ -64,5 +68,32 @@ describe("WayfinderPublication", () => {
     expect(decoded.status).toBe("failed");
     expect(decoded.artifacts).toHaveLength(2);
     expect(decoded.nextStep).toBe("create decision ticket choose-target");
+  });
+});
+
+describe("WayfinderMutation", () => {
+  it("keeps one structured canonical action and its receipt-backed state", () => {
+    const decoded = decodeWayfinderMutation({
+      actionId: "action:rename",
+      action: { kind: "rename-ticket", ticketNumber: 42, title: "Choose the release target" },
+      status: "mutating",
+      error: null,
+      updatedAt: "2026-07-30T10:05:00.000Z",
+    });
+
+    expect(decoded.action.kind).toBe("rename-ticket");
+    expect(decoded.status).toBe("mutating");
+  });
+
+  it("rejects arbitrary GitHub issue administration", () => {
+    expect(() =>
+      decodeWayfinderMutation({
+        actionId: "action:raw",
+        action: { kind: "edit-issue-body", ticketNumber: 42, body: "anything" },
+        status: "mutating",
+        error: null,
+        updatedAt: "2026-07-30T10:05:00.000Z",
+      }),
+    ).toThrow();
   });
 });
