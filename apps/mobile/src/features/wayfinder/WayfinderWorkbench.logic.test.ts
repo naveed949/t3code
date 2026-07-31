@@ -68,6 +68,36 @@ describe("buildMobileWayfinderPresentation", () => {
     );
   });
 
+  it("bounds compact graph relationships and points assistive technology to the full list", () => {
+    const tickets = Array.from({ length: 100 }, (_, index) => {
+      const number = index + 1;
+      return {
+        number,
+        title: `Decision ${number}`,
+        url: `https://github.com/t3tools/t3code/issues/${number}`,
+        state: "open" as const,
+        classification: "grilling" as const,
+        claimedBy: null,
+        blockedBy: Array.from({ length: index }, (__, blocker) => blocker + 1),
+        blocks: Array.from({ length: 99 - index }, (__, blocked) => number + blocked + 1),
+      };
+    });
+
+    const presentation = buildMobileWayfinderPresentation({
+      ...map,
+      tickets,
+      frontier: [1],
+    });
+
+    expect(presentation.graphRows.reduce((count, row) => count + row.dependsOn.length, 0)).toBe(
+      200,
+    );
+    expect(presentation.graphTruncated).toBe(true);
+    expect(presentation.graphAccessibilityLabel).toBe(
+      "Dependency graph with 100 tickets and 200 shown relationships. The complete dependency list follows.",
+    );
+  });
+
   it("offers every ticket classification and builds the selected create action", () => {
     expect(WAYFINDER_TICKET_CLASSIFICATIONS).toEqual(["research", "prototype", "grilling", "task"]);
     expect(createWayfinderTicketAction("Prototype sync", "prototype")).toEqual({

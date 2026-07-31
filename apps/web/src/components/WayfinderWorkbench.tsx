@@ -555,6 +555,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly toSpecAvailable?: boolean;
   readonly onStartToSpec?: (acknowledgedIncomplete: boolean) => void;
 }) {
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const reconcileRef = useRef(props.onReconcile);
   reconcileRef.current = props.onReconcile;
   const lifecycleRef = useRef({
@@ -566,6 +567,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     const transition = advanceWayfinderReconciliationLifecycle(lifecycleRef.current, event);
     lifecycleRef.current = transition.lifecycle;
     if (transition.reason) reconcileRef.current(transition.reason);
+  }, []);
+  useEffect(() => {
+    headingRef.current?.focus({ preventScroll: true });
   }, []);
   useEffect(() => {
     advanceLifecycle({
@@ -652,7 +656,12 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
               <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                 Wayfinder Workbench
               </p>
-              <h2 className="mt-1 text-base font-semibold text-foreground">
+              <h2
+                ref={headingRef}
+                tabIndex={-1}
+                data-wayfinder-initial-focus="true"
+                className="mt-1 text-base font-semibold text-foreground"
+              >
                 {map.canonicalReference.title}
               </h2>
             </div>
@@ -780,6 +789,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           <div
             role="img"
             aria-label={model.accessibilitySummary}
+            aria-describedby="wayfinder-graph-alternative"
             data-wayfinder-dependency-graph="stable"
             className="grid gap-2 overflow-x-auto rounded-lg border border-border/70 bg-muted/20 p-3"
             style={{ gridTemplateColumns: `repeat(${columnCount}, minmax(9rem, 1fr))` }}
@@ -821,6 +831,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
               );
             })}
           </div>
+          <p id="wayfinder-graph-alternative" className="sr-only">
+            The frontier-first ticket list after this graph is the complete dependency alternative.
+          </p>
         </section>
 
         <section aria-labelledby="wayfinder-frontier">

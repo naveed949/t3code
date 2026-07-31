@@ -156,9 +156,14 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   }
 
   const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const questionLabelId = `wayfinder-decision-question-${encodeURIComponent(activeQuestion.id)}`;
 
   return (
-    <div className="px-4 py-3 sm:px-5">
+    <div
+      role={isWayfinderDecision ? "group" : undefined}
+      aria-labelledby={isWayfinderDecision ? questionLabelId : undefined}
+      className="px-4 py-3 sm:px-5"
+    >
       <div className="mb-2 flex items-center gap-3">
         <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/55 uppercase">
           {isWayfinderDecision ? "Decision Card" : activeQuestion.header}
@@ -169,7 +174,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
           </span>
         ) : null}
       </div>
-      <p className="text-sm text-foreground/90">{activeQuestion.question}</p>
+      <p
+        id={isWayfinderDecision ? questionLabelId : undefined}
+        className="text-sm text-foreground/90"
+      >
+        {activeQuestion.question}
+      </p>
       {isWayfinderDecision ? (
         <p className="mt-1 text-xs text-muted-foreground/65">
           Agent proposal · your response confirms the draft decision.
@@ -188,7 +198,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
           const shortcutKey = index < 9 ? index + 1 : null;
           const className = cn(
-            "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
+            "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 motion-reduce:transition-none focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
             isSelected
               ? "border-primary/30 bg-primary/8 text-foreground"
               : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
@@ -204,11 +214,11 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                 ) : null}
               </div>
               {isSelected ? (
-                <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                <CheckIcon aria-hidden className="size-3.5 shrink-0 text-primary" />
               ) : shortcutKey !== null ? (
                 <kbd
                   className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
+                    "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150 motion-reduce:transition-none",
                     "bg-background/35 text-muted-foreground/70 group-hover:border-border/70 group-hover:text-muted-foreground",
                   )}
                 >
@@ -221,6 +231,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
             <button
               key={`${activeQuestion.id}:${option.label}`}
               type="button"
+              aria-pressed={isSelected}
               disabled={isResponding}
               onClick={() => {
                 handleOptionSelection(activeQuestion.id, option.label);

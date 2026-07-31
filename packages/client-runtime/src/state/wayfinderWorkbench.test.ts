@@ -81,6 +81,36 @@ describe("deriveWayfinderWorkbenchModel", () => {
       "Release map. 1 frontier ticket, 2 open tickets, 1 completed ticket. Last synchronized 2026-01-02T00:00:00.000Z.",
     );
   });
+
+  it("bounds a dense 100-ticket graph while preserving the complete list alternative", () => {
+    const tickets = Array.from({ length: 100 }, (_, index) => {
+      const number = index + 1;
+      return {
+        number,
+        title: `Decision ${number}`,
+        url: `https://github.com/t3tools/t3code/issues/${number}`,
+        state: "open" as const,
+        classification: "grilling" as const,
+        claimedBy: null,
+        blockedBy: Array.from({ length: index }, (__, blocker) => blocker + 1),
+        blocks: Array.from({ length: 99 - index }, (__, blocked) => number + blocked + 1),
+      };
+    });
+
+    const model = deriveWayfinderWorkbenchModel({
+      ...map,
+      tickets,
+      frontier: [1],
+    });
+
+    expect(model.tickets).toHaveLength(100);
+    expect(model.nodes).toHaveLength(100);
+    expect(model.edges).toHaveLength(200);
+    expect(model.graphTruncated).toBe(true);
+    expect(model.accessibilitySummary).toContain(
+      "The complete dependency list follows the bounded graph.",
+    );
+  });
 });
 
 describe("deriveWayfinderTicketClaimActions", () => {

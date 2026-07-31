@@ -108,6 +108,19 @@ child tickets that are ready to advance. Starting work claims a frontier ticket 
 deterministic linked ticket thread; retry, return, release, and reclaim expose the reverse and
 recovery states on every client.
 
+The complete frontier-first ticket list is also the non-visual alternative to the dependency graph.
+The shared model keeps all supported tickets but caps the decorative graph at 100 nodes and 200
+stably sorted relationships. Web and desktop focus the Workbench heading when the panel opens;
+mobile exposes the same state and actions through a full-screen route. See
+[wayfinderWorkbench.ts][30].
+
+#### Wayfinder projection budget
+
+The server-side bound applied before a canonical map enters shared shell state. GitHub relationship
+connections stop at 100 entries, and the complete projected map may occupy at most 256 KiB when
+encoded as UTF-8 JSON. Preflight rejects an oversized map; reconciliation retains the last healthy
+projection as cached read-only state. See [WayfinderMapProjection.ts][31].
+
 #### HITL resolution
 
 The receipt-backed completion of one claimed Wayfinder decision in its dedicated linked thread.
@@ -291,3 +304,5 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts
 [28]: ../../apps/server/src/orchestration/Layers/WayfinderReconciliationReactor.ts
 [29]: ../../apps/server/src/orchestration/Layers/WayfinderResearchReactor.ts
+[30]: ../../packages/client-runtime/src/state/wayfinderWorkbench.ts
+[31]: ../../apps/server/src/nativeSkills/WayfinderMapProjection.ts

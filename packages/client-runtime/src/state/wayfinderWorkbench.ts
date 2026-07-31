@@ -271,8 +271,11 @@ export interface WayfinderWorkbenchModel {
   readonly tickets: WayfinderMapProjection["tickets"];
   readonly nodes: ReadonlyArray<WayfinderWorkbenchNode>;
   readonly edges: ReadonlyArray<WayfinderWorkbenchEdge>;
+  readonly graphTruncated: boolean;
   readonly accessibilitySummary: string;
 }
+
+export const WAYFINDER_DEPENDENCY_GRAPH_EDGE_LIMIT = 200;
 
 export function applyOptimisticWayfinderMutation(
   map: WayfinderMapProjection,
@@ -408,13 +411,15 @@ export function deriveWayfinderWorkbenchModel(
         };
       }),
     );
-  const edges = map.tickets
+  const allEdges = map.tickets
     .flatMap((ticket) =>
       ticket.blockedBy
         .filter((blocker) => ticketsByNumber.has(blocker))
         .map((blocker) => ({ from: blocker, to: ticket.number })),
     )
     .sort((left, right) => left.from - right.from || left.to - right.to);
+  const graphTruncated = allEdges.length > WAYFINDER_DEPENDENCY_GRAPH_EDGE_LIMIT;
+  const edges = allEdges.slice(0, WAYFINDER_DEPENDENCY_GRAPH_EDGE_LIMIT);
   const tickets = [...map.tickets].sort((left, right) => {
     const frontierOrder = Number(frontier.has(right.number)) - Number(frontier.has(left.number));
     if (frontierOrder !== 0) return frontierOrder;
@@ -428,12 +433,15 @@ export function deriveWayfinderWorkbenchModel(
     tickets,
     nodes,
     edges,
+    graphTruncated,
     accessibilitySummary: `${map.canonicalReference.title}. ${plural(
       map.frontier.length,
       "frontier ticket",
     )}, ${plural(openCount, "open ticket")}, ${plural(
       completedCount,
       "completed ticket",
-    )}. Last synchronized ${map.lastSynchronizedAt}.`,
+    )}. Last synchronized ${map.lastSynchronizedAt}.${
+      graphTruncated ? " The complete dependency list follows the bounded graph." : ""
+    }`,
   };
 }

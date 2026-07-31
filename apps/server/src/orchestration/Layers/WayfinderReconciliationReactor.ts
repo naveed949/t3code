@@ -172,13 +172,19 @@ export const makeWayfinderReconciliationProcessor = Effect.gen(function* () {
       );
       return;
     }
-    if (loaded.success.kind === "truncated" || loaded.success.kind === "not-wayfinder-map") {
+    if (
+      loaded.success.kind === "truncated" ||
+      loaded.success.kind === "over-budget" ||
+      loaded.success.kind === "not-wayfinder-map"
+    ) {
       yield* unavailable(
         event,
         lastSuccessfulAt,
         loaded.success.kind === "truncated"
           ? "GitHub returned a partial Wayfinder graph. The cached map remains read-only."
-          : "The canonical GitHub issue is no longer a Wayfinder map. The cached map remains read-only.",
+          : loaded.success.kind === "over-budget"
+            ? "The canonical Wayfinder map exceeds the shared projection budget. The cached map remains read-only."
+            : "The canonical GitHub issue is no longer a Wayfinder map. The cached map remains read-only.",
       );
       return;
     }

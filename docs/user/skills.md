@@ -140,3 +140,39 @@ closure is retained as a receipt. If the flow is interrupted, **Resume resolutio
 the exact next step while **Release** remains available; the canonical claim and verified artifacts
 are not discarded. The resulting close, reopen, comment, and relationship receipts reconcile both
 the linked thread and the shared Workstream on web, desktop, mobile, and reconnect.
+
+## Accessibility and performance
+
+Opening the web or desktop Workbench moves keyboard focus to its named heading without scrolling the
+map. Native buttons, links, fields, disclosure controls, and Decision Card options remain reachable
+with the keyboard. Decision Card choices expose their selected state to assistive technology; on
+web, number keys 1–9 select the matching option while focus is outside an editable field. Mobile
+controls expose explicit button, selection, disabled, and field names. Synchronization, claim,
+research, publication, and completion states are always written in text and never rely on color
+alone.
+
+The dependency graph is optional context, not the only representation of the map. Web and desktop
+identify the complete frontier-first ticket list that follows the graph; mobile presents that same
+list whether its compact graph is shown or hidden. Graph layout is deterministic and has no
+continuous animation. Decision Card transitions honor reduced-motion preferences.
+
+The environment server rejects partial GitHub relationship pages beyond 100 entries and shared
+Wayfinder projections above 256 KiB rather than sending an incomplete or oversized map. A supported
+projection may contain up to 100 graph nodes; the visual graph renders at most 200 relationships,
+while the complete dependency details remain in the ticket list. Visible Workbenches perform a
+lightweight conditional refresh every 60 seconds and load the full graph only when its revision
+evidence changes.
+
+## Compatibility and recovery checklist
+
+- Codex and Claude run the verified Wayfinder skill natively. Cursor, Grok, OpenCode, unknown skills,
+  and modified skill digests use the generic prompt path without claiming native support.
+- Web and desktop use the same Workbench panel; mobile uses a full-screen route with equivalent map,
+  mutation, recovery, and handoff actions.
+- Local, relay, and tunnel clients send typed actions only. The environment-owning server performs
+  every GitHub read and write with its own credentials.
+- A failed preflight creates no tracker artifacts. Publication, claim, resolution, and reconciliation
+  failures retain verified receipts and expose resume, retry, release, refresh, or cached read-only
+  states as appropriate.
+- `to-spec` starts only from **Start to-spec** or an acknowledged **Start to-spec early** action. It
+  remains a separate generic Skill Run with canonical Wayfinder provenance.

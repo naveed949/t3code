@@ -871,6 +871,54 @@ it.effect("rejects a truncated native relationship projection", () =>
   ),
 );
 
+it.effect("rejects a Wayfinder projection that exceeds the shared-shell payload budget", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: {
+        canonicalKey: "github.com/t3tools/t3code",
+        owner: "t3tools",
+        name: "t3code",
+      },
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+    assert.strictEqual(result.kind, "over-budget");
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () =>
+          Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Oversized map",
+                      url: "https://github.com/t3tools/t3code/issues/42",
+                      state: "OPEN",
+                      body: `## Notes\n\n${"x".repeat(300_000)}`,
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: false },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+      }),
+    ),
+  ),
+);
+
 it.effect("uses lightweight revision evidence before reloading a visible map", () => {
   const calls: ReadonlyArray<string>[] = [];
   const revision = `github:${JSON.stringify([

@@ -40,6 +40,13 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
     ? decisionStep.visibleQuestions
     : props.pendingUserInput.questions;
   const canAdvance = props.isWayfinderDecision && decisionStep.canAdvance;
+  const isResponding = props.respondingUserInputId === props.pendingUserInput.requestId;
+  const submitLabel = canAdvance
+    ? "Next decision"
+    : props.isWayfinderDecision
+      ? "Confirm decision"
+      : "Submit answers";
+  const submitDisabled = (!canAdvance && props.answers === null) || isResponding;
 
   return (
     <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
@@ -71,6 +78,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                 return (
                   <Pressable
                     key={option.label}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      option.description && option.description !== option.label
+                        ? `${option.label}. ${option.description}`
+                        : option.label
+                    }
+                    accessibilityState={{ selected, disabled: isResponding }}
+                    disabled={isResponding}
                     className={cn(
                       "rounded-full border px-3 py-2.5 ",
                       selected
@@ -100,6 +115,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               })}
             </View>
             <TextInput
+              accessibilityLabel={`Custom answer for ${question.question}`}
               value={draft?.customAnswer ?? ""}
               onChangeText={(value) =>
                 props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
@@ -111,14 +127,14 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         );
       })}
       <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={submitLabel}
+        accessibilityState={{ disabled: submitDisabled }}
         className={cn(
           "items-center justify-center rounded-2xl px-4 py-3.5",
           canAdvance || props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
         )}
-        disabled={
-          (!canAdvance && props.answers === null) ||
-          props.respondingUserInputId === props.pendingUserInput.requestId
-        }
+        disabled={submitDisabled}
         onPress={() => {
           if (canAdvance) {
             setQuestionIndex((current) => current + 1);
@@ -127,13 +143,7 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
           void props.onSubmit();
         }}
       >
-        <Text className="font-t3-extrabold text-sm text-white">
-          {canAdvance
-            ? "Next decision"
-            : props.isWayfinderDecision
-              ? "Confirm decision"
-              : "Submit answers"}
-        </Text>
+        <Text className="font-t3-extrabold text-sm text-white">{submitLabel}</Text>
       </Pressable>
     </View>
   );

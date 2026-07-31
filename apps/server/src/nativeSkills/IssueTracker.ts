@@ -13,7 +13,10 @@ import type {
 } from "@t3tools/contracts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as GitHubCli from "../sourceControl/GitHubCli.ts";
-import { projectWayfinderMap } from "./WayfinderMapProjection.ts";
+import {
+  isWayfinderMapProjectionWithinBudget,
+  projectWayfinderMap,
+} from "./WayfinderMapProjection.ts";
 
 export interface IssueTrackerRepository {
   readonly canonicalKey: string;
@@ -41,6 +44,7 @@ export interface IssueTrackerClaim {
 export type WayfinderMapLoadResult =
   | { readonly kind: "loaded"; readonly map: WayfinderMapProjection }
   | { readonly kind: "not-wayfinder-map" }
+  | { readonly kind: "over-budget" }
   | { readonly kind: "truncated" };
 
 export type WayfinderMapReconciliationResult =
@@ -675,16 +679,17 @@ export const GitHubIssueTrackerLive = Layer.effect(
               },
             }
           : null;
-        return issue?.labels.nodes.some((label) => label.name === "wayfinder:map")
-          ? {
-              kind: "loaded" as const,
-              map: projectWayfinderMap(
-                normalizedIssue!,
-                input.synchronizedAt,
-                issue.updatedAt === undefined ? undefined : wayfinderRevision(normalizedIssue!),
-              ),
-            }
-          : { kind: "not-wayfinder-map" as const };
+        if (!issue?.labels.nodes.some((label) => label.name === "wayfinder:map")) {
+          return { kind: "not-wayfinder-map" as const };
+        }
+        const map = projectWayfinderMap(
+          normalizedIssue!,
+          input.synchronizedAt,
+          issue.updatedAt === undefined ? undefined : wayfinderRevision(normalizedIssue!),
+        );
+        return isWayfinderMapProjectionWithinBudget(map)
+          ? { kind: "loaded" as const, map }
+          : { kind: "over-budget" as const };
       },
     );
     const loadViewerLogin = Effect.fn("IssueTracker.loadViewerLogin")(function* (cwd: string) {
