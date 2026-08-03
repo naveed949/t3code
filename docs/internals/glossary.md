@@ -89,6 +89,14 @@ A project-scoped identity that groups related skill work. The first explicit ski
 the Workstream identifier in [decider.ts][8]; clients derive its current representation from the
 shared project Skill Run list and each run's linked thread.
 
+#### Development Workflow attachment
+
+An explicit, one-per-Origin-Thread link from a native structured Wayfinder Skill Run to a durable
+Development Workflow Workstream. The attachment preserves compatible Wayfinder projection data and
+an observation cursor in the thread projection; it never treats assistant prose as workflow
+authority and does not replace the originating conversation thread. See [the contracts][1] and
+[ProjectionPipeline.ts][11].
+
 #### Skill Run
 
 One execution of a pinned skill within a Workstream. Its durable invocation record includes the skill

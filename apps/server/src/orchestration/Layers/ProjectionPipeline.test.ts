@@ -2810,4 +2810,143 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
       ]);
     }),
   );
+
+  it.effect("persists an explicit workflow attachment without replacing the Origin Thread", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.make("thread-workflow-projection");
+      const projectId = ProjectId.make("project-workflow-projection");
+      const skillRunId = SkillRunId.make("skill-run:workflow-projection");
+      const workstreamId = WorkstreamId.make("workstream:workflow-projection");
+      const attachedAt = "2026-08-03T12:00:00.000Z";
+      const backfilledWayfinderData = {
+        wayfinderMap: {
+          canonicalReference: {
+            number: 29,
+            title: "Development Workflow",
+            url: "https://github.com/t3tools/t3code/issues/29",
+            state: "open" as const,
+          },
+          destination: "Ship the workflow.",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: attachedAt,
+        },
+        wayfinderSynchronizedAt: attachedAt,
+      };
+
+      yield* eventStore.append({
+        type: "thread.created",
+        eventId: EventId.make("evt-workflow-projection-thread"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: attachedAt,
+        commandId: CommandId.make("cmd-workflow-projection-thread"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-workflow-projection-thread"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: "Workflow origin",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "full-access",
+          branch: null,
+          worktreePath: null,
+          createdAt: attachedAt,
+          updatedAt: attachedAt,
+        },
+      });
+      yield* eventStore.append({
+        type: "thread.workflow-attached",
+        eventId: EventId.make("evt-workflow-projection-attachment"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: attachedAt,
+        commandId: CommandId.make("cmd-workflow-projection-attachment"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-workflow-projection-attachment"),
+        metadata: {},
+        payload: {
+          threadId,
+          hint: {
+            status: "attached",
+            sourceSkillRunId: skillRunId,
+            workstreamId,
+            backfilledWayfinderData,
+            offeredAt: attachedAt,
+            updatedAt: attachedAt,
+          },
+          attachment: {
+            originThreadId: threadId,
+            workstreamId,
+            sourceSkillRunId: skillRunId,
+            workflowGoal: "Ship the workflow.",
+            backfilledWayfinderData,
+            observationCursor: {
+              sourceSkillRunId: skillRunId,
+              observedAt: attachedAt,
+              wayfinderSynchronizedAt: attachedAt,
+            },
+            attachedAt,
+          },
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+      // A second bootstrap mirrors an already-running projector coming back
+      // after a reconnect; the persisted attachment must remain unchanged.
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{
+        readonly title: string;
+        readonly attachmentState: string | null;
+      }>`
+        SELECT
+          title,
+          workflow_attachment_state_json AS "attachmentState"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.equal(rows[0]?.title, "Workflow origin");
+      assert.deepEqual(JSON.parse(rows[0]?.attachmentState ?? "null"), {
+        hint: {
+          status: "attached",
+          sourceSkillRunId: skillRunId,
+          workstreamId,
+          backfilledWayfinderData,
+          offeredAt: attachedAt,
+          updatedAt: attachedAt,
+        },
+        attachment: {
+          originThreadId: threadId,
+          workstreamId,
+          sourceSkillRunId: skillRunId,
+          workflowGoal: "Ship the workflow.",
+          backfilledWayfinderData,
+          observationCursor: {
+            sourceSkillRunId: skillRunId,
+            observedAt: attachedAt,
+            wayfinderSynchronizedAt: attachedAt,
+          },
+          attachedAt,
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        Layer.fresh(
+          makeProjectionPipelinePrefixedTestLayer("t3-workflow-attachment-projection-test-"),
+        ),
+      ),
+    ),
+  );
 });

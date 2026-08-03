@@ -253,6 +253,7 @@ import {
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
+import { WorkflowAttachmentCard } from "./chat/WorkflowAttachmentCard";
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -1222,6 +1223,13 @@ function ChatViewContent(props: ChatViewProps) {
     threadEnvironment.controlWayfinderResearch,
     { reportFailure: false },
   );
+  const dismissWorkflowAttachmentHintCommand = useAtomCommand(
+    threadEnvironment.dismissWorkflowAttachmentHint,
+    { reportFailure: false },
+  );
+  const attachWorkflowCommand = useAtomCommand(threadEnvironment.attachWorkflow, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1680,6 +1688,34 @@ function ChatViewContent(props: ChatViewProps) {
   const activeLinkedTicketInvocation =
     activeLinkedTicketAction === null ? null : (activeLatestTurn?.skillInvocation ?? null);
   const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
+  const dismissWorkflowAttachmentHint = useCallback(() => {
+    if (!activeThread) return;
+    void dismissWorkflowAttachmentHintCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+      },
+    });
+  }, [activeThread, dismissWorkflowAttachmentHintCommand]);
+  const attachWorkflow = useCallback(
+    (workflowGoal: string) => {
+      if (!activeThread) return;
+      void attachWorkflowCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeThread.id,
+          originThreadId: activeThread.id,
+          workflowGoal,
+          confirmed: true,
+        },
+      });
+    },
+    [activeThread, attachWorkflowCommand],
+  );
+  const openAttachedWorkflow = useCallback(() => {
+    if (!activeThreadRef || !activeWayfinderMap) return;
+    useRightPanelStore.getState().open(activeThreadRef, "wayfinder");
+  }, [activeThreadRef, activeWayfinderMap]);
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -6216,6 +6252,19 @@ function ChatViewContent(props: ChatViewProps) {
                 className="chat-composer-horizontal-inset w-full"
               >
                 <div className="pointer-events-auto relative z-10">
+                  {activeThread.workflowAttachmentHint?.status === "available" ||
+                  activeThread.workflowAttachment ? (
+                    <div className="mx-auto mb-2 w-full max-w-3xl">
+                      <WorkflowAttachmentCard
+                        originThreadId={activeThread.id}
+                        hint={activeThread.workflowAttachmentHint ?? null}
+                        attachment={activeThread.workflowAttachment ?? null}
+                        onDismiss={dismissWorkflowAttachmentHint}
+                        onAttach={attachWorkflow}
+                        {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
+                      />
+                    </div>
+                  ) : null}
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div

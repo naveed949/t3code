@@ -15,6 +15,7 @@ import {
   SkillRunId,
   SkillInvocation,
   TurnId,
+  WorkflowAttachmentState,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
   type OrchestrationMessage,
@@ -81,6 +82,9 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    workflowAttachmentState: Schema.optional(
+      Schema.NullOr(Schema.fromJsonString(WorkflowAttachmentState)),
+    ),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -266,6 +270,15 @@ function mapTitleRegeneration(row: Schema.Schema.Type<typeof ProjectionThreadDbR
     : null;
 }
 
+function mapWorkflowAttachmentState(row: Schema.Schema.Type<typeof ProjectionThreadDbRowSchema>) {
+  const state = row.workflowAttachmentState;
+  if (state == null) return {};
+  return {
+    ...(state.hint !== undefined ? { workflowAttachmentHint: state.hint } : {}),
+    ...(state.attachment !== undefined ? { workflowAttachment: state.attachment } : {}),
+  };
+}
+
 function mapSessionRow(
   row: Schema.Schema.Type<typeof ProjectionThreadSessionDbRowSchema>,
 ): OrchestrationSession {
@@ -401,6 +414,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          workflow_attachment_state_json AS "workflowAttachmentState",
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
@@ -435,6 +449,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          workflow_attachment_state_json AS "workflowAttachmentState",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -471,6 +486,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          workflow_attachment_state_json AS "workflowAttachmentState",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE deleted_at IS NULL
@@ -1076,6 +1092,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          workflow_attachment_state_json AS "workflowAttachmentState",
           deleted_at AS "deletedAt"
         FROM projection_threads
         WHERE thread_id = ${threadId}
@@ -1511,6 +1528,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 snoozedUntil: row.snoozedUntil,
                 snoozedAt: row.snoozedAt,
                 titleRegeneration: mapTitleRegeneration(row),
+                ...mapWorkflowAttachmentState(row),
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1714,6 +1732,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   snoozedUntil: row.snoozedUntil,
                   snoozedAt: row.snoozedAt,
                   titleRegeneration: mapTitleRegeneration(row),
+                  ...mapWorkflowAttachmentState(row),
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
@@ -1859,6 +1878,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       snoozedUntil: row.snoozedUntil,
                       snoozedAt: row.snoozedAt,
                       titleRegeneration: mapTitleRegeneration(row),
+                      ...mapWorkflowAttachmentState(row),
                       session: sessionByThread.get(row.threadId) ?? null,
                       latestUserMessageAt: row.latestUserMessageAt,
                       hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2010,6 +2030,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   snoozedUntil: row.snoozedUntil,
                   snoozedAt: row.snoozedAt,
                   titleRegeneration: mapTitleRegeneration(row),
+                  ...mapWorkflowAttachmentState(row),
                   session: sessionByThread.get(row.threadId) ?? null,
                   latestUserMessageAt: row.latestUserMessageAt,
                   hasPendingApprovals: row.pendingApprovalCount > 0,
@@ -2282,6 +2303,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         snoozedUntil: threadRow.value.snoozedUntil,
         snoozedAt: threadRow.value.snoozedAt,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
+        ...mapWorkflowAttachmentState(threadRow.value),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
         latestUserMessageAt: threadRow.value.latestUserMessageAt,
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
@@ -2381,6 +2403,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         snoozedUntil: threadRow.value.snoozedUntil,
         snoozedAt: threadRow.value.snoozedAt,
         titleRegeneration: mapTitleRegeneration(threadRow.value),
+        ...mapWorkflowAttachmentState(threadRow.value),
         deletedAt: null,
         messages: messageRows.map((row) => {
           const message = {

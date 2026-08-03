@@ -50,6 +50,9 @@ export type PublishWayfinderDraftInput = CommandInput<"thread.wayfinder.publish"
 export type MutateWayfinderInput = CommandInput<"thread.wayfinder.mutate">;
 export type ReconcileWayfinderMapInput = CommandInput<"thread.wayfinder.reconcile">;
 export type ControlWayfinderResearchInput = CommandInput<"thread.wayfinder.research">;
+export type DismissWorkflowAttachmentHintInput =
+  CommandInput<"thread.workflow-attachment.hint.dismiss">;
+export type AttachWorkflowInput = CommandInput<"thread.workflow.attach">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -325,6 +328,32 @@ export const controlWayfinderResearch: (input: ControlWayfinderResearchInput) =>
       createdAt: metadata.createdAt,
     });
   });
+
+export const dismissWorkflowAttachmentHint: (
+  input: DismissWorkflowAttachmentHintInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.dismissWorkflowAttachmentHint")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow-attachment.hint.dismiss",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const attachWorkflow: (input: AttachWorkflowInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.attachWorkflow",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.attach",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
 
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.revertThreadCheckpoint")(function* (input) {

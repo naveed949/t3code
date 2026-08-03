@@ -24,10 +24,16 @@ export function ProjectWorkstreamsShelf(props: {
   );
   const entries = props.workstreams.flatMap((workstream) => {
     const map = workstream.wayfinderMap;
-    const thread = workstream.linkedThreadIds
+    const attachment = workstream.workflowAttachment;
+    const threadIds = attachment
+      ? [attachment.originThreadId, ...workstream.linkedThreadIds]
+      : workstream.linkedThreadIds;
+    const thread = threadIds
       .map((threadId) => threadByKey.get(`${workstream.environmentId}:${threadId}`))
       .find((candidate) => candidate !== undefined);
-    return map && thread ? [{ workstream, map, thread }] : [];
+    return (map !== null || attachment !== null) && thread
+      ? [{ workstream, map, attachment, thread }]
+      : [];
   });
   if (entries.length === 0) return null;
 
@@ -41,22 +47,22 @@ export function ProjectWorkstreamsShelf(props: {
         Workstreams
       </Text>
       <View className="gap-2">
-        {entries.map(({ workstream, map, thread }) => (
+        {entries.map(({ workstream, map, attachment, thread }) => (
           <Pressable
             key={`${workstream.environmentId}:${workstream.id}`}
             accessibilityRole="button"
-            accessibilityLabel={`${map.canonicalReference.title}, ${workstream.status} Workstream`}
+            accessibilityLabel={`${map?.canonicalReference.title ?? attachment?.workflowGoal}, ${attachment ? "Development workflow" : workstream.status} Workstream`}
             className="rounded-xl border border-border bg-card px-4 py-3"
             onPress={() => props.onSelectThread(thread)}
           >
             <Text className="text-sm font-semibold text-foreground" numberOfLines={1}>
-              {map.canonicalReference.title}
+              {map?.canonicalReference.title ?? attachment?.workflowGoal}
             </Text>
             <Text className="mt-1 text-xs capitalize text-foreground-muted" numberOfLines={1}>
               {projectTitleByKey.get(
                 scopedProjectKey(workstream.environmentId, workstream.projectId),
               ) ?? "Project"}{" "}
-              · {workstream.status}
+              · {attachment ? "Development workflow" : workstream.status}
             </Text>
           </Pressable>
         ))}

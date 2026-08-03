@@ -3,7 +3,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ThreadId, WorkstreamId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
 import { isValidElement, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -60,6 +60,7 @@ function workstream(
       lastSynchronizedAt: "2026-07-30T00:00:00.000Z",
     },
     wayfinderSynchronization: null,
+    workflowAttachment: null,
     readiness: { ready: false, blockers: [{ kind: "open-decision-tickets", ticketNumbers: [43] }] },
   };
 }
@@ -105,5 +106,45 @@ describe("ProjectWorkstreamsShelf", () => {
     ]);
     buttons[1]?.onPress();
     expect(onSelectThread).toHaveBeenCalledWith(completedThread);
+  });
+
+  it("reopens an attached workflow through its durable Origin Thread", () => {
+    const onSelectThread = vi.fn();
+    const originThread = {
+      environmentId,
+      id: ThreadId.make("thread:origin"),
+      projectId,
+    } as EnvironmentThreadShell;
+    const tree = ProjectWorkstreamsShelf({
+      workstreams: [
+        {
+          ...workstream("workstream:workflow", "active", activeThread),
+          linkedThreadIds: [activeThread.id],
+          wayfinderMap: null,
+          workflowAttachment: {
+            originThreadId: originThread.id,
+            workstreamId: WorkstreamId.make("workstream:workflow"),
+            sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+            workflowGoal: "Ship the Development Workflow.",
+            backfilledWayfinderData: {},
+            observationCursor: {
+              sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+              observedAt: "2026-08-03T12:00:00.000Z",
+            },
+            attachedAt: "2026-08-03T12:00:00.000Z",
+          },
+        },
+      ],
+      projects: [project],
+      threads: [activeThread, originThread],
+      onSelectThread,
+    });
+    const buttons = pressableProps(tree);
+
+    expect(buttons[0]?.accessibilityLabel).toBe(
+      "Ship the Development Workflow., Development workflow Workstream",
+    );
+    buttons[0]?.onPress();
+    expect(onSelectThread).toHaveBeenCalledWith(originThread);
   });
 });

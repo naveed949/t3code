@@ -8,6 +8,7 @@ import {
   ProviderInstanceId,
   SkillInvocation,
   SkillRunId,
+  WorkflowAttachmentState,
   WorkstreamId,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
@@ -30,6 +31,9 @@ const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
 const encodeSkillInvocationJson = Schema.encodeEffect(Schema.fromJsonString(SkillInvocation));
+const encodeWorkflowAttachmentStateJson = Schema.encodeEffect(
+  Schema.fromJsonString(WorkflowAttachmentState),
+);
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -2038,3 +2042,129 @@ it.effect(
     }).pipe(Effect.provide(layer));
   },
 );
+
+it.effect("restores an explicit workflow attachment from the durable thread projection", () => {
+  const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
+    Layer.provideMerge(RepositoryIdentityResolver.layer),
+    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(NodeServices.layer),
+  );
+
+  return Effect.gen(function* () {
+    const snapshotQuery = yield* ProjectionSnapshotQuery;
+    const sql = yield* SqlClient.SqlClient;
+    const synchronizedAt = "2026-08-03T12:00:00.000Z";
+    const attachmentState = {
+      hint: {
+        status: "attached" as const,
+        sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+        workstreamId: WorkstreamId.make("workstream:workflow-origin"),
+        backfilledWayfinderData: {
+          wayfinderMap: {
+            canonicalReference: {
+              number: 29,
+              title: "Development Workflow",
+              url: "https://github.com/t3tools/t3code/issues/29",
+              state: "open" as const,
+            },
+            destination: "Ship the workflow.",
+            notes: "",
+            decisionsSoFar: [],
+            fogOfWar: [],
+            outOfScope: [],
+            tickets: [],
+            frontier: [],
+            lastSynchronizedAt: synchronizedAt,
+          },
+          wayfinderSynchronizedAt: synchronizedAt,
+        },
+        offeredAt: synchronizedAt,
+        updatedAt: synchronizedAt,
+      },
+      attachment: {
+        originThreadId: ThreadId.make("thread-workflow-origin"),
+        workstreamId: WorkstreamId.make("workstream:workflow-origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {
+          wayfinderMap: {
+            canonicalReference: {
+              number: 29,
+              title: "Development Workflow",
+              url: "https://github.com/t3tools/t3code/issues/29",
+              state: "open" as const,
+            },
+            destination: "Ship the workflow.",
+            notes: "",
+            decisionsSoFar: [],
+            fogOfWar: [],
+            outOfScope: [],
+            tickets: [],
+            frontier: [],
+            lastSynchronizedAt: synchronizedAt,
+          },
+          wayfinderSynchronizedAt: synchronizedAt,
+        },
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+          observedAt: synchronizedAt,
+          wayfinderSynchronizedAt: synchronizedAt,
+        },
+        attachedAt: synchronizedAt,
+      },
+    } satisfies WorkflowAttachmentState;
+    const attachmentStateJson = yield* encodeWorkflowAttachmentStateJson(attachmentState);
+
+    yield* sql`DELETE FROM projection_threads`;
+    yield* sql`
+      INSERT INTO projection_threads (
+        thread_id,
+        project_id,
+        title,
+        model_selection_json,
+        runtime_mode,
+        interaction_mode,
+        branch,
+        worktree_path,
+        latest_turn_id,
+        latest_user_message_at,
+        pending_approval_count,
+        pending_user_input_count,
+        has_actionable_proposed_plan,
+        workflow_attachment_state_json,
+        created_at,
+        updated_at,
+        deleted_at
+      )
+      VALUES (
+        'thread-workflow-origin',
+        'project-workflow',
+        'Workflow origin',
+        '{"provider":"codex","model":"gpt-5-codex"}',
+        'full-access',
+        'default',
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        0,
+        0,
+        0,
+        ${attachmentStateJson},
+        ${synchronizedAt},
+        ${synchronizedAt},
+        NULL
+      )
+    `;
+
+    const reconnectedShell = yield* snapshotQuery.getShellSnapshot();
+    assert.deepStrictEqual(
+      reconnectedShell.threads[0]?.workflowAttachment,
+      attachmentState.attachment,
+    );
+    assert.deepStrictEqual(
+      reconnectedShell.threads[0]?.workflowAttachmentHint,
+      attachmentState.hint,
+    );
+  }).pipe(Effect.provide(layer));
+});

@@ -7,6 +7,7 @@ import type {
   ThreadId,
   WayfinderMapProjection,
   WayfinderSynchronizationState,
+  WorkflowAttachment,
   WorkstreamId,
 } from "@t3tools/contracts";
 import {
@@ -29,6 +30,8 @@ export interface ProjectSkillWorkstream {
   readonly skillRuns: ReadonlyArray<SkillInvocation>;
   readonly wayfinderMap: WayfinderMapProjection | null;
   readonly wayfinderSynchronization: WayfinderSynchronizationState | null;
+  /** Explicit Origin Thread attachment, if this is a Development Workflow. */
+  readonly workflowAttachment: WorkflowAttachment | null;
   readonly readiness: WayfinderReadiness;
 }
 
@@ -74,7 +77,35 @@ export const deriveProjectWorkstreams = (
     workstreams.set(invocation.workstreamId, existing);
   }
 
+  // Attachments are durable thread projection state. Seed a workstream entry
+  // even if compact/reconnected shell data no longer includes the source run,
+  // so each surface can still reopen the Origin Thread and its workflow.
+  for (const thread of threads) {
+    const attachment = thread.workflowAttachment;
+    if (thread.projectId !== projectId || attachment === undefined) continue;
+    const existing = workstreams.get(attachment.workstreamId) ?? {
+      linkedThreadIds: new Set<ThreadId>(),
+      skillRuns: new Map<SkillRunId, SkillInvocation>(),
+    };
+    existing.linkedThreadIds.add(attachment.originThreadId);
+    workstreams.set(attachment.workstreamId, existing);
+  }
+
   return Array.from(workstreams, ([id, workstream]) => {
+    const workflowAttachment =
+      threads
+        .flatMap((thread) => {
+          const attachment = thread.workflowAttachment;
+          return thread.projectId === projectId && attachment?.workstreamId === id
+            ? [attachment]
+            : [];
+        })
+        .sort(
+          (left, right) =>
+            left.attachedAt.localeCompare(right.attachedAt) ||
+            left.originThreadId.localeCompare(right.originThreadId),
+        )
+        .at(-1) ?? null;
     const sortedRuns = Array.from(workstream.skillRuns.values()).sort(
       (left, right) =>
         left.createdAt.localeCompare(right.createdAt) ||
@@ -88,11 +119,17 @@ export const deriveProjectWorkstreams = (
           left.createdAt.localeCompare(right.createdAt) ||
           left.skillRunId.localeCompare(right.skillRunId),
       );
-    const storedWayfinderMap = mapRuns.at(-1)?.wayfinderMap ?? null;
+    const storedWayfinderMap =
+      mapRuns.at(-1)?.wayfinderMap ??
+      workflowAttachment?.backfilledWayfinderData.wayfinderMap ??
+      null;
     const lastSynchronizedAt = sortedRuns
       .flatMap((run) => [
         ...(run.wayfinderSynchronizedAt ? [run.wayfinderSynchronizedAt] : []),
         ...(run.wayfinderMap ? [run.wayfinderMap.lastSynchronizedAt] : []),
+        ...(workflowAttachment?.observationCursor.wayfinderSynchronizedAt
+          ? [workflowAttachment.observationCursor.wayfinderSynchronizedAt]
+          : []),
       ])
       .sort()
       .at(-1);
@@ -115,7 +152,9 @@ export const deriveProjectWorkstreams = (
             left.run.createdAt.localeCompare(right.run.createdAt) ||
             left.run.skillRunId.localeCompare(right.run.skillRunId),
         )
-        .at(-1)?.synchronization ?? null;
+        .at(-1)?.synchronization ??
+      workflowAttachment?.backfilledWayfinderData.wayfinderSynchronization ??
+      null;
     const ticketThreads = sortedRuns
       .flatMap((run) => {
         const action = run.action?.id === "work-ticket" ? run.action : null;
@@ -169,6 +208,7 @@ export const deriveProjectWorkstreams = (
       skillRuns: sortedRuns,
       wayfinderMap,
       wayfinderSynchronization,
+      workflowAttachment,
       readiness,
     };
   }).sort((left, right) => left.id.localeCompare(right.id));
@@ -215,7 +255,14 @@ export function deriveEnvironmentWorkstreams(
   skillRuns: ReadonlyArray<SkillInvocation>,
   threads: ReadonlyArray<OrchestrationThreadShell> = [],
 ): ReadonlyArray<EnvironmentProjectSkillWorkstream> {
-  const projectIds = [...new Set(skillRuns.map((run) => run.projectId))].sort();
+  const projectIds = [
+    ...new Set([
+      ...skillRuns.map((run) => run.projectId),
+      ...threads.flatMap((thread) =>
+        thread.workflowAttachment === undefined ? [] : [thread.projectId],
+      ),
+    ]),
+  ].sort();
   return projectIds.flatMap((projectId) =>
     deriveProjectWorkstreams(projectId, skillRuns, threads).map((workstream) => ({
       ...workstream,

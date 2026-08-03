@@ -23,8 +23,10 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  attachWorkflow,
   createProject,
   controlWayfinderResearch,
+  dismissWorkflowAttachmentHint,
   mutateWayfinder,
   publishWayfinderDraft,
   reconcileWayfinderMap,
@@ -196,6 +198,45 @@ describe("environment commands", () => {
           skillRunId: "skill-run:1",
           confirmed: true,
           createdAt: "2026-06-06T00:03:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches explicit workflow attachment and dismissal commands", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* attachWorkflow({
+        commandId: CommandId.make("attach-workflow-command"),
+        threadId: ThreadId.make("thread-origin"),
+        originThreadId: ThreadId.make("thread-origin"),
+        workflowGoal: "Ship the workflow.",
+        confirmed: true,
+        createdAt: "2026-08-03T12:00:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* dismissWorkflowAttachmentHint({
+        commandId: CommandId.make("dismiss-workflow-hint-command"),
+        threadId: ThreadId.make("thread-origin"),
+        createdAt: "2026-08-03T12:01:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.workflow.attach",
+          commandId: "attach-workflow-command",
+          threadId: "thread-origin",
+          originThreadId: "thread-origin",
+          workflowGoal: "Ship the workflow.",
+          confirmed: true,
+          createdAt: "2026-08-03T12:00:00.000Z",
+        },
+        {
+          type: "thread.workflow-attachment.hint.dismiss",
+          commandId: "dismiss-workflow-hint-command",
+          threadId: "thread-origin",
+          createdAt: "2026-08-03T12:01:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

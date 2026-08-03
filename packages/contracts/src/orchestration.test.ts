@@ -638,6 +638,32 @@ it.effect("decodes thread settle and unsettle commands", () =>
   }),
 );
 
+it.effect("requires explicit confirmation before attaching a Development Workflow", () =>
+  Effect.gen(function* () {
+    const attached = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.attach",
+      commandId: "cmd-workflow-attach",
+      threadId: "thread-wayfinder",
+      originThreadId: "thread-wayfinder",
+      workflowGoal: "Ship the workflow safely.",
+      confirmed: true,
+      createdAt: "2026-08-03T12:00:00.000Z",
+    });
+    assert.strictEqual(attached.type, "thread.workflow.attach");
+
+    const unconfirmed = yield* decodeClientOrchestrationCommand({
+      type: "thread.workflow.attach",
+      commandId: "cmd-workflow-unconfirmed",
+      threadId: "thread-wayfinder",
+      originThreadId: "thread-wayfinder",
+      workflowGoal: "Ship the workflow safely.",
+      confirmed: false,
+      createdAt: "2026-08-03T12:00:00.000Z",
+    }).pipe(Effect.flip);
+    assert.ok(unconfirmed);
+  }),
+);
+
 it.effect("defaults settled fields when decoding historical thread data", () =>
   Effect.gen(function* () {
     const common = {

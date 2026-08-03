@@ -617,6 +617,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
+            workflowAttachmentState: null,
             deletedAt: null,
           });
           return;
@@ -787,6 +788,61 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             deletedAt: event.payload.deletedAt,
             updatedAt: event.payload.deletedAt,
+          });
+          return;
+        }
+
+        case "thread.workflow-attachment-hinted": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            workflowAttachmentState: {
+              ...(existingRow.value.workflowAttachmentState ?? {}),
+              hint: event.payload.hint,
+            },
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.workflow-attachment-hint-dismissed": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            workflowAttachmentState: {
+              ...(existingRow.value.workflowAttachmentState ?? {}),
+              hint: event.payload.hint,
+            },
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.workflow-attached": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            workflowAttachmentState: {
+              ...(existingRow.value.workflowAttachmentState ?? {}),
+              hint: event.payload.hint,
+              attachment: event.payload.attachment,
+            },
+            updatedAt: event.occurredAt,
           });
           return;
         }

@@ -41,6 +41,9 @@ import {
   ThreadWayfinderMutationUpdatedPayload,
   ThreadWayfinderReconciliationUpdatedPayload,
   ThreadWayfinderResearchUpdatedPayload,
+  ThreadWorkflowAttachedPayload,
+  ThreadWorkflowAttachmentHintDismissedPayload,
+  ThreadWorkflowAttachmentHintedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -942,6 +945,55 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.workflow-attachment-hinted":
+      return decodeForEvent(
+        ThreadWorkflowAttachmentHintedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachmentHint: payload.hint,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-attachment-hint-dismissed":
+      return decodeForEvent(
+        ThreadWorkflowAttachmentHintDismissedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachmentHint: payload.hint,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-attached":
+      return decodeForEvent(
+        ThreadWorkflowAttachedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachmentHint: payload.hint,
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
       );
 
     default:

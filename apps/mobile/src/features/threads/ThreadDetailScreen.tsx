@@ -14,6 +14,8 @@ import type {
   ServerConfig as T3ServerConfig,
   ThreadId,
   WayfinderDraft,
+  WorkflowAttachment,
+  WorkflowAttachmentHint,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -36,6 +38,7 @@ import type {
 import { PendingApprovalCard } from "./PendingApprovalCard";
 import { PendingUserInputCard } from "./PendingUserInputCard";
 import { WayfinderDraftCard } from "./WayfinderDraftCard";
+import { WorkflowAttachmentCard } from "./WorkflowAttachmentCard";
 import {
   COMPOSER_COLLAPSED_CHROME,
   COMPOSER_EXPANDED_CHROME,
@@ -60,6 +63,8 @@ export interface ThreadDetailScreenProps {
   readonly respondingUserInputId: ApprovalRequestId | null;
   readonly wayfinderDraft: WayfinderDraft | null;
   readonly wayfinderPublication: import("@t3tools/contracts").WayfinderPublication | null;
+  readonly workflowAttachmentHint?: WorkflowAttachmentHint;
+  readonly workflowAttachment?: WorkflowAttachment;
   readonly draftMessage: string;
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
   readonly connectionStateLabel: EnvironmentConnectionPhase;
@@ -101,6 +106,9 @@ export interface ThreadDetailScreenProps {
   ) => void;
   readonly onSubmitUserInput: () => Promise<unknown>;
   readonly onPublishWayfinderDraft: () => void;
+  readonly onDismissWorkflowAttachmentHint?: () => void;
+  readonly onAttachWorkflow?: (workflowGoal: string) => void;
+  readonly onOpenWorkflow?: () => void;
   readonly showContent?: boolean;
 }
 
@@ -393,6 +401,21 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               pushes the resting content floor up by the same amount. */}
           <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
             <View className="w-full self-center" style={{ maxWidth: contentMaxWidth }}>
+              {props.workflowAttachmentHint?.status === "available" || props.workflowAttachment ? (
+                <Animated.View
+                  className="shrink-0 px-4 pb-3"
+                  entering={FadeInDown.duration(220)}
+                  exiting={FadeOut.duration(140)}
+                >
+                  <WorkflowAttachmentCard
+                    hint={props.workflowAttachmentHint ?? null}
+                    attachment={props.workflowAttachment ?? null}
+                    onDismiss={props.onDismissWorkflowAttachmentHint}
+                    onAttach={props.onAttachWorkflow}
+                    onOpenWorkstream={props.onOpenWorkflow}
+                  />
+                </Animated.View>
+              ) : null}
               {props.wayfinderDraft ||
               props.activePendingApproval ||
               props.activePendingUserInput ? (

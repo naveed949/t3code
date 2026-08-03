@@ -46,6 +46,7 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
       skillRuns: [invocation],
       wayfinderMap: null,
       wayfinderSynchronization: null,
+      workflowAttachment: null,
       readiness: {
         ready: false,
         blockers: [
@@ -53,6 +54,86 @@ it("derives durable project Workstreams from shared Skill Run state", () => {
           { kind: "tracker-synchronization-unhealthy", status: "unknown" },
         ],
       },
+    },
+  ]);
+});
+
+it("keeps an explicitly attached workflow reopenable from durable thread state", () => {
+  const synchronizedAt = "2026-08-03T12:00:00.000Z";
+  const originThread = {
+    id: ThreadId.make("thread-workflow-origin"),
+    projectId: ProjectId.make("project-workflow"),
+    title: "Workflow origin",
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
+    runtimeMode: "full-access" as const,
+    interactionMode: "default" as const,
+    branch: null,
+    worktreePath: null,
+    latestTurn: null,
+    createdAt: synchronizedAt,
+    updatedAt: synchronizedAt,
+    archivedAt: null,
+    settledOverride: null,
+    settledAt: null,
+    session: null,
+    latestUserMessageAt: null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
+    workflowAttachment: {
+      originThreadId: ThreadId.make("thread-workflow-origin"),
+      workstreamId: WorkstreamId.make("workstream:workflow-origin"),
+      sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+      workflowGoal: "Ship the workflow.",
+      backfilledWayfinderData: {
+        wayfinderMap: {
+          canonicalReference: {
+            number: 29,
+            title: "Development Workflow",
+            url: "https://github.com/t3tools/t3code/issues/29",
+            state: "open" as const,
+          },
+          destination: "Ship the workflow.",
+          notes: "",
+          decisionsSoFar: [],
+          fogOfWar: [],
+          outOfScope: [],
+          tickets: [],
+          frontier: [],
+          lastSynchronizedAt: synchronizedAt,
+        },
+        wayfinderSynchronizedAt: synchronizedAt,
+        wayfinderSynchronization: {
+          status: "healthy" as const,
+          reason: "resume" as const,
+          lastAttemptedAt: synchronizedAt,
+          lastSuccessfulAt: synchronizedAt,
+          canMutate: true,
+        },
+      },
+      observationCursor: {
+        sourceSkillRunId: SkillRunId.make("skill-run:workflow-origin"),
+        observedAt: synchronizedAt,
+        wayfinderSynchronizedAt: synchronizedAt,
+      },
+      attachedAt: synchronizedAt,
+    },
+  };
+
+  const [workstream] = deriveProjectWorkstreams(originThread.projectId, [], [originThread]);
+
+  expect(workstream?.id).toBe("workstream:workflow-origin");
+  expect(workstream?.workflowAttachment?.originThreadId).toBe(originThread.id);
+  expect(workstream?.wayfinderMap?.canonicalReference.number).toBe(29);
+  expect(workstream?.wayfinderSynchronization?.status).toBe("healthy");
+  expect(workstream?.linkedThreadIds).toEqual([originThread.id]);
+  expect(
+    deriveEnvironmentWorkstreams(EnvironmentId.make("environment:workflow"), [], [originThread]),
+  ).toMatchObject([
+    {
+      environmentId: "environment:workflow",
+      projectId: originThread.projectId,
+      id: "workstream:workflow-origin",
     },
   ]);
 });

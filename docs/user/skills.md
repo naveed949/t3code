@@ -22,6 +22,19 @@ The resulting skill-run identity is part of the shared project snapshot and link
 originating thread, so web, desktop, and mobile clients retain the same run after later turns and
 after reconnecting.
 
+### Development Workflow attachment
+
+After a native, structured Wayfinder invocation, an unattached thread can offer one dismissible
+**Attach this Wayfinder workstream?** hint. Ordinary messages and generic skill prompts never offer
+this hint or create a workflow attachment. To attach it, confirm that conversation as the Origin
+Thread and give the Development Workflow a goal.
+
+Attachment keeps the conversation intact; it does not replace or convert the thread. T3 retains the
+compatible Wayfinder data and its observation point so the attached Workstream can be reopened after
+reconnecting or restarting. The Workstreams list returns to the Origin Thread on every client; web
+and desktop reopen an attached synchronized map in the Workbench panel, while mobile uses its
+Wayfinder route.
+
 Continuing an existing Wayfinder map synchronizes a projection from GitHub. The Workbench
 shows the destination, notes, decisions, fog of war, out-of-scope entries, native child tickets and
 dependencies, claims, issue states, canonical links, and the last synchronization time. Its frontier

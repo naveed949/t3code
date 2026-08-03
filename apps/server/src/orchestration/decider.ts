@@ -6,6 +6,8 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type SkillInvocation,
+  type WorkflowAttachmentWayfinderData,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
@@ -45,6 +47,35 @@ const decodeWayfinderMutationApprovalPayload = Schema.decodeUnknownOption(
     action: WayfinderMutationAction,
   }),
 );
+
+function isWorkflowAttachableWayfinderInvocation(invocation: SkillInvocation): boolean {
+  return (
+    invocation.skill.name === "wayfinder" &&
+    invocation.execution.mode === "native" &&
+    invocation.action?.id !== "work-ticket" &&
+    (invocation.wayfinderMap !== undefined || invocation.wayfinderDraft !== undefined)
+  );
+}
+
+function backfillWorkflowAttachmentWayfinderData(
+  invocation: SkillInvocation,
+): WorkflowAttachmentWayfinderData {
+  return {
+    ...(invocation.wayfinderMap !== undefined ? { wayfinderMap: invocation.wayfinderMap } : {}),
+    ...(invocation.wayfinderDraft !== undefined
+      ? { wayfinderDraft: invocation.wayfinderDraft }
+      : {}),
+    ...(invocation.wayfinderPublication !== undefined
+      ? { wayfinderPublication: invocation.wayfinderPublication }
+      : {}),
+    ...(invocation.wayfinderSynchronizedAt !== undefined
+      ? { wayfinderSynchronizedAt: invocation.wayfinderSynchronizedAt }
+      : {}),
+    ...(invocation.wayfinderSynchronization !== undefined
+      ? { wayfinderSynchronization: invocation.wayfinderSynchronization }
+      : {}),
+  };
+}
 
 function sameWayfinderMutationAction(
   left: WayfinderMutationAction,
@@ -970,14 +1001,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           handoffWorkstreamId = wayfinderInvocation.workstreamId;
         }
       }
-      const skillInvocationFields = requestedSkillInvocation
-        ? (({ reconnectWorkstreamId: _reconnectWorkstreamId, ...invocation }) => invocation)(
-            requestedSkillInvocation,
-          )
-        : undefined;
-      const skillInvocation = requestedSkillInvocation
+      const skillInvocation: SkillInvocation | undefined = requestedSkillInvocation
         ? {
-            ...skillInvocationFields,
+            skill: requestedSkillInvocation.skill,
+            ...(requestedSkillInvocation.arguments !== undefined
+              ? { arguments: requestedSkillInvocation.arguments }
+              : {}),
+            ...(requestedSkillInvocation.action !== undefined
+              ? { action: requestedSkillInvocation.action }
+              : {}),
+            execution: requestedSkillInvocation.execution,
+            ...(requestedSkillInvocation.wayfinderMap !== undefined
+              ? { wayfinderMap: requestedSkillInvocation.wayfinderMap }
+              : {}),
+            ...(requestedSkillInvocation.wayfinderSynchronizedAt !== undefined
+              ? { wayfinderSynchronizedAt: requestedSkillInvocation.wayfinderSynchronizedAt }
+              : {}),
+            ...(requestedSkillInvocation.wayfinderSynchronization !== undefined
+              ? { wayfinderSynchronization: requestedSkillInvocation.wayfinderSynchronization }
+              : {}),
             workstreamId:
               handoffWorkstreamId ??
               requestedSkillInvocation.reconnectWorkstreamId ??
@@ -1073,6 +1115,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ),
             )
           : null;
+      // A Development Workflow attachment is never inferred from prose or
+      // from a generic skill. A native, structured Wayfinder invocation can
+      // offer exactly one durable hint for this Origin Thread; the later
+      // attach command still requires the user to name and confirm the goal.
+      const workflowAttachmentHintEvent =
+        skillInvocation !== undefined &&
+        isWorkflowAttachableWayfinderInvocation(skillInvocation) &&
+        targetThread.workflowAttachment === undefined &&
+        targetThread.workflowAttachmentHint === undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  causationEventId: turnStartRequestedEvent.eventId,
+                  type: "thread.workflow-attachment-hinted",
+                  payload: {
+                    threadId: command.threadId,
+                    hint: {
+                      status: "available",
+                      sourceSkillRunId: skillInvocation.skillRunId,
+                      workstreamId: skillInvocation.workstreamId,
+                      backfilledWayfinderData:
+                        backfillWorkflowAttachmentWayfinderData(skillInvocation),
+                      offeredAt: command.createdAt,
+                      updatedAt: command.createdAt,
+                    },
+                  },
+                }),
+              ),
+            )
+          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -1116,6 +1194,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         userMessageEvent,
         turnStartRequestedEvent,
         ...(draftStartedEvent ? [draftStartedEvent] : []),
+        ...(workflowAttachmentHintEvent ? [workflowAttachmentHintEvent] : []),
       ];
     }
 
@@ -1198,6 +1277,100 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           requestId: command.requestId,
           answers: command.answers,
           createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.workflow-attachment.hint.dismiss": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const hint = thread.workflowAttachmentHint;
+      if (hint === undefined || hint.status !== "available") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No available structured Wayfinder hint can be dismissed.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-attachment-hint-dismissed",
+        payload: {
+          threadId: command.threadId,
+          hint: {
+            ...hint,
+            status: "dismissed",
+            updatedAt: command.createdAt,
+          },
+        },
+      };
+    }
+
+    case "thread.workflow.attach": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (command.originThreadId !== thread.id) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow attachment must explicitly confirm this origin thread.",
+        });
+      }
+      if (thread.workflowAttachment !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This origin thread is already attached to a Development Workflow.",
+        });
+      }
+      const hint = thread.workflowAttachmentHint;
+      if (hint === undefined || hint.status !== "available") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow attachment requires an available structured Wayfinder hint.",
+        });
+      }
+      const attachment = {
+        originThreadId: command.originThreadId,
+        workstreamId: hint.workstreamId,
+        sourceSkillRunId: hint.sourceSkillRunId,
+        workflowGoal: command.workflowGoal,
+        backfilledWayfinderData: hint.backfilledWayfinderData,
+        observationCursor: {
+          sourceSkillRunId: hint.sourceSkillRunId,
+          observedAt: command.createdAt,
+          ...(hint.backfilledWayfinderData.wayfinderSynchronizedAt !== undefined
+            ? {
+                wayfinderSynchronizedAt: hint.backfilledWayfinderData.wayfinderSynchronizedAt,
+              }
+            : {}),
+        },
+        attachedAt: command.createdAt,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-attached",
+        payload: {
+          threadId: command.threadId,
+          hint: {
+            ...hint,
+            status: "attached",
+            updatedAt: command.createdAt,
+          },
+          attachment,
         },
       };
     }

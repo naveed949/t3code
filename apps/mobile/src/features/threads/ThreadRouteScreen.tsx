@@ -220,6 +220,14 @@ function ThreadRouteContent(
     threadEnvironment.publishWayfinderDraft,
     "publish Wayfinder draft",
   );
+  const dismissWorkflowAttachmentHintCommand = useAtomCommand(
+    threadEnvironment.dismissWorkflowAttachmentHint,
+    "dismiss workflow attachment hint",
+  );
+  const attachWorkflowCommand = useAtomCommand(
+    threadEnvironment.attachWorkflow,
+    "attach Development Workflow",
+  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -669,6 +677,28 @@ function ThreadRouteContent(
       threadId: String(selectedThread.id),
     });
   }, [navigation, selectedThread, wayfinderMap]);
+  const dismissWorkflowAttachmentHint = useCallback(() => {
+    if (!selectedThread) return;
+    void dismissWorkflowAttachmentHintCommand({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id },
+    });
+  }, [dismissWorkflowAttachmentHintCommand, selectedThread]);
+  const attachWorkflow = useCallback(
+    (workflowGoal: string) => {
+      if (!selectedThread) return;
+      void attachWorkflowCommand({
+        environmentId: selectedThread.environmentId,
+        input: {
+          threadId: selectedThread.id,
+          originThreadId: selectedThread.id,
+          workflowGoal,
+          confirmed: true,
+        },
+      });
+    },
+    [attachWorkflowCommand, selectedThread],
+  );
   const wayfinderHeaderItems = useMemo<NativeHeaderItems>(
     () =>
       wayfinderMap
@@ -902,6 +932,8 @@ function ThreadRouteContent(
           respondingUserInputId={requests.respondingUserInputId}
           wayfinderDraft={wayfinderDraft}
           wayfinderPublication={wayfinderPublication}
+          workflowAttachmentHint={selectedThread.workflowAttachmentHint}
+          workflowAttachment={selectedThread.workflowAttachment}
           draftMessage={composer.draftMessage}
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}
@@ -930,6 +962,9 @@ function ThreadRouteContent(
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
           onSubmitUserInput={requests.onSubmitUserInput}
           onPublishWayfinderDraft={publishWayfinderDraft}
+          onDismissWorkflowAttachmentHint={dismissWorkflowAttachmentHint}
+          onAttachWorkflow={attachWorkflow}
+          {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}
         />
       </View>
     </>

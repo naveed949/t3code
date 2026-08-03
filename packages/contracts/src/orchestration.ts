@@ -354,6 +354,65 @@ export const SkillInvocation = Schema.Struct({
 });
 export type SkillInvocation = typeof SkillInvocation.Type;
 
+/**
+ * Structured Wayfinder state that can safely seed an explicitly attached
+ * Development Workflow. This deliberately contains only native Wayfinder
+ * projection data; assistant prose and generic-skill output never become
+ * workflow authority.
+ */
+export const WorkflowAttachmentWayfinderData = Schema.Struct({
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  wayfinderDraft: OptionalWayfinderDraft,
+  wayfinderPublication: OptionalWayfinderPublication,
+  wayfinderSynchronizedAt: Schema.optional(IsoDateTime),
+  wayfinderSynchronization: Schema.optional(WayfinderSynchronizationState),
+});
+export type WorkflowAttachmentWayfinderData = typeof WorkflowAttachmentWayfinderData.Type;
+
+/**
+ * A durable point from which an attached workflow can resume observing its
+ * native Wayfinder source. The source run and synchronized timestamp are
+ * intentionally retained instead of inferred from conversation text.
+ */
+export const WorkflowAttachmentObservationCursor = Schema.Struct({
+  sourceSkillRunId: SkillRunId,
+  observedAt: IsoDateTime,
+  wayfinderSynchronizedAt: Schema.optional(IsoDateTime),
+});
+export type WorkflowAttachmentObservationCursor = typeof WorkflowAttachmentObservationCursor.Type;
+
+export const WorkflowAttachmentHint = Schema.Struct({
+  status: Schema.Literals(["available", "dismissed", "attached"]),
+  sourceSkillRunId: SkillRunId,
+  workstreamId: WorkstreamId,
+  backfilledWayfinderData: WorkflowAttachmentWayfinderData,
+  offeredAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowAttachmentHint = typeof WorkflowAttachmentHint.Type;
+
+export const WorkflowAttachment = Schema.Struct({
+  originThreadId: ThreadId,
+  workstreamId: WorkstreamId,
+  sourceSkillRunId: SkillRunId,
+  workflowGoal: TrimmedNonEmptyString,
+  backfilledWayfinderData: WorkflowAttachmentWayfinderData,
+  observationCursor: WorkflowAttachmentObservationCursor,
+  attachedAt: IsoDateTime,
+});
+export type WorkflowAttachment = typeof WorkflowAttachment.Type;
+
+/**
+ * Projection-only state kept on an Origin Thread. Native Wayfinder runs
+ * continue to own their map; this state only records an explicit user choice
+ * to attach one run as a Development Workflow Workstream.
+ */
+export const WorkflowAttachmentState = Schema.Struct({
+  hint: Schema.optional(WorkflowAttachmentHint),
+  attachment: Schema.optional(WorkflowAttachment),
+});
+export type WorkflowAttachmentState = typeof WorkflowAttachmentState.Type;
+
 export const ProjectScriptIcon = Schema.Literals([
   "play",
   "test",
@@ -551,6 +610,11 @@ export const OrchestrationThread = Schema.Struct({
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   // Pending-only state. Optional so older servers remain compatible.
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  // Explicit Development Workflow state. Optional preserves compatibility
+  // with pre-attachment snapshots and does not make every Wayfinder run a
+  // workflow attachment.
+  workflowAttachmentHint: Schema.optional(WorkflowAttachmentHint),
+  workflowAttachment: Schema.optional(WorkflowAttachment),
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
@@ -604,6 +668,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   titleRegeneration: Schema.optional(Schema.NullOr(ThreadTitleRegeneration)),
+  workflowAttachmentHint: Schema.optional(WorkflowAttachmentHint),
+  workflowAttachment: Schema.optional(WorkflowAttachment),
   session: Schema.NullOr(OrchestrationSession),
   latestUserMessageAt: Schema.NullOr(IsoDateTime),
   hasPendingApprovals: Schema.Boolean,
@@ -967,6 +1033,25 @@ const ThreadWayfinderResearchCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowAttachmentHintDismissCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow-attachment.hint.dismiss"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowAttachCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.attach"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  originThreadId: ThreadId,
+  workflowGoal: TrimmedNonEmptyString,
+  // Attachment is always an explicit confirmation. Keeping the literal in
+  // the wire contract prevents a client default from silently attaching.
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1005,6 +1090,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderMutateCommand,
   ThreadWayfinderReconcileCommand,
   ThreadWayfinderResearchCommand,
+  ThreadWorkflowAttachmentHintDismissCommand,
+  ThreadWorkflowAttachCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1034,6 +1121,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderMutateCommand,
   ThreadWayfinderReconcileCommand,
   ThreadWayfinderResearchCommand,
+  ThreadWorkflowAttachmentHintDismissCommand,
+  ThreadWorkflowAttachCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1201,6 +1290,9 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.wayfinder-reconciliation-updated",
   "thread.wayfinder-research-requested",
   "thread.wayfinder-research-updated",
+  "thread.workflow-attachment-hinted",
+  "thread.workflow-attachment-hint-dismissed",
+  "thread.workflow-attached",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1438,6 +1530,22 @@ export const ThreadWayfinderResearchUpdatedPayload = Schema.Struct({
   research: WayfinderResearchState,
 });
 
+export const ThreadWorkflowAttachmentHintedPayload = Schema.Struct({
+  threadId: ThreadId,
+  hint: WorkflowAttachmentHint,
+});
+
+export const ThreadWorkflowAttachmentHintDismissedPayload = Schema.Struct({
+  threadId: ThreadId,
+  hint: WorkflowAttachmentHint,
+});
+
+export const ThreadWorkflowAttachedPayload = Schema.Struct({
+  threadId: ThreadId,
+  hint: WorkflowAttachmentHint,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -1636,6 +1744,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.wayfinder-research-updated"),
     payload: ThreadWayfinderResearchUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-attachment-hinted"),
+    payload: ThreadWorkflowAttachmentHintedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-attachment-hint-dismissed"),
+    payload: ThreadWorkflowAttachmentHintDismissedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-attached"),
+    payload: ThreadWorkflowAttachedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

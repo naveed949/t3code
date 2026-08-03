@@ -10,8 +10,11 @@ export const ProjectWorkstreamsShelf = memo(function ProjectWorkstreamsShelf(pro
 }) {
   const workstreams = props.workstreams.flatMap((workstream) => {
     const map = workstream.wayfinderMap;
-    const threadId = workstream.linkedThreadIds[0];
-    return map && threadId ? [{ workstream, map, threadId }] : [];
+    const attachment = workstream.workflowAttachment;
+    const threadId = attachment?.originThreadId ?? workstream.linkedThreadIds[0];
+    return (map !== null || attachment !== null) && threadId
+      ? [{ workstream, map, attachment, threadId }]
+      : [];
   });
   if (workstreams.length === 0) return null;
 
@@ -21,7 +24,7 @@ export const ProjectWorkstreamsShelf = memo(function ProjectWorkstreamsShelf(pro
         Workstreams
       </p>
       <ul className="space-y-1">
-        {workstreams.map(({ workstream, map, threadId }) => {
+        {workstreams.map(({ workstream, map, attachment, threadId }) => {
           const projectKey = `${workstream.environmentId}:${workstream.projectId}`;
           return (
             <li key={`${workstream.environmentId}:${workstream.id}`}>
@@ -35,10 +38,11 @@ export const ProjectWorkstreamsShelf = memo(function ProjectWorkstreamsShelf(pro
                 <MapIcon aria-hidden className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs font-medium text-foreground">
-                    {map.canonicalReference.title}
+                    {map?.canonicalReference.title ?? attachment?.workflowGoal}
                   </span>
                   <span className="block truncate text-[11px] text-muted-foreground">
-                    {props.projectTitleByKey.get(projectKey) ?? "Project"} · {workstream.status}
+                    {props.projectTitleByKey.get(projectKey) ?? "Project"} ·{" "}
+                    {attachment ? "Development workflow" : workstream.status}
                   </span>
                 </span>
               </button>
