@@ -10,8 +10,10 @@ import {
   ProviderInstanceId,
   SkillRunId,
   SkillInvocation,
+  WorkflowAttachmentState,
   WorkstreamId,
 } from "@t3tools/contracts";
+import type { WorkflowAttachment } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -2840,6 +2842,83 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         },
         wayfinderSynchronizedAt: attachedAt,
       };
+      const attachment: WorkflowAttachment = {
+        originThreadId: threadId,
+        workstreamId,
+        sourceSkillRunId: skillRunId,
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData,
+        observationCursor: {
+          sourceSkillRunId: skillRunId,
+          observedAt: attachedAt,
+          wayfinderSynchronizedAt: attachedAt,
+        },
+        attachedAt,
+      };
+      const synchronizedAt = "2026-08-03T12:05:00.000Z";
+      const synchronizedAttachment: WorkflowAttachment = {
+        ...attachment,
+        backfilledWayfinderData: {
+          ...backfilledWayfinderData,
+          wayfinderMap: {
+            ...backfilledWayfinderData.wayfinderMap,
+            revision: "issue-29:2",
+            lastSynchronizedAt: synchronizedAt,
+          },
+          wayfinderSynchronizedAt: synchronizedAt,
+        },
+        observationCursor: {
+          sourceSkillRunId: skillRunId,
+          observedAt: synchronizedAt,
+          wayfinderSynchronizedAt: synchronizedAt,
+        },
+        workflowGraph: {
+          artifacts: [
+            {
+              id: "wayfinder-map:29:content:initial",
+              logicalId: "wayfinder-map:29",
+              kind: "wayfinder-map",
+              state: "superseded",
+              lineage: {
+                workstreamId,
+                sourceSkillRunId: skillRunId,
+                sourceStage: "attachment",
+                upstreamVersion: "content:initial",
+              },
+              upstreamSynchronizedAt: attachedAt,
+              importedAt: attachedAt,
+              marker: { kind: "new", state: "unread", markedAt: attachedAt },
+            },
+            {
+              id: "wayfinder-map:29:revision:issue-29:2",
+              logicalId: "wayfinder-map:29",
+              kind: "wayfinder-map",
+              state: "current",
+              lineage: {
+                workstreamId,
+                sourceSkillRunId: skillRunId,
+                sourceStage: "reconciliation",
+                upstreamVersion: "revision:issue-29:2",
+              },
+              upstreamSynchronizedAt: synchronizedAt,
+              importedAt: synchronizedAt,
+              marker: { kind: "changed", state: "unread", markedAt: synchronizedAt },
+            },
+          ],
+          nodes: [
+            {
+              id: `workflow:${workstreamId}`,
+              kind: "workstream",
+              state: "stale",
+              sourceArtifactId: "wayfinder-map:29:revision:issue-29:2",
+              resolution: { status: "required", allowed: ["accept-upstream"] },
+              staleAt: synchronizedAt,
+            },
+          ],
+          unreadArtifactCount: 2,
+          updatedAt: synchronizedAt,
+        },
+      };
 
       yield* eventStore.append({
         type: "thread.created",
@@ -2886,20 +2965,20 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
             offeredAt: attachedAt,
             updatedAt: attachedAt,
           },
-          attachment: {
-            originThreadId: threadId,
-            workstreamId,
-            sourceSkillRunId: skillRunId,
-            workflowGoal: "Ship the workflow.",
-            backfilledWayfinderData,
-            observationCursor: {
-              sourceSkillRunId: skillRunId,
-              observedAt: attachedAt,
-              wayfinderSynchronizedAt: attachedAt,
-            },
-            attachedAt,
-          },
+          attachment,
         },
+      });
+      yield* eventStore.append({
+        type: "thread.workflow-synchronized",
+        eventId: EventId.make("evt-workflow-projection-synchronized"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: synchronizedAt,
+        commandId: CommandId.make("cmd-workflow-projection-synchronized"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-workflow-projection-synchronized"),
+        metadata: {},
+        payload: { threadId, attachment: synchronizedAttachment },
       });
 
       yield* projectionPipeline.bootstrap;
@@ -2918,7 +2997,10 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE thread_id = ${threadId}
       `;
       assert.equal(rows[0]?.title, "Workflow origin");
-      assert.deepEqual(JSON.parse(rows[0]?.attachmentState ?? "null"), {
+      const attachmentState = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(WorkflowAttachmentState),
+      )(rows[0]?.attachmentState ?? "{}").pipe(Effect.orDie);
+      assert.deepEqual(attachmentState, {
         hint: {
           status: "attached",
           sourceSkillRunId: skillRunId,
@@ -2927,19 +3009,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
           offeredAt: attachedAt,
           updatedAt: attachedAt,
         },
-        attachment: {
-          originThreadId: threadId,
-          workstreamId,
-          sourceSkillRunId: skillRunId,
-          workflowGoal: "Ship the workflow.",
-          backfilledWayfinderData,
-          observationCursor: {
-            sourceSkillRunId: skillRunId,
-            observedAt: attachedAt,
-            wayfinderSynchronizedAt: attachedAt,
-          },
-          attachedAt,
-        },
+        attachment: synchronizedAttachment,
       });
     }).pipe(
       Effect.provide(

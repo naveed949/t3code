@@ -109,6 +109,9 @@ export interface ThreadDetailScreenProps {
   readonly onDismissWorkflowAttachmentHint?: () => void;
   readonly onAttachWorkflow?: (workflowGoal: string) => void;
   readonly onOpenWorkflow?: () => void;
+  readonly onViewWorkflowArtifacts?: () => void;
+  readonly onAcknowledgeWorkflowArtifact?: (artifactId: string) => void;
+  readonly onResolveWorkflowStale?: () => void;
   readonly showContent?: boolean;
 }
 
@@ -413,6 +416,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onDismiss={props.onDismissWorkflowAttachmentHint}
                     onAttach={props.onAttachWorkflow}
                     onOpenWorkstream={props.onOpenWorkflow}
+                    onViewArtifacts={props.onViewWorkflowArtifacts}
+                    onAcknowledgeArtifact={props.onAcknowledgeWorkflowArtifact}
+                    onResolveStale={props.onResolveWorkflowStale}
                   />
                 </Animated.View>
               ) : null}

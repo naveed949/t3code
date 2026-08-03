@@ -10,11 +10,22 @@ export function WorkflowAttachmentCard(props: {
   readonly onDismiss?: () => void;
   readonly onAttach?: (workflowGoal: string) => void;
   readonly onOpenWorkstream?: () => void;
+  readonly onViewArtifacts?: () => void;
+  readonly onAcknowledgeArtifact?: (artifactId: string) => void;
+  readonly onResolveStale?: () => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
 
   if (props.attachment !== null) {
+    const graph = props.attachment.workflowGraph;
+    const unreadArtifactCount = graph?.unreadArtifactCount ?? 0;
+    const artifactToAcknowledge = graph?.artifacts
+      .slice()
+      .reverse()
+      .find((artifact) => artifact.marker.state !== "acknowledged");
+    const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
+
     return (
       <View className="gap-2 rounded-[20px] border border-sky-300/35 bg-sky-50/90 p-4 dark:border-sky-300/15 dark:bg-sky-400/8">
         <Text className="font-t3-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
@@ -34,6 +45,56 @@ export function WorkflowAttachmentCard(props: {
               Open Workstream
             </Text>
           </Pressable>
+        ) : null}
+        {unreadArtifactCount > 0 ? (
+          <View className="gap-2 rounded-xl border border-sky-500/20 bg-white/60 px-3 py-2.5 dark:bg-neutral-950/30">
+            <Text className="font-sans text-xs text-neutral-700 dark:text-neutral-200">
+              {unreadArtifactCount} new or changed upstream{" "}
+              {unreadArtifactCount === 1 ? "artifact" : "artifacts"}.
+            </Text>
+            {props.onViewArtifacts ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Mark workflow updates viewed"
+                className="self-start rounded-lg px-2 py-1"
+                onPress={props.onViewArtifacts}
+              >
+                <Text className="font-t3-bold text-xs text-sky-700 dark:text-sky-300">
+                  Mark viewed
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
+        {artifactToAcknowledge && props.onAcknowledgeArtifact ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Acknowledge latest workflow update"
+            className="self-start rounded-lg px-2 py-1"
+            onPress={() => props.onAcknowledgeArtifact?.(artifactToAcknowledge.id)}
+          >
+            <Text className="font-t3-bold text-xs text-sky-700 dark:text-sky-300">
+              Acknowledge latest update
+            </Text>
+          </Pressable>
+        ) : null}
+        {staleNode ? (
+          <View className="gap-2 rounded-xl border border-amber-400/45 bg-amber-100/70 px-3 py-2.5 dark:border-amber-300/25 dark:bg-amber-400/10">
+            <Text className="font-sans text-xs leading-relaxed text-amber-950 dark:text-amber-100">
+              Upstream Wayfinder data changed. Downstream work is paused until this update is
+              accepted.
+            </Text>
+            {props.onResolveStale ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Accept upstream workflow update"
+                className="self-start rounded-lg bg-amber-600 px-3 py-2"
+                onPress={props.onResolveStale}
+              >
+                <Text className="font-t3-bold text-xs text-white">Accept upstream update</Text>
+              </Pressable>
+            ) : null}
+          </View>
         ) : null}
       </View>
     );

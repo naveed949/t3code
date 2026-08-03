@@ -29,8 +29,12 @@ import {
   ThreadWayfinderReconciliationUpdatedPayload as ContractsThreadWayfinderReconciliationUpdatedPayloadSchema,
   ThreadWayfinderResearchUpdatedPayload as ContractsThreadWayfinderResearchUpdatedPayloadSchema,
   ThreadWorkflowAttachedPayload as ContractsThreadWorkflowAttachedPayloadSchema,
+  ThreadWorkflowArtifactAcknowledgedPayload as ContractsThreadWorkflowArtifactAcknowledgedPayloadSchema,
   ThreadWorkflowAttachmentHintDismissedPayload as ContractsThreadWorkflowAttachmentHintDismissedPayloadSchema,
   ThreadWorkflowAttachmentHintedPayload as ContractsThreadWorkflowAttachmentHintedPayloadSchema,
+  ThreadWorkflowArtifactsViewedPayload as ContractsThreadWorkflowArtifactsViewedPayloadSchema,
+  ThreadWorkflowStaleResolvedPayload as ContractsThreadWorkflowStaleResolvedPayloadSchema,
+  ThreadWorkflowSynchronizedPayload as ContractsThreadWorkflowSynchronizedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -78,3 +82,9 @@ export const ThreadWorkflowAttachmentHintedPayload =
 export const ThreadWorkflowAttachmentHintDismissedPayload =
   ContractsThreadWorkflowAttachmentHintDismissedPayloadSchema;
 export const ThreadWorkflowAttachedPayload = ContractsThreadWorkflowAttachedPayloadSchema;
+export const ThreadWorkflowSynchronizedPayload = ContractsThreadWorkflowSynchronizedPayloadSchema;
+export const ThreadWorkflowArtifactsViewedPayload =
+  ContractsThreadWorkflowArtifactsViewedPayloadSchema;
+export const ThreadWorkflowArtifactAcknowledgedPayload =
+  ContractsThreadWorkflowArtifactAcknowledgedPayloadSchema;
+export const ThreadWorkflowStaleResolvedPayload = ContractsThreadWorkflowStaleResolvedPayloadSchema;

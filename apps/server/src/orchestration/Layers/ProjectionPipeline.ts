@@ -847,6 +847,27 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.workflow-synchronized":
+        case "thread.workflow-artifacts-viewed":
+        case "thread.workflow-artifact-acknowledged":
+        case "thread.workflow-stale-resolved": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            workflowAttachmentState: {
+              ...(existingRow.value.workflowAttachmentState ?? {}),
+              attachment: event.payload.attachment,
+            },
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
         case "thread.message-sent":
         case "thread.proposed-plan-upserted":
         case "thread.activity-appended":

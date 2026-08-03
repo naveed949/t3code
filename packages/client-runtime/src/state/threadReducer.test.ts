@@ -7,10 +7,12 @@ import {
   MessageId,
   ProjectId,
   ProviderInstanceId,
+  SkillRunId,
   ThreadId,
   TurnId,
+  WorkstreamId,
 } from "@t3tools/contracts";
-import type { OrchestrationThread } from "@t3tools/contracts";
+import type { OrchestrationThread, WorkflowAttachment } from "@t3tools/contracts";
 
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 
@@ -741,6 +743,104 @@ describe("applyThreadDetailEvent", () => {
         // msg-3 (turn-2) is filtered, msg-1 (no turn) and msg-2 (turn-1) remain
         expect(result.thread.messages).toHaveLength(2);
         expect(result.thread.latestTurn?.turnId).toBe("turn-1");
+      }
+    });
+  });
+
+  describe("Development Workflow attachment events", () => {
+    it("applies synchronized lineage and stale resolution to detail state", () => {
+      const attachment: WorkflowAttachment = {
+        originThreadId: ThreadId.make("thread-1"),
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-04-01T14:00:00.000Z",
+        },
+        workflowGraph: {
+          artifacts: [
+            {
+              id: "wayfinder-map:29:revision:2",
+              logicalId: "wayfinder-map:29",
+              kind: "wayfinder-map",
+              state: "current",
+              lineage: {
+                workstreamId: WorkstreamId.make("workstream:origin"),
+                sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+                sourceStage: "reconciliation",
+                upstreamVersion: "revision:2",
+              },
+              upstreamSynchronizedAt: "2026-04-01T14:00:00.000Z",
+              importedAt: "2026-04-01T14:00:00.000Z",
+              marker: {
+                kind: "changed",
+                state: "unread",
+                markedAt: "2026-04-01T14:00:00.000Z",
+              },
+            },
+          ],
+          nodes: [
+            {
+              id: "workflow:workstream:origin",
+              kind: "workstream",
+              state: "stale",
+              sourceArtifactId: "wayfinder-map:29:revision:2",
+              resolution: { status: "required", allowed: ["accept-upstream"] },
+              staleAt: "2026-04-01T14:00:00.000Z",
+            },
+          ],
+          unreadArtifactCount: 1,
+          updatedAt: "2026-04-01T14:00:00.000Z",
+        },
+        attachedAt: "2026-04-01T00:00:00.000Z",
+      };
+      const synchronized = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 15,
+        occurredAt: "2026-04-01T14:00:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.workflow-synchronized",
+        payload: { threadId: ThreadId.make("thread-1"), attachment },
+      });
+
+      expect(synchronized.kind).toBe("updated");
+      if (synchronized.kind !== "updated") return;
+      expect(synchronized.thread.workflowAttachment?.workflowGraph?.nodes[0]?.state).toBe("stale");
+
+      const resolvedAttachment: WorkflowAttachment = {
+        ...attachment,
+        workflowGraph: {
+          ...attachment.workflowGraph!,
+          nodes: [
+            {
+              ...attachment.workflowGraph!.nodes[0]!,
+              state: "current",
+              resolution: {
+                status: "resolved",
+                resolution: "accept-upstream",
+                resolvedAt: "2026-04-01T14:01:00.000Z",
+              },
+            },
+          ],
+        },
+      };
+      const resolved = applyThreadDetailEvent(synchronized.thread, {
+        ...baseEventFields,
+        sequence: 16,
+        occurredAt: "2026-04-01T14:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.workflow-stale-resolved",
+        payload: { threadId: ThreadId.make("thread-1"), attachment: resolvedAttachment },
+      });
+      expect(resolved.kind).toBe("updated");
+      if (resolved.kind === "updated") {
+        expect(resolved.thread.workflowAttachment?.workflowGraph?.nodes[0]?.resolution.status).toBe(
+          "resolved",
+        );
       }
     });
   });

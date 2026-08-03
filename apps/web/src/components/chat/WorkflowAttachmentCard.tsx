@@ -1,5 +1,5 @@
 import type { ThreadId, WorkflowAttachment, WorkflowAttachmentHint } from "@t3tools/contracts";
-import { Link2Icon, XIcon } from "lucide-react";
+import { AlertTriangleIcon, CheckIcon, EyeIcon, Link2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 export function WorkflowAttachmentCard(props: {
@@ -9,11 +9,22 @@ export function WorkflowAttachmentCard(props: {
   readonly onDismiss: () => void;
   readonly onAttach: (workflowGoal: string) => void;
   readonly onOpenWorkstream?: () => void;
+  readonly onViewArtifacts?: () => void;
+  readonly onAcknowledgeArtifact?: (artifactId: string) => void;
+  readonly onResolveStale?: () => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
 
   if (props.attachment !== null) {
+    const graph = props.attachment.workflowGraph;
+    const unreadArtifactCount = graph?.unreadArtifactCount ?? 0;
+    const artifactToAcknowledge = graph?.artifacts
+      .slice()
+      .reverse()
+      .find((artifact) => artifact.marker.state !== "acknowledged");
+    const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
+
     return (
       <section
         aria-label="Attached Development Workflow"
@@ -35,6 +46,54 @@ export function WorkflowAttachmentCard(props: {
             </button>
           ) : null}
         </div>
+        {unreadArtifactCount > 0 ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-background/60 px-2.5 py-2 text-xs text-muted-foreground">
+            <EyeIcon aria-hidden className="size-3.5 text-primary" />
+            <span aria-live="polite">
+              {unreadArtifactCount} new or changed upstream{" "}
+              {unreadArtifactCount === 1 ? "artifact" : "artifacts"}.
+            </span>
+            {props.onViewArtifacts ? (
+              <button
+                type="button"
+                className="ml-auto rounded-md px-2 py-1 font-medium text-primary hover:bg-primary/10"
+                onClick={props.onViewArtifacts}
+              >
+                Mark viewed
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {artifactToAcknowledge && props.onAcknowledgeArtifact ? (
+          <button
+            type="button"
+            className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
+            onClick={() => props.onAcknowledgeArtifact?.(artifactToAcknowledge.id)}
+          >
+            <CheckIcon aria-hidden className="size-3.5" />
+            Acknowledge latest update
+          </button>
+        ) : null}
+        {staleNode ? (
+          <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-950 dark:text-amber-100">
+            <div className="flex items-start gap-1.5">
+              <AlertTriangleIcon aria-hidden className="mt-0.5 size-3.5 shrink-0" />
+              <p>
+                Upstream Wayfinder data changed. Downstream work is paused until this update is
+                accepted.
+              </p>
+            </div>
+            {props.onResolveStale ? (
+              <button
+                type="button"
+                className="mt-2 rounded-md bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700"
+                onClick={props.onResolveStale}
+              >
+                Accept upstream update
+              </button>
+            ) : null}
+          </div>
+        ) : null}
       </section>
     );
   }

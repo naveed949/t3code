@@ -370,6 +370,106 @@ export const WorkflowAttachmentWayfinderData = Schema.Struct({
 export type WorkflowAttachmentWayfinderData = typeof WorkflowAttachmentWayfinderData.Type;
 
 /**
+ * The structured stage that supplied a durable Wayfinder artifact. Keeping
+ * this explicit prevents generic assistant prose from acquiring workflow
+ * authority during synchronization.
+ */
+export const WorkflowArtifactSourceStage = Schema.Literals([
+  "attachment",
+  "publication",
+  "mutation",
+  "reconciliation",
+]);
+export type WorkflowArtifactSourceStage = typeof WorkflowArtifactSourceStage.Type;
+
+export const WorkflowArtifactLineage = Schema.Struct({
+  workstreamId: WorkstreamId,
+  sourceSkillRunId: SkillRunId,
+  sourceStage: WorkflowArtifactSourceStage,
+  upstreamVersion: TrimmedNonEmptyString,
+});
+export type WorkflowArtifactLineage = typeof WorkflowArtifactLineage.Type;
+
+export const WorkflowArtifactMarkerKind = Schema.Literals(["new", "changed"]);
+export type WorkflowArtifactMarkerKind = typeof WorkflowArtifactMarkerKind.Type;
+
+export const WorkflowArtifactMarkerState = Schema.Literals(["unread", "viewed", "acknowledged"]);
+export type WorkflowArtifactMarkerState = typeof WorkflowArtifactMarkerState.Type;
+
+/**
+ * Retained artifact markers live outside client caches, while the graph keeps
+ * an aggregate for markers that age out of its bounded lineage window.
+ */
+export const WorkflowArtifactMarker = Schema.Struct({
+  kind: WorkflowArtifactMarkerKind,
+  state: WorkflowArtifactMarkerState,
+  markedAt: IsoDateTime,
+  viewedAt: Schema.optional(IsoDateTime),
+  acknowledgedAt: Schema.optional(IsoDateTime),
+});
+export type WorkflowArtifactMarker = typeof WorkflowArtifactMarker.Type;
+
+export const WorkflowArtifact = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  logicalId: TrimmedNonEmptyString,
+  kind: Schema.Literal("wayfinder-map"),
+  state: Schema.Literals(["current", "superseded"]),
+  lineage: WorkflowArtifactLineage,
+  upstreamSynchronizedAt: IsoDateTime,
+  importedAt: IsoDateTime,
+  marker: WorkflowArtifactMarker,
+});
+export type WorkflowArtifact = typeof WorkflowArtifact.Type;
+
+export const WorkflowStaleResolution = Schema.Literal("accept-upstream");
+export type WorkflowStaleResolution = typeof WorkflowStaleResolution.Type;
+
+export const WorkflowGraphNodeResolution = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("not-required") }),
+  Schema.Struct({
+    status: Schema.Literal("required"),
+    allowed: Schema.Array(WorkflowStaleResolution).check(Schema.isMinLength(1)),
+  }),
+  Schema.Struct({
+    status: Schema.Literal("resolved"),
+    resolution: WorkflowStaleResolution,
+    resolvedAt: IsoDateTime,
+  }),
+]);
+export type WorkflowGraphNodeResolution = typeof WorkflowGraphNodeResolution.Type;
+
+/**
+ * The initial graph deliberately has one downstream Workstream node. Future
+ * workflow stages can add nodes without changing the source-of-truth boundary
+ * or artifact lineage shape introduced here.
+ */
+export const WorkflowGraphNode = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: Schema.Literal("workstream"),
+  state: Schema.Literals(["current", "stale"]),
+  sourceArtifactId: Schema.NullOr(TrimmedNonEmptyString),
+  resolution: WorkflowGraphNodeResolution,
+  staleAt: Schema.optional(IsoDateTime),
+});
+export type WorkflowGraphNode = typeof WorkflowGraphNode.Type;
+
+/**
+ * Compact graph data sent through the normal sequenced shell stream. Server
+ * code retains a bounded history of artifacts and a durable unread aggregate
+ * before persisting this shape.
+ */
+export const WorkflowGraph = Schema.Struct({
+  artifacts: Schema.Array(WorkflowArtifact),
+  nodes: Schema.Array(WorkflowGraphNode),
+  // Historical artifacts are deliberately capped for socket payloads. This
+  // aggregate preserves unread marker state even after an older artifact has
+  // aged out of that bounded lineage window.
+  unreadArtifactCount: NonNegativeInt,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowGraph = typeof WorkflowGraph.Type;
+
+/**
  * A durable point from which an attached workflow can resume observing its
  * native Wayfinder source. The source run and synchronized timestamp are
  * intentionally retained instead of inferred from conversation text.
@@ -398,6 +498,10 @@ export const WorkflowAttachment = Schema.Struct({
   workflowGoal: TrimmedNonEmptyString,
   backfilledWayfinderData: WorkflowAttachmentWayfinderData,
   observationCursor: WorkflowAttachmentObservationCursor,
+  // Optional so persisted attachments created before graph synchronization
+  // remain readable. The server materializes a graph on their next compatible
+  // structured Wayfinder observation.
+  workflowGraph: Schema.optional(WorkflowGraph),
   attachedAt: IsoDateTime,
 });
 export type WorkflowAttachment = typeof WorkflowAttachment.Type;
@@ -1052,6 +1156,32 @@ const ThreadWorkflowAttachCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowArtifactsViewCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.artifacts.view"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowArtifactAcknowledgeCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.artifact.acknowledge"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  artifactId: TrimmedNonEmptyString,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowStaleResolveCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.stale.resolve"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  resolution: WorkflowStaleResolution,
+  // Resolving staleness changes the authoritative dispatch gate, so it must
+  // be an explicit user confirmation rather than a client-side default.
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1092,6 +1222,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowArtifactsViewCommand,
+  ThreadWorkflowArtifactAcknowledgeCommand,
+  ThreadWorkflowStaleResolveCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1123,6 +1256,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowArtifactsViewCommand,
+  ThreadWorkflowArtifactAcknowledgeCommand,
+  ThreadWorkflowStaleResolveCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1293,6 +1429,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-attachment-hinted",
   "thread.workflow-attachment-hint-dismissed",
   "thread.workflow-attached",
+  "thread.workflow-synchronized",
+  "thread.workflow-artifacts-viewed",
+  "thread.workflow-artifact-acknowledged",
+  "thread.workflow-stale-resolved",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1546,6 +1686,26 @@ export const ThreadWorkflowAttachedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowSynchronizedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowArtifactsViewedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowArtifactAcknowledgedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowStaleResolvedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -1759,6 +1919,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-attached"),
     payload: ThreadWorkflowAttachedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-synchronized"),
+    payload: ThreadWorkflowSynchronizedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-artifacts-viewed"),
+    payload: ThreadWorkflowArtifactsViewedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-artifact-acknowledged"),
+    payload: ThreadWorkflowArtifactAcknowledgedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-stale-resolved"),
+    payload: ThreadWorkflowStaleResolvedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

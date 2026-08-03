@@ -580,6 +580,42 @@ export function applyThreadDetailEvent(
       };
     }
 
+    // ── Development Workflow attachment state ──────────────────────
+    case "thread.workflow-attachment-hinted":
+    case "thread.workflow-attachment-hint-dismissed":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          workflowAttachmentHint: event.payload.hint,
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.workflow-attached":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          workflowAttachmentHint: event.payload.hint,
+          workflowAttachment: event.payload.attachment,
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.workflow-synchronized":
+    case "thread.workflow-artifacts-viewed":
+    case "thread.workflow-artifact-acknowledged":
+    case "thread.workflow-stale-resolved":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          workflowAttachment: event.payload.attachment,
+          updatedAt: event.occurredAt,
+        },
+      };
+
     // ── Events that don't mutate thread state directly ──────────────
     case "thread.wayfinder-publication-requested":
     case "thread.wayfinder-reconciliation-requested":

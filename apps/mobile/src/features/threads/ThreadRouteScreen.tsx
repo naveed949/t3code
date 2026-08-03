@@ -228,6 +228,18 @@ function ThreadRouteContent(
     threadEnvironment.attachWorkflow,
     "attach Development Workflow",
   );
+  const viewWorkflowArtifactsCommand = useAtomCommand(
+    threadEnvironment.viewWorkflowArtifacts,
+    "view workflow artifacts",
+  );
+  const acknowledgeWorkflowArtifactCommand = useAtomCommand(
+    threadEnvironment.acknowledgeWorkflowArtifact,
+    "acknowledge workflow artifact",
+  );
+  const resolveWorkflowStaleCommand = useAtomCommand(
+    threadEnvironment.resolveWorkflowStale,
+    "resolve stale workflow",
+  );
   const navigation = useNavigation();
   const params = props.route.params;
   const environmentIdRaw = firstRouteParam(params.environmentId);
@@ -699,6 +711,30 @@ function ThreadRouteContent(
     },
     [attachWorkflowCommand, selectedThread],
   );
+  const viewWorkflowArtifacts = useCallback(() => {
+    if (!selectedThread) return;
+    void viewWorkflowArtifactsCommand({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id },
+    });
+  }, [selectedThread, viewWorkflowArtifactsCommand]);
+  const acknowledgeWorkflowArtifact = useCallback(
+    (artifactId: string) => {
+      if (!selectedThread) return;
+      void acknowledgeWorkflowArtifactCommand({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id, artifactId },
+      });
+    },
+    [acknowledgeWorkflowArtifactCommand, selectedThread],
+  );
+  const resolveWorkflowStale = useCallback(() => {
+    if (!selectedThread) return;
+    void resolveWorkflowStaleCommand({
+      environmentId: selectedThread.environmentId,
+      input: { threadId: selectedThread.id, resolution: "accept-upstream", confirmed: true },
+    });
+  }, [resolveWorkflowStaleCommand, selectedThread]);
   const wayfinderHeaderItems = useMemo<NativeHeaderItems>(
     () =>
       wayfinderMap
@@ -964,6 +1000,9 @@ function ThreadRouteContent(
           onPublishWayfinderDraft={publishWayfinderDraft}
           onDismissWorkflowAttachmentHint={dismissWorkflowAttachmentHint}
           onAttachWorkflow={attachWorkflow}
+          onViewWorkflowArtifacts={viewWorkflowArtifacts}
+          onAcknowledgeWorkflowArtifact={acknowledgeWorkflowArtifact}
+          onResolveWorkflowStale={resolveWorkflowStale}
           {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}
         />
       </View>

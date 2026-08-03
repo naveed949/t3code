@@ -53,6 +53,9 @@ export type ControlWayfinderResearchInput = CommandInput<"thread.wayfinder.resea
 export type DismissWorkflowAttachmentHintInput =
   CommandInput<"thread.workflow-attachment.hint.dismiss">;
 export type AttachWorkflowInput = CommandInput<"thread.workflow.attach">;
+export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
+export type AcknowledgeWorkflowArtifactInput = CommandInput<"thread.workflow.artifact.acknowledge">;
+export type ResolveWorkflowStaleInput = CommandInput<"thread.workflow.stale.resolve">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -350,6 +353,43 @@ export const attachWorkflow: (input: AttachWorkflowInput) => CommandEffect = Eff
   return yield* dispatch({
     ...input,
     type: "thread.workflow.attach",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const viewWorkflowArtifacts: (input: ViewWorkflowArtifactsInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.viewWorkflowArtifacts")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.artifacts.view",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const acknowledgeWorkflowArtifact: (
+  input: AcknowledgeWorkflowArtifactInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.acknowledgeWorkflowArtifact")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.artifact.acknowledge",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const resolveWorkflowStale: (input: ResolveWorkflowStaleInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.resolveWorkflowStale",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.stale.resolve",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

@@ -101,3 +101,66 @@ it("exposes the mobile reopen entry point after attachment", () => {
 
   expect(markup).toContain('aria-label="Open attached Development Workflow"');
 });
+
+it("exposes durable workflow marker and stale-resolution controls on mobile", () => {
+  const markup = renderToStaticMarkup(
+    <WorkflowAttachmentCard
+      hint={null}
+      attachment={{
+        originThreadId: ThreadId.make("thread-origin"),
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-08-03T12:05:00.000Z",
+        },
+        workflowGraph: {
+          artifacts: [
+            {
+              id: "wayfinder-map:29:revision:2",
+              logicalId: "wayfinder-map:29",
+              kind: "wayfinder-map",
+              state: "current",
+              lineage: {
+                workstreamId: WorkstreamId.make("workstream:origin"),
+                sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+                sourceStage: "reconciliation",
+                upstreamVersion: "revision:2",
+              },
+              upstreamSynchronizedAt: "2026-08-03T12:05:00.000Z",
+              importedAt: "2026-08-03T12:05:00.000Z",
+              marker: {
+                kind: "changed",
+                state: "unread",
+                markedAt: "2026-08-03T12:05:00.000Z",
+              },
+            },
+          ],
+          nodes: [
+            {
+              id: "workflow:workstream:origin",
+              kind: "workstream",
+              state: "stale",
+              sourceArtifactId: "wayfinder-map:29:revision:2",
+              resolution: { status: "required", allowed: ["accept-upstream"] },
+              staleAt: "2026-08-03T12:05:00.000Z",
+            },
+          ],
+          unreadArtifactCount: 33,
+          updatedAt: "2026-08-03T12:05:00.000Z",
+        },
+        attachedAt: "2026-08-03T12:00:00.000Z",
+      }}
+      onViewArtifacts={() => undefined}
+      onAcknowledgeArtifact={() => undefined}
+      onResolveStale={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain('aria-label="Mark workflow updates viewed"');
+  expect(markup).toContain("33 new or changed upstream artifacts.");
+  expect(markup).toContain('aria-label="Acknowledge latest workflow update"');
+  expect(markup).toContain('aria-label="Accept upstream workflow update"');
+});

@@ -35,6 +35,12 @@ reconnecting or restarting. The Workstreams list returns to the Origin Thread on
 and desktop reopen an attached synchronized map in the Workbench panel, while mobile uses its
 Wayfinder route.
 
+Later native structured Wayfinder updates continue to synchronize the attachment. T3 records a
+bounded lineage for each imported map version and marks new or changed upstream artifacts until you
+view or acknowledge them. A newer upstream version pauses downstream workflow dispatch; use
+**Accept upstream update** on the attachment to explicitly resolve that change before starting
+dependent work again. Assistant prose and generic skills cannot change this workflow state.
+
 Continuing an existing Wayfinder map synchronizes a projection from GitHub. The Workbench
 shows the destination, notes, decisions, fog of war, out-of-scope entries, native child tickets and
 dependencies, claims, issue states, canonical links, and the last synchronization time. Its frontier

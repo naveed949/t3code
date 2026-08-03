@@ -1230,6 +1230,16 @@ function ChatViewContent(props: ChatViewProps) {
   const attachWorkflowCommand = useAtomCommand(threadEnvironment.attachWorkflow, {
     reportFailure: false,
   });
+  const viewWorkflowArtifactsCommand = useAtomCommand(threadEnvironment.viewWorkflowArtifacts, {
+    reportFailure: false,
+  });
+  const acknowledgeWorkflowArtifactCommand = useAtomCommand(
+    threadEnvironment.acknowledgeWorkflowArtifact,
+    { reportFailure: false },
+  );
+  const resolveWorkflowStaleCommand = useAtomCommand(threadEnvironment.resolveWorkflowStale, {
+    reportFailure: false,
+  });
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1712,6 +1722,30 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, attachWorkflowCommand],
   );
+  const viewWorkflowArtifacts = useCallback(() => {
+    if (!activeThread) return;
+    void viewWorkflowArtifactsCommand({
+      environmentId: activeThread.environmentId,
+      input: { threadId: activeThread.id },
+    });
+  }, [activeThread, viewWorkflowArtifactsCommand]);
+  const acknowledgeWorkflowArtifact = useCallback(
+    (artifactId: string) => {
+      if (!activeThread) return;
+      void acknowledgeWorkflowArtifactCommand({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, artifactId },
+      });
+    },
+    [acknowledgeWorkflowArtifactCommand, activeThread],
+  );
+  const resolveWorkflowStale = useCallback(() => {
+    if (!activeThread) return;
+    void resolveWorkflowStaleCommand({
+      environmentId: activeThread.environmentId,
+      input: { threadId: activeThread.id, resolution: "accept-upstream", confirmed: true },
+    });
+  }, [activeThread, resolveWorkflowStaleCommand]);
   const openAttachedWorkflow = useCallback(() => {
     if (!activeThreadRef || !activeWayfinderMap) return;
     useRightPanelStore.getState().open(activeThreadRef, "wayfinder");
@@ -6261,6 +6295,9 @@ function ChatViewContent(props: ChatViewProps) {
                         attachment={activeThread.workflowAttachment ?? null}
                         onDismiss={dismissWorkflowAttachmentHint}
                         onAttach={attachWorkflow}
+                        onViewArtifacts={viewWorkflowArtifacts}
+                        onAcknowledgeArtifact={acknowledgeWorkflowArtifact}
+                        onResolveStale={resolveWorkflowStale}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
                       />
                     </div>

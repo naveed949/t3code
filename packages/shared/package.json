@@ -214,6 +214,10 @@
     "./wayfinderReadiness": {
       "types": "./src/wayfinderReadiness.ts",
       "import": "./src/wayfinderReadiness.ts"
+    },
+    "./workflowGraph": {
+      "types": "./src/workflowGraph.ts",
+      "import": "./src/workflowGraph.ts"
     }
   },
   "scripts": {

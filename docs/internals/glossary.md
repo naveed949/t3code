@@ -94,8 +94,11 @@ shared project Skill Run list and each run's linked thread.
 An explicit, one-per-Origin-Thread link from a native structured Wayfinder Skill Run to a durable
 Development Workflow Workstream. The attachment preserves compatible Wayfinder projection data and
 an observation cursor in the thread projection; it never treats assistant prose as workflow
-authority and does not replace the originating conversation thread. See [the contracts][1] and
-[ProjectionPipeline.ts][11].
+authority and does not replace the originating conversation thread. Its compact graph retains
+bounded artifact lineage (Workstream, source run, source stage, and exact upstream version) and
+durable new/changed markers. A newer compatible artifact supersedes the old one, marks the
+Workstream node stale, and gates downstream dispatch until an allowed explicit resolution is
+recorded. See [the contracts][1] and [ProjectionPipeline.ts][11].
 
 #### Skill Run
 

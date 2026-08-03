@@ -6,11 +6,22 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationThread,
   type SkillInvocation,
+  type WorkflowArtifactSourceStage,
   type WorkflowAttachmentWayfinderData,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
+import { stableStringify } from "@t3tools/shared/relaySigning";
+import {
+  acknowledgeWorkflowArtifact,
+  hasPendingWorkflowStaleness,
+  initializeWorkflowGraph,
+  resolveWorkflowStaleness,
+  synchronizeWorkflowAttachmentWayfinderData,
+  viewWorkflowArtifacts,
+} from "@t3tools/shared/workflowGraph";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -75,6 +86,63 @@ function backfillWorkflowAttachmentWayfinderData(
       ? { wayfinderSynchronization: invocation.wayfinderSynchronization }
       : {}),
   };
+}
+
+function isCompatibleWorkflowWayfinderSource(input: {
+  readonly thread: OrchestrationThread;
+  readonly skillRunId: SkillInvocation["skillRunId"];
+  readonly sourceInvocation?: SkillInvocation;
+}): boolean {
+  const attachment = input.thread.workflowAttachment;
+  if (attachment === undefined) {
+    return false;
+  }
+  const invocation = input.sourceInvocation ?? input.thread.latestTurn?.skillInvocation;
+  if (invocation?.skillRunId !== input.skillRunId) {
+    // The source can outlive being the latest turn. Only the originally
+    // attached run or the last persisted observer cursor may continue without
+    // a currently projected native invocation to validate.
+    return (
+      attachment.sourceSkillRunId === input.skillRunId ||
+      attachment.observationCursor.sourceSkillRunId === input.skillRunId
+    );
+  }
+  return (
+    invocation.skill.name === "wayfinder" &&
+    invocation.execution.mode === "native" &&
+    invocation.action?.id !== "work-ticket" &&
+    invocation.workstreamId === attachment.workstreamId
+  );
+}
+
+function staleWorkflowAttachmentForInvocation(
+  readModel: OrchestrationReadModel,
+  invocation:
+    | Pick<SkillInvocation, "skill" | "action" | "execution" | "reconnectWorkstreamId">
+    | undefined,
+) {
+  if (
+    invocation === undefined ||
+    (invocation.skill.name === "wayfinder" &&
+      invocation.execution.mode === "native" &&
+      invocation.action?.id !== "work-ticket")
+  ) {
+    return undefined;
+  }
+  const sourceSkillRunId =
+    invocation.action?.id === "handoff-to-spec" || invocation.action?.id === "work-ticket"
+      ? invocation.action.sourceSkillRunId
+      : undefined;
+  return readModel.threads
+    .map((thread) => thread.workflowAttachment)
+    .find(
+      (attachment) =>
+        attachment !== undefined &&
+        hasPendingWorkflowStaleness(attachment) &&
+        (attachment.sourceSkillRunId === sourceSkillRunId ||
+          attachment.observationCursor.sourceSkillRunId === sourceSkillRunId ||
+          attachment.workstreamId === invocation.reconnectWorkstreamId),
+    );
 }
 
 function sameWayfinderMutationAction(
@@ -308,6 +376,59 @@ type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
+
+function synchronizeWorkflowAttachment(input: {
+  readonly command: Pick<OrchestrationCommand, "commandId"> & {
+    readonly threadId: OrchestrationThread["id"];
+    readonly createdAt: string;
+  };
+  readonly thread: OrchestrationThread;
+  readonly skillRunId: SkillInvocation["skillRunId"];
+  readonly sourceInvocation?: SkillInvocation;
+  readonly sourceStage: WorkflowArtifactSourceStage;
+  readonly data: WorkflowAttachmentWayfinderData;
+}): Effect.Effect<PlannedOrchestrationEvent | null, PlatformError.PlatformError, Crypto.Crypto> {
+  if (
+    !isCompatibleWorkflowWayfinderSource({
+      thread: input.thread,
+      skillRunId: input.skillRunId,
+      ...(input.sourceInvocation !== undefined ? { sourceInvocation: input.sourceInvocation } : {}),
+    })
+  ) {
+    return Effect.succeed(null);
+  }
+  const currentAttachment = input.thread.workflowAttachment;
+  if (currentAttachment === undefined) {
+    return Effect.succeed(null);
+  }
+  const attachment = synchronizeWorkflowAttachmentWayfinderData({
+    attachment: currentAttachment,
+    sourceSkillRunId: input.skillRunId,
+    sourceStage: input.sourceStage,
+    observedAt: input.command.createdAt,
+    data: input.data,
+  });
+  if (stableStringify(attachment) === stableStringify(currentAttachment)) {
+    return Effect.succeed(null);
+  }
+  return withEventBase({
+    aggregateKind: "thread",
+    aggregateId: input.command.threadId,
+    occurredAt: input.command.createdAt,
+    commandId: input.command.commandId,
+  }).pipe(
+    Effect.map(
+      (eventBase): PlannedOrchestrationEvent => ({
+        ...eventBase,
+        type: "thread.workflow-synchronized",
+        payload: {
+          threadId: input.command.threadId,
+          attachment,
+        },
+      }),
+    ),
+  );
+}
 
 const decideCommandSequence = Effect.fn("decideCommandSequence")(function* ({
   commands,
@@ -910,6 +1031,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const requestedSkillInvocation = command.skillInvocation;
+      const staleWorkflowAttachment = staleWorkflowAttachmentForInvocation(
+        readModel,
+        requestedSkillInvocation,
+      );
+      if (staleWorkflowAttachment !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "This Development Workflow has stale structured Wayfinder data. Accept the upstream update from its Origin Thread before dispatching downstream work.",
+        });
+      }
       const handoffAction =
         requestedSkillInvocation?.action?.id === "handoff-to-spec"
           ? requestedSkillInvocation.action
@@ -1151,6 +1283,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ),
             )
           : null;
+      const workflowSynchronized =
+        skillInvocation?.wayfinderMap !== undefined
+          ? yield* synchronizeWorkflowAttachment({
+              command,
+              thread: targetThread,
+              skillRunId: skillInvocation.skillRunId,
+              sourceInvocation: skillInvocation,
+              sourceStage: "reconciliation",
+              data: {
+                wayfinderMap: skillInvocation.wayfinderMap,
+                wayfinderSynchronizedAt:
+                  skillInvocation.wayfinderSynchronizedAt ??
+                  skillInvocation.wayfinderMap.lastSynchronizedAt,
+                ...(skillInvocation.wayfinderSynchronization !== undefined
+                  ? { wayfinderSynchronization: skillInvocation.wayfinderSynchronization }
+                  : {}),
+              },
+            })
+          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -1195,6 +1346,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         turnStartRequestedEvent,
         ...(draftStartedEvent ? [draftStartedEvent] : []),
         ...(workflowAttachmentHintEvent ? [workflowAttachmentHintEvent] : []),
+        ...(workflowSynchronized ? [workflowSynchronized] : []),
       ];
     }
 
@@ -1338,7 +1490,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Workflow attachment requires an available structured Wayfinder hint.",
         });
       }
-      const attachment = {
+      const attachmentBase = {
         originThreadId: command.originThreadId,
         workstreamId: hint.workstreamId,
         sourceSkillRunId: hint.sourceSkillRunId,
@@ -1354,6 +1506,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
         },
         attachedAt: command.createdAt,
+      };
+      const attachment = {
+        ...attachmentBase,
+        workflowGraph: initializeWorkflowGraph(attachmentBase),
       };
       return {
         ...(yield* withEventBase({
@@ -1371,6 +1527,92 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             updatedAt: command.createdAt,
           },
           attachment,
+        },
+      };
+    }
+
+    case "thread.workflow.artifacts.view": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined || attachment.workflowGraph === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "No durable workflow artifact markers are available to view.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-artifacts-viewed",
+        payload: {
+          threadId: command.threadId,
+          attachment: viewWorkflowArtifacts(attachment, command.createdAt),
+        },
+      };
+    }
+
+    case "thread.workflow.artifact.acknowledge": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const artifact = attachment?.workflowGraph?.artifacts.find(
+        (candidate) => candidate.id === command.artifactId,
+      );
+      if (attachment === undefined || artifact === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The workflow artifact to acknowledge is not present in the bounded graph.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-artifact-acknowledged",
+        payload: {
+          threadId: command.threadId,
+          attachment: acknowledgeWorkflowArtifact(
+            attachment,
+            command.artifactId,
+            command.createdAt,
+          ),
+        },
+      };
+    }
+
+    case "thread.workflow.stale.resolve": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined || !hasPendingWorkflowStaleness(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This Development Workflow has no stale downstream work to resolve.",
+        });
+      }
+      const resolved = resolveWorkflowStaleness(attachment, command.resolution, command.createdAt);
+      if (resolved === attachment) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This stale workflow does not allow the requested resolution.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-stale-resolved",
+        payload: {
+          threadId: command.threadId,
+          attachment: resolved,
         },
       };
     }
@@ -1974,7 +2216,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.wayfinder.publication.update": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
@@ -1994,6 +2236,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
         },
       };
+      const workflowSynchronized =
+        command.publication.status === "synchronized" && command.wayfinderMap !== undefined
+          ? yield* synchronizeWorkflowAttachment({
+              command,
+              thread,
+              skillRunId: command.skillRunId,
+              sourceStage: "publication",
+              data: {
+                wayfinderMap: command.wayfinderMap,
+                wayfinderPublication: command.publication,
+                wayfinderSynchronizedAt: command.wayfinderMap.lastSynchronizedAt,
+              },
+            })
+          : null;
       if (command.publication.status === "awaiting-approval") {
         const approvalRequested: Omit<OrchestrationEvent, "sequence"> = {
           ...(yield* withEventBase({
@@ -2016,7 +2272,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             },
           },
         };
-        return [updated, approvalRequested];
+        return [
+          updated,
+          ...(workflowSynchronized ? [workflowSynchronized] : []),
+          approvalRequested,
+        ];
       }
       if (command.publication.status !== "synchronized") return updated;
       const published: Omit<OrchestrationEvent, "sequence"> = {
@@ -2043,11 +2303,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         },
       };
-      return [updated, published];
+      return [updated, ...(workflowSynchronized ? [workflowSynchronized] : []), published];
     }
 
     case "thread.wayfinder.mutation.update": {
-      yield* requireThread({ readModel, command, threadId: command.threadId });
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const updated: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -2063,9 +2323,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
         },
       };
-      if (command.mutation.status !== "awaiting-approval") return updated;
+      const workflowSynchronized =
+        command.mutation.status === "synchronized" && command.wayfinderMap !== undefined
+          ? yield* synchronizeWorkflowAttachment({
+              command,
+              thread,
+              skillRunId: command.skillRunId,
+              sourceStage: "mutation",
+              data: {
+                wayfinderMap: command.wayfinderMap,
+                wayfinderSynchronizedAt: command.wayfinderMap.lastSynchronizedAt,
+              },
+            })
+          : null;
+      if (command.mutation.status !== "awaiting-approval") {
+        return workflowSynchronized ? [updated, workflowSynchronized] : updated;
+      }
       return [
         updated,
+        ...(workflowSynchronized ? [workflowSynchronized] : []),
         {
           ...(yield* withEventBase({
             aggregateKind: "thread",
@@ -2095,12 +2371,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.wayfinder.reconciliation.update": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
-      return {
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -2115,6 +2391,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
         },
       };
+      const workflowSynchronized =
+        command.synchronization.status === "healthy" && command.wayfinderMap !== undefined
+          ? yield* synchronizeWorkflowAttachment({
+              command,
+              thread,
+              skillRunId: command.skillRunId,
+              sourceStage: "reconciliation",
+              data: {
+                wayfinderMap: command.wayfinderMap,
+                wayfinderSynchronizedAt: command.wayfinderMap.lastSynchronizedAt,
+                wayfinderSynchronization: command.synchronization,
+              },
+            })
+          : null;
+      return workflowSynchronized ? [updated, workflowSynchronized] : updated;
     }
 
     case "thread.wayfinder.research.update": {

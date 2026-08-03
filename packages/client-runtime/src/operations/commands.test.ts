@@ -23,6 +23,7 @@ import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
 import {
   archiveThread,
+  acknowledgeWorkflowArtifact,
   attachWorkflow,
   createProject,
   controlWayfinderResearch,
@@ -30,9 +31,11 @@ import {
   mutateWayfinder,
   publishWayfinderDraft,
   reconcileWayfinderMap,
+  resolveWorkflowStale,
   settleThread,
   stopThreadSession,
   unsettleThread,
+  viewWorkflowArtifacts,
 } from "./commands.ts";
 
 const TEST_CRYPTO_LAYER = Layer.succeed(
@@ -203,7 +206,7 @@ describe("environment commands", () => {
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
   );
 
-  it.effect("dispatches explicit workflow attachment and dismissal commands", () =>
+  it.effect("dispatches explicit workflow attachment, marker, and resolution commands", () =>
     Effect.gen(function* () {
       const dispatched: ClientOrchestrationCommand[] = [];
       const supervisor = yield* makeSupervisor(dispatched);
@@ -221,6 +224,24 @@ describe("environment commands", () => {
         threadId: ThreadId.make("thread-origin"),
         createdAt: "2026-08-03T12:01:00.000Z",
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* viewWorkflowArtifacts({
+        commandId: CommandId.make("view-workflow-artifacts-command"),
+        threadId: ThreadId.make("thread-origin"),
+        createdAt: "2026-08-03T12:02:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* acknowledgeWorkflowArtifact({
+        commandId: CommandId.make("acknowledge-workflow-artifact-command"),
+        threadId: ThreadId.make("thread-origin"),
+        artifactId: "wayfinder-map:29:revision:2",
+        createdAt: "2026-08-03T12:03:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* resolveWorkflowStale({
+        commandId: CommandId.make("resolve-workflow-stale-command"),
+        threadId: ThreadId.make("thread-origin"),
+        resolution: "accept-upstream",
+        confirmed: true,
+        createdAt: "2026-08-03T12:04:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
 
       expect(dispatched).toEqual([
         {
@@ -237,6 +258,27 @@ describe("environment commands", () => {
           commandId: "dismiss-workflow-hint-command",
           threadId: "thread-origin",
           createdAt: "2026-08-03T12:01:00.000Z",
+        },
+        {
+          type: "thread.workflow.artifacts.view",
+          commandId: "view-workflow-artifacts-command",
+          threadId: "thread-origin",
+          createdAt: "2026-08-03T12:02:00.000Z",
+        },
+        {
+          type: "thread.workflow.artifact.acknowledge",
+          commandId: "acknowledge-workflow-artifact-command",
+          threadId: "thread-origin",
+          artifactId: "wayfinder-map:29:revision:2",
+          createdAt: "2026-08-03T12:03:00.000Z",
+        },
+        {
+          type: "thread.workflow.stale.resolve",
+          commandId: "resolve-workflow-stale-command",
+          threadId: "thread-origin",
+          resolution: "accept-upstream",
+          confirmed: true,
+          createdAt: "2026-08-03T12:04:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

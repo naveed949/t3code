@@ -2,7 +2,9 @@ import {
   EnvironmentId,
   ProjectId,
   ProviderInstanceId,
+  SkillRunId,
   ThreadId,
+  WorkstreamId,
   type OrchestrationShellSnapshot,
   type OrchestrationThread,
 } from "@t3tools/contracts";
@@ -227,6 +229,40 @@ describe("environment entity projections", () => {
       worktreePath: "/repo/current-worktree",
     });
     expect(merged?.messages).toBe(messages);
+  });
+
+  it("takes durable Development Workflow state from the newer shell", () => {
+    const workflowAttachment = {
+      originThreadId: THREAD_ID,
+      workstreamId: WorkstreamId.make("workstream:origin"),
+      sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+      workflowGoal: "Ship the workflow.",
+      backfilledWayfinderData: {},
+      observationCursor: {
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        observedAt: "2026-06-01T00:01:00.000Z",
+      },
+      attachedAt: "2026-06-01T00:00:00.000Z",
+    };
+    const detail = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+      workflowAttachment: undefined,
+    } satisfies OrchestrationThread & { readonly environmentId: EnvironmentId };
+    const shell = {
+      ...THREAD_SHELL,
+      environmentId: ENVIRONMENT_ID,
+      workflowAttachment,
+    };
+
+    const merged = mergeEnvironmentThread(detail, shell);
+
+    expect(merged?.workflowAttachment).toBe(workflowAttachment);
   });
 
   it("preserves untouched project and thread identities across unrelated shell updates", () => {

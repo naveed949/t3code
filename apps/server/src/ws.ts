@@ -284,7 +284,14 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
       | "thread.activity-appended"
       | "thread.turn-diff-completed"
       | "thread.reverted"
-      | "thread.session-set";
+      | "thread.session-set"
+      | "thread.workflow-attachment-hinted"
+      | "thread.workflow-attachment-hint-dismissed"
+      | "thread.workflow-attached"
+      | "thread.workflow-synchronized"
+      | "thread.workflow-artifacts-viewed"
+      | "thread.workflow-artifact-acknowledged"
+      | "thread.workflow-stale-resolved";
   }
 > {
   return (
@@ -293,7 +300,14 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.activity-appended" ||
     event.type === "thread.turn-diff-completed" ||
     event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
+    event.type === "thread.session-set" ||
+    event.type === "thread.workflow-attachment-hinted" ||
+    event.type === "thread.workflow-attachment-hint-dismissed" ||
+    event.type === "thread.workflow-attached" ||
+    event.type === "thread.workflow-synchronized" ||
+    event.type === "thread.workflow-artifacts-viewed" ||
+    event.type === "thread.workflow-artifact-acknowledged" ||
+    event.type === "thread.workflow-stale-resolved"
   );
 }
 

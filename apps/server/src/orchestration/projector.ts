@@ -42,8 +42,12 @@ import {
   ThreadWayfinderReconciliationUpdatedPayload,
   ThreadWayfinderResearchUpdatedPayload,
   ThreadWorkflowAttachedPayload,
+  ThreadWorkflowArtifactAcknowledgedPayload,
   ThreadWorkflowAttachmentHintDismissedPayload,
   ThreadWorkflowAttachmentHintedPayload,
+  ThreadWorkflowArtifactsViewedPayload,
+  ThreadWorkflowStaleResolvedPayload,
+  ThreadWorkflowSynchronizedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -990,6 +994,70 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachmentHint: payload.hint,
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-synchronized":
+      return decodeForEvent(
+        ThreadWorkflowSynchronizedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-artifacts-viewed":
+      return decodeForEvent(
+        ThreadWorkflowArtifactsViewedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-artifact-acknowledged":
+      return decodeForEvent(
+        ThreadWorkflowArtifactAcknowledgedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-stale-resolved":
+      return decodeForEvent(
+        ThreadWorkflowStaleResolvedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachment: payload.attachment,
             updatedAt: event.occurredAt,
           }),
