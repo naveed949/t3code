@@ -45,6 +45,7 @@ const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
     getSkillRunsByThreadId: () => Effect.die("unused"),
     getThreadDetailById: () => Effect.die("unused"),
     getThreadDetailSnapshot: () => Effect.die("unused"),
+    searchThreads: () => Effect.succeed({ matches: [] }),
   });
 
 const makeTerminalManagerLayer = (

@@ -151,6 +151,10 @@
       "types": "./src/state/wayfinderDraft.ts",
       "default": "./src/state/wayfinderDraft.ts"
     },
+    "./state/thread-search": {
+      "types": "./src/state/threadSearch.ts",
+      "default": "./src/state/threadSearch.ts"
+    },
     "./state/vcs": {
       "types": "./src/state/vcs.ts",
       "default": "./src/state/vcs.ts"
