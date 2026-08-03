@@ -124,6 +124,16 @@ stably sorted relationships. Web and desktop focus the Workbench heading when th
 mobile exposes the same state and actions through a full-screen route. See
 [wayfinderWorkbench.ts][30].
 
+#### Workflow Panel and Outline
+
+The Workstream-scoped presentation derived from the synchronized Wayfinder projection. The compact
+panel surfaces the active stage, milestone, checkpoint or attention, active runs, progress, and
+Ticket Frontier. The complete outline retains every projected ticket and dependency independently of
+the bounded decorative graph. Node selection is local presentation state only; the inspector exposes
+canonical evidence, history, lineage, linked thread, and the currently allowed native controls. It
+never imports or rebrands provider-authored thread Plan steps as workflow nodes. See
+[wayfinderWorkflow.ts][32].
+
 #### Wayfinder projection budget
 
 The server-side bound applied before a canonical map enters shared shell state. GitHub relationship
@@ -315,3 +325,4 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [29]: ../../apps/server/src/orchestration/Layers/WayfinderResearchReactor.ts
 [30]: ../../packages/client-runtime/src/state/wayfinderWorkbench.ts
 [31]: ../../apps/server/src/nativeSkills/WayfinderMapProjection.ts
+[32]: ../../packages/client-runtime/src/state/wayfinderWorkflow.ts

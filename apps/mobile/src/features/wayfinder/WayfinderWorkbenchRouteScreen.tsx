@@ -61,8 +61,10 @@ import {
   requestMobileWayfinderToSpecStart,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
+  buildMobileWorkflowPresentation,
   buildMobileWayfinderPresentation,
 } from "./WayfinderWorkbench.logic";
+import { WorkflowPanel } from "./WorkflowPanel";
 
 const EMPTY_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
 
@@ -748,7 +750,25 @@ function WayfinderWorkbenchContent(props: {
       synchronization,
       activeLinkedTicketNumbers: [],
     });
+  const workflowMap = canonicalMap ?? map;
+  const workflowReadiness =
+    workstream?.readiness ??
+    deriveWayfinderReadiness({
+      map: workflowMap,
+      synchronization,
+      activeLinkedTicketNumbers: [],
+    });
   const completion = buildMobileWayfinderCompletionPresentation(readiness);
+  const mutationsEnabled = !working && connected && synchronization?.canMutate !== false;
+  const workflowPresentation = buildMobileWorkflowPresentation({
+    map: workflowMap,
+    mutation,
+    research: invocation?.wayfinderResearch ?? null,
+    ticketThreads: workstream?.ticketThreads ?? [],
+    synchronization,
+    readiness: workflowReadiness,
+    mutationsEnabled,
+  });
   const toSpecSkill =
     serverConfig?.providers
       .find((provider) => provider.instanceId === thread?.modelSelection.instanceId)
@@ -882,6 +902,8 @@ function WayfinderWorkbenchContent(props: {
           </Text>
         )}
       </View>
+
+      <WorkflowPanel model={workflowPresentation} onOpenThread={props.onReturnToThread} />
 
       {linkedTicketAction === null ? (
         <View className="gap-3 rounded-xl border border-border bg-card p-4">

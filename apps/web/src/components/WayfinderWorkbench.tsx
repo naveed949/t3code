@@ -10,6 +10,7 @@ import {
   WAYFINDER_TICKET_CLASSIFICATIONS,
   type WayfinderTicketClassification,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
+import { deriveWayfinderWorkflowViewModel } from "@t3tools/client-runtime/state/wayfinder-workflow";
 import {
   advanceWayfinderReconciliationLifecycle,
   WAYFINDER_CONDITIONAL_REFRESH_INTERVAL_MS,
@@ -34,6 +35,8 @@ import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+
+import { WorkflowPanel } from "./WorkflowPanel.tsx";
 
 export function requestWayfinderToSpecStart(input: {
   readonly readiness: WayfinderReadiness;
@@ -635,6 +638,22 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
       synchronization: props.synchronization,
       activeLinkedTicketNumbers: [],
     });
+  const workflowReadiness =
+    props.readiness ??
+    deriveWayfinderReadiness({
+      map: props.map,
+      synchronization: props.synchronization,
+      activeLinkedTicketNumbers: [],
+    });
+  const workflowModel = deriveWayfinderWorkflowViewModel({
+    map: props.map,
+    mutation: props.mutation ?? null,
+    research: props.research ?? null,
+    ticketThreads: props.ticketThreads ?? [],
+    synchronization: props.synchronization,
+    readiness: workflowReadiness,
+    mutationsEnabled,
+  });
   const startToSpec = () => {
     if (!props.onStartToSpec) return;
     requestWayfinderToSpecStart({
@@ -709,6 +728,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
             GitHub #{String(props.map.canonicalReference.number)}
           </ReferenceLink>
         </header>
+
+        <WorkflowPanel
+          model={workflowModel}
+          {...(props.onReturnToThread ? { onOpenThread: props.onReturnToThread } : {})}
+        />
 
         <section
           aria-labelledby="wayfinder-completion"

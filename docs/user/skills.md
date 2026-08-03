@@ -66,6 +66,15 @@ preflight reloads GitHub and the project Workstream snapshot; the new run record
 `resume` synchronization result. Active linked runtime work and synchronization health are included
 when the shared clients recompute whether the Workstream is complete.
 
+Each attached workflow also has a compact **Workflow Panel**. It shows the current Wayfinder stage,
+canonical milestone, checkpoint or attention state, active runs, progress, and Ticket Frontier. Its
+complete **Workflow Outline** lists every synchronized ticket and dependency even when the graph is
+hidden. Selecting a node only opens its inspector; it never starts, stops, or changes workflow work.
+The inspector shows canonical evidence, history, dependency lineage, linked-thread information, and
+the actions currently available for that node. The thread's provider-authored Plan remains separate
+and is never presented as workflow nodes. Web and desktop support arrow keys, Home, and End in the
+outline; mobile exposes the same complete outline and inspector without requiring the graph.
+
 Completion is derived from the synchronized artifacts, never from assistant narration or the parent
 issue's closed state. The Workbench lists every unmet invariant: a missing destination, open decision
 tickets, active linked ticket threads, remaining in-scope fog, closed tickets whose classification is

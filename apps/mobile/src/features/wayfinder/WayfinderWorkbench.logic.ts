@@ -5,6 +5,7 @@ import {
   deriveWayfinderResearchModel,
   deriveWayfinderWorkbenchModel,
 } from "@t3tools/client-runtime/state/wayfinder-workbench";
+import { deriveWayfinderWorkflowViewModel } from "@t3tools/client-runtime/state/wayfinder-workflow";
 import type {
   ThreadId,
   WayfinderMapProjection,
@@ -151,6 +152,12 @@ export function buildMobileWayfinderPresentation(map: WayfinderMapProjection) {
         : "Dependency graph. No dependencies.",
     accessibilitySummary: model.accessibilitySummary,
   };
+}
+
+export function buildMobileWorkflowPresentation(
+  input: Parameters<typeof deriveWayfinderWorkflowViewModel>[0],
+) {
+  return deriveWayfinderWorkflowViewModel(input);
 }
 
 export function buildMobileResearchPresentation(input: {

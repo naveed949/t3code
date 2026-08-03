@@ -8,6 +8,7 @@ import {
   buildMobileResearchPresentation,
   buildMobileTicketClaimActions,
   buildMobileTicketAction,
+  buildMobileWorkflowPresentation,
   buildMobileWayfinderPresentation,
   buildMobileWayfinderCompletionPresentation,
   requestMobileWayfinderToSpecStart,
@@ -250,6 +251,36 @@ describe("buildMobileWayfinderPresentation", () => {
         { kind: "graduated", key: "relay-policy" },
       ],
     });
+  });
+});
+
+describe("buildMobileWorkflowPresentation", () => {
+  it("keeps every projected ticket, relationship, inspector detail, and available action on mobile", () => {
+    const presentation = buildMobileWorkflowPresentation({
+      map,
+      mutation: null,
+      research: null,
+      ticketThreads: [],
+      synchronization: null,
+      readiness: {
+        ready: false,
+        blockers: [{ kind: "open-decision-tickets", ticketNumbers: [43, 44] }],
+      },
+      mutationsEnabled: true,
+    });
+
+    expect(presentation.panel.ticketFrontier).toEqual([
+      { id: "ticket:43", number: 43, title: "Research hosting" },
+    ]);
+    expect(presentation.outline.map((node) => node.number)).toEqual([43, 44]);
+    expect(presentation.outline[1]).toMatchObject({
+      lineage: { blockedBy: [43], enables: [] },
+      state: { kind: "blocked", label: "Blocked" },
+    });
+    expect(presentation.outline[0]?.allowedActions).toEqual(
+      expect.arrayContaining([{ id: "start-research", label: "Start research", enabled: true }]),
+    );
+    expect(presentation.outline[0]?.accessibilityLabel).toContain("Enables #44");
   });
 });
 

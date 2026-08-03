@@ -115,6 +115,28 @@ describe("WayfinderWorkbench", () => {
     expect(markup).toContain("Research hosting");
   });
 
+  it("keeps the workflow panel on the server projection while legacy controls are optimistic", () => {
+    const markup = renderToStaticMarkup(
+      <WayfinderWorkbench
+        map={map}
+        mutation={{
+          actionId: "action:close",
+          action: { kind: "close-ticket", ticketNumber: 43 },
+          status: "awaiting-approval",
+          error: null,
+          updatedAt: "2026-01-02T00:01:00.000Z",
+        }}
+        synchronization={null}
+        connected
+        onReconcile={() => undefined}
+      />,
+    );
+
+    expect(markup).toContain(
+      "Ticket #43: Research hosting. Runnable. research ticket. Enables #44.",
+    );
+  });
+
   it("renders start, return, release, and partial-recovery ticket actions", () => {
     const linkedThreadId = ThreadId.make("wayfinder-ticket:workstream:release:44");
     const markup = renderToStaticMarkup(
