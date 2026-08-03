@@ -1,11 +1,18 @@
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationEvent,
+  OrchestrationReadModel,
+  OrchestrationThreadActivity,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  SkillRunId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
@@ -30,11 +37,60 @@ import {
   ThreadRevertedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
+  ThreadWayfinderPublicationUpdatedPayload,
+  ThreadWayfinderMutationUpdatedPayload,
+  ThreadWayfinderReconciliationUpdatedPayload,
+  ThreadWayfinderResearchUpdatedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
 const MAX_THREAD_MESSAGES = 2_000;
 const MAX_THREAD_CHECKPOINTS = 500;
+const MAX_RECENT_THREAD_ACTIVITIES = 500;
+const WayfinderScopedActivityPayload = Schema.Struct({ skillRunId: SkillRunId });
+const decodeWayfinderScopedActivityPayload = Schema.decodeUnknownOption(
+  WayfinderScopedActivityPayload,
+);
+
+export function retainThreadActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  const ordered = activities.toSorted(compareThreadActivities);
+  const recent = ordered.slice(-MAX_RECENT_THREAD_ACTIVITIES);
+  const recentIds = new Set(recent.map((activity) => activity.id));
+  let activeDraft:
+    | { readonly marker: OrchestrationThreadActivity; readonly skillRunId: SkillRunId }
+    | undefined;
+  for (let index = ordered.length - 1; index >= 0; index -= 1) {
+    const activity = ordered[index];
+    if (!activity) continue;
+    if (activity.kind === "wayfinder.draft.published") break;
+    if (activity.kind !== "wayfinder.draft.started") continue;
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    if (Option.isSome(payload)) {
+      activeDraft = { marker: activity, skillRunId: payload.value.skillRunId };
+    }
+    break;
+  }
+  const durableWayfinderActivities = ordered.filter((activity) => {
+    if (activeDraft === undefined || recentIds.has(activity.id)) return false;
+    if (activity.id === activeDraft.marker.id) return true;
+    if (activity.kind !== "user-input.requested" && activity.kind !== "user-input.resolved") {
+      return false;
+    }
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    return Option.isSome(payload) && payload.value.skillRunId === activeDraft.skillRunId;
+  });
+  const publishedBySkillRun = new Map<SkillRunId, OrchestrationThreadActivity>();
+  for (const activity of ordered) {
+    if (activity.kind !== "wayfinder.draft.published" || recentIds.has(activity.id)) continue;
+    const payload = decodeWayfinderScopedActivityPayload(activity.payload);
+    if (Option.isSome(payload)) publishedBySkillRun.set(payload.value.skillRunId, activity);
+  }
+  return [...durableWayfinderActivities, ...publishedBySkillRun.values(), ...recent].toSorted(
+    compareThreadActivities,
+  );
+}
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {
   if (status === "error") return "error" as const;
@@ -735,17 +791,153 @@ export function projectEvent(
             return nextBase;
           }
 
-          const activities = [
+          const activities = retainThreadActivities([
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          ]);
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
               activities,
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.wayfinder-publication-updated":
+      return decodeForEvent(
+        ThreadWayfinderPublicationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const invocation = thread?.latestTurn?.skillInvocation;
+          if (!thread || !invocation || invocation.skillRunId !== payload.skillRunId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                ...thread.latestTurn!,
+                skillInvocation: {
+                  ...invocation,
+                  wayfinderPublication: payload.publication,
+                  ...(payload.wayfinderMap !== undefined
+                    ? {
+                        wayfinderMap: payload.wayfinderMap,
+                        wayfinderSynchronizedAt: payload.wayfinderMap.lastSynchronizedAt,
+                      }
+                    : {}),
+                },
+              },
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.wayfinder-mutation-updated":
+      return decodeForEvent(
+        ThreadWayfinderMutationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const invocation = thread?.latestTurn?.skillInvocation;
+          if (!thread || !invocation || invocation.skillRunId !== payload.skillRunId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                ...thread.latestTurn!,
+                skillInvocation: {
+                  ...invocation,
+                  wayfinderMutation: payload.mutation,
+                  ...(payload.wayfinderMap !== undefined
+                    ? {
+                        wayfinderMap: payload.wayfinderMap,
+                        wayfinderSynchronizedAt: payload.wayfinderMap.lastSynchronizedAt,
+                      }
+                    : {}),
+                },
+              },
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.wayfinder-reconciliation-updated":
+      return decodeForEvent(
+        ThreadWayfinderReconciliationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const invocation = thread?.latestTurn?.skillInvocation;
+          if (!thread || !invocation || invocation.skillRunId !== payload.skillRunId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                ...thread.latestTurn!,
+                skillInvocation: {
+                  ...invocation,
+                  wayfinderSynchronization: payload.synchronization,
+                  ...(payload.synchronization.lastSuccessfulAt !== undefined
+                    ? {
+                        wayfinderSynchronizedAt: payload.synchronization.lastSuccessfulAt,
+                      }
+                    : {}),
+                  ...(payload.wayfinderMap !== undefined
+                    ? {
+                        wayfinderMap: payload.wayfinderMap,
+                      }
+                    : {}),
+                },
+              },
+              updatedAt: event.occurredAt,
+            }),
+          };
+        }),
+      );
+
+    case "thread.wayfinder-research-updated":
+      return decodeForEvent(
+        ThreadWayfinderResearchUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId);
+          const invocation = thread?.latestTurn?.skillInvocation;
+          if (!thread || !invocation || invocation.skillRunId !== payload.skillRunId) {
+            return nextBase;
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              latestTurn: {
+                ...thread.latestTurn!,
+                skillInvocation: {
+                  ...invocation,
+                  wayfinderResearch: payload.research,
+                },
+              },
               updatedAt: event.occurredAt,
             }),
           };

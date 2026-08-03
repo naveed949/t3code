@@ -1,5 +1,6 @@
 import * as Arr from "effect/Array";
 import * as Order from "effect/Order";
+import { useAtomValue } from "@effect/atom-react";
 import { useNavigation } from "@react-navigation/native";
 import { useEffect, useMemo, useState } from "react";
 
@@ -20,6 +21,7 @@ import { useHomeListOptions } from "./home-list-options";
 import { buildHomeProjectScopes } from "./homeThreadList";
 import { usePendingTaskListActions } from "./usePendingTaskListActions";
 import { useThreadListActions } from "./useThreadListActions";
+import { environmentThreadShells } from "../../state/threads";
 
 /* ─── Route screen ───────────────────────────────────────────────────── */
 
@@ -27,6 +29,7 @@ export function HomeRouteScreen() {
   const { layout } = useAdaptiveWorkspaceLayout();
   const projects = useProjects();
   const threads = useThreadShells();
+  const workstreams = useAtomValue(environmentThreadShells.workstreamsAtom);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const navigation = useNavigation();
@@ -194,6 +197,7 @@ export function HomeRouteScreen() {
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
           threads={threads}
+          workstreams={workstreams}
           threadSortOrder={listOptions.threadSortOrder}
         />
       </>

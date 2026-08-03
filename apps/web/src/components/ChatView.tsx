@@ -10,11 +10,15 @@ import {
   type ProviderApprovalDecision,
   ProviderInstanceId,
   type ServerProvider,
+  type SkillInvocationRequest,
   type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
+  type WayfinderReconcileReason,
   type KeybindingCommand,
+  type WayfinderMutationAction,
+  type WayfinderResearchAction,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -26,6 +30,16 @@ import {
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  deriveWayfinderDraft,
+  findLatestWayfinderDraftInvocation,
+} from "@t3tools/client-runtime/state/wayfinder-draft";
+import {
+  findThreadWayfinderWorkstream,
+  findWayfinderReconciliationInvocation,
+  type ProjectSkillWorkstream,
+} from "@t3tools/client-runtime/state/skill-runs";
+import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
@@ -65,7 +79,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
@@ -139,6 +153,7 @@ import {
   usePreviewMiniPlayerStore,
 } from "../previewMiniPlayerStore";
 import { RightPanelTabs } from "./RightPanelTabs";
+import { WayfinderWorkbench } from "./WayfinderWorkbench";
 import { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
 import { BranchToolbar } from "./BranchToolbar";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -176,7 +191,7 @@ import {
   deriveLogicalProjectKeyFromSettings,
   selectProjectGroupingSettings,
 } from "../logicalProject";
-import { buildDraftThreadRouteParams } from "../threadRoutes";
+import { buildDraftThreadRouteParams, buildThreadRouteParams } from "../threadRoutes";
 import {
   type ComposerImageAttachment,
   type DraftThreadEnvMode,
@@ -208,7 +223,7 @@ import {
   serverEnvironment,
 } from "../state/server";
 import { terminalEnvironment } from "../state/terminal";
-import { threadEnvironment } from "../state/threads";
+import { environmentThreadShells, threadEnvironment } from "../state/threads";
 import { vcsEnvironment } from "../state/vcs";
 import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
 import {
@@ -270,6 +285,8 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  nativeSkillChooserMessage,
+  resolveChatSkillInvocationRequest,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -313,6 +330,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_PROJECT_WORKSTREAMS_ATOM = Atom.make<ReadonlyArray<ProjectSkillWorkstream>>([]);
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1159,6 +1177,9 @@ function ChatViewContent(props: ChatViewProps) {
     [environmentId, threadId],
   );
   const routeThreadKey = useMemo(() => scopedThreadKey(routeThreadRef), [routeThreadRef]);
+  const environmentSkillRuns = useAtomValue(
+    environmentThreadShells.environmentSkillRunsAtom(environmentId),
+  );
   const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const upsertKeybinding = useAtomCommand(serverEnvironment.upsertKeybinding, {
     reportFailure: false,
@@ -1188,6 +1209,19 @@ function ChatViewContent(props: ChatViewProps) {
   const respondToThreadUserInput = useAtomCommand(threadEnvironment.respondToUserInput, {
     reportFailure: false,
   });
+  const publishWayfinderDraftCommand = useAtomCommand(threadEnvironment.publishWayfinderDraft, {
+    reportFailure: false,
+  });
+  const mutateWayfinderCommand = useAtomCommand(threadEnvironment.mutateWayfinder, {
+    reportFailure: false,
+  });
+  const reconcileWayfinderMapCommand = useAtomCommand(threadEnvironment.reconcileWayfinderMap, {
+    reportFailure: false,
+  });
+  const controlWayfinderResearchCommand = useAtomCommand(
+    threadEnvironment.controlWayfinderResearch,
+    { reportFailure: false },
+  );
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1272,6 +1306,10 @@ function ChatViewContent(props: ChatViewProps) {
     (store) => store.setLogicalProjectDraftThreadId,
   );
   const promptRef = useRef("");
+  const explicitSkillInvocationRequestRef = useRef<SkillInvocationRequest | null>(null);
+  const onExplicitSkillInvocation = useCallback((request: SkillInvocationRequest) => {
+    explicitSkillInvocationRequestRef.current = request;
+  }, []);
   const composerImagesRef = useRef<ComposerImageAttachment[]>([]);
   const composerTerminalContextsRef = useRef<TerminalContextDraft[]>([]);
   const composerElementContextsRef = useRef<ElementContextDraft[]>([]);
@@ -1619,6 +1657,29 @@ function ChatViewContent(props: ChatViewProps) {
   const activeProjectRef = activeThread
     ? scopeProjectRef(activeThread.environmentId, activeThread.projectId)
     : null;
+  const activeProjectWorkstreams = useAtomValue(
+    activeProjectRef
+      ? environmentThreadShells.projectWorkstreamsAtom(activeProjectRef)
+      : EMPTY_PROJECT_WORKSTREAMS_ATOM,
+  );
+  const activeWayfinderWorkstream = activeThread
+    ? findThreadWayfinderWorkstream(activeThread.id, activeProjectWorkstreams)
+    : null;
+  const activeWayfinderMap =
+    activeWayfinderWorkstream?.wayfinderMap ??
+    activeLatestTurn?.skillInvocation?.wayfinderMap ??
+    null;
+  const activeWayfinderInvocation = findWayfinderReconciliationInvocation(
+    activeWayfinderWorkstream,
+    activeLatestTurn?.skillInvocation ?? null,
+  );
+  const activeLinkedTicketAction =
+    activeLatestTurn?.skillInvocation?.action?.id === "work-ticket"
+      ? activeLatestTurn.skillInvocation.action
+      : null;
+  const activeLinkedTicketInvocation =
+    activeLinkedTicketAction === null ? null : (activeLatestTurn?.skillInvocation ?? null);
+  const activeWayfinderMutation = activeWayfinderInvocation?.wayfinderMutation ?? null;
   const activeProject = useProject(activeProjectRef);
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
@@ -1664,6 +1725,11 @@ function ChatViewContent(props: ChatViewProps) {
     useRightPanelStore.getState().reconcileFileSurfaces(activeThreadRef, activeProject !== null);
   }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef]);
 
+  useEffect(() => {
+    if (!activeThreadRef || !activeWayfinderMap) return;
+    useRightPanelStore.getState().open(activeThreadRef, "wayfinder");
+  }, [activeThreadRef, activeWayfinderMap?.lastSynchronizedAt]);
+
   // Compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
   const allProjects = useProjects();
@@ -1685,6 +1751,30 @@ function ChatViewContent(props: ChatViewProps) {
       connection: activeEnvironment.connection,
     };
   }, [activeEnvironment, activeEnvironmentUnavailable, activeEnvironmentUnavailableLabel]);
+  const reconcileActiveWayfinderMap = useCallback(
+    (reason: WayfinderReconcileReason) => {
+      if (!activeThread || !activeWayfinderInvocation) return;
+      void reconcileWayfinderMapCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeWayfinderInvocation.threadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          reason,
+        },
+      });
+    },
+    [activeThread, activeWayfinderInvocation, reconcileWayfinderMapCommand],
+  );
+  const returnToWayfinderTicketThread = useCallback(
+    (linkedThreadId: ThreadId) => {
+      if (!activeThread) return;
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, linkedThreadId)),
+      });
+    },
+    [activeThread, navigate],
+  );
   const handleReconnectActiveEnvironment = useCallback(
     async (environmentId: EnvironmentId) => {
       const result = await retryEnvironment(environmentId);
@@ -2058,6 +2148,14 @@ function ChatViewContent(props: ChatViewProps) {
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],
   );
+  const latestWayfinderDraftInvocation =
+    findLatestWayfinderDraftInvocation(environmentSkillRuns, activeThread?.id) ??
+    activeLatestTurn?.skillInvocation;
+  const wayfinderDraft = useMemo(
+    () => deriveWayfinderDraft(latestWayfinderDraftInvocation, threadActivities),
+    [latestWayfinderDraftInvocation, threadActivities],
+  );
+  const wayfinderPublication = latestWayfinderDraftInvocation?.wayfinderPublication ?? null;
   const activePendingUserInput = pendingUserInputs[0] ?? null;
   const activePendingDraftAnswers = useMemo(
     () =>
@@ -3132,6 +3230,10 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef || !activeProject) return;
     useRightPanelStore.getState().open(activeThreadRef, "files");
   }, [activeProject, activeThreadRef]);
+  const addWayfinderSurface = useCallback(() => {
+    if (!activeThreadRef || !activeWayfinderMap) return;
+    useRightPanelStore.getState().open(activeThreadRef, "wayfinder");
+  }, [activeThreadRef, activeWayfinderMap]);
   const openFileSurface = useCallback(
     (relativePath: string) => {
       if (!activeThreadRef || !activeProject) return;
@@ -4671,6 +4773,17 @@ function ChatViewContent(props: ChatViewProps) {
       return;
     }
 
+    const skillInvocationResolution = resolveChatSkillInvocationRequest({
+      text: promptForSend,
+      providerInstanceId: ctxSelectedModelSelection.instanceId,
+      providers: providerStatuses,
+      explicitRequest: explicitSkillInvocationRequestRef.current,
+    });
+    if (skillInvocationResolution && "kind" in skillInvocationResolution) {
+      setThreadError(threadIdForSend, nativeSkillChooserMessage(skillInvocationResolution.reason));
+      return;
+    }
+
     sendInFlightRef.current = true;
     if (isDraftHeroState && activeThreadKey) {
       let resolveDockStarted: (() => void) | undefined;
@@ -4715,6 +4828,8 @@ function ChatViewContent(props: ChatViewProps) {
       effort: ctxSelectedPromptEffort,
       text: messageTextForSend || IMAGE_ONLY_BOOTSTRAP_PROMPT,
     });
+    const skillInvocationRequest = skillInvocationResolution;
+    explicitSkillInvocationRequestRef.current = null;
     const turnAttachmentsPromise = Promise.all(
       composerImagesSnapshot.map(async (image) => ({
         type: "image" as const,
@@ -4886,6 +5001,7 @@ function ChatViewContent(props: ChatViewProps) {
           titleSeed: title,
           runtimeMode,
           interactionMode,
+          ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
           ...(bootstrap ? { bootstrap } : {}),
           createdAt: messageCreatedAt,
         },
@@ -5019,6 +5135,220 @@ function ChatViewContent(props: ChatViewProps) {
       return result;
     },
     [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
+  );
+
+  const onPublishWayfinderDraft = useCallback(async () => {
+    if (!activeThreadId || !wayfinderDraft || !latestWayfinderDraftInvocation) return;
+    const result = await publishWayfinderDraftCommand({
+      environmentId,
+      input: {
+        threadId: activeThreadId,
+        skillRunId: latestWayfinderDraftInvocation.skillRunId,
+        confirmed: wayfinderPublication?.status === "awaiting-approval",
+      },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setThreadError(
+        activeThreadId,
+        error instanceof Error ? error.message : "Failed to start Wayfinder publication.",
+      );
+    }
+  }, [
+    activeThreadId,
+    environmentId,
+    latestWayfinderDraftInvocation,
+    publishWayfinderDraftCommand,
+    setThreadError,
+    wayfinderDraft,
+    wayfinderPublication?.status,
+  ]);
+
+  const onMutateWayfinder = useCallback(
+    async (
+      action: WayfinderMutationAction,
+      options?: { readonly actionId?: string; readonly confirmed?: boolean },
+    ) => {
+      if (!activeWayfinderInvocation) return;
+      const result = await mutateWayfinderCommand({
+        environmentId,
+        input: {
+          threadId: activeWayfinderInvocation.threadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          action,
+          ...(options?.actionId ? { actionId: options.actionId } : {}),
+          confirmed: options?.confirmed ?? false,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeWayfinderInvocation.threadId,
+          error instanceof Error ? error.message : "Failed to update the Wayfinder map.",
+        );
+      }
+    },
+    [activeWayfinderInvocation, environmentId, mutateWayfinderCommand, setThreadError],
+  );
+  const onCompleteWayfinderHitl = useCallback(
+    async (
+      action: Extract<WayfinderMutationAction, { readonly kind: "complete-hitl-ticket" }>,
+      options?: { readonly actionId?: string; readonly confirmed?: boolean },
+    ) => {
+      if (!activeLinkedTicketInvocation) return;
+      const result = await mutateWayfinderCommand({
+        environmentId,
+        input: {
+          threadId: activeLinkedTicketInvocation.threadId,
+          skillRunId: activeLinkedTicketInvocation.skillRunId,
+          action,
+          ...(options?.actionId ? { actionId: options.actionId } : {}),
+          confirmed: options?.confirmed ?? false,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeLinkedTicketInvocation.threadId,
+          error instanceof Error ? error.message : "Failed to resolve the Wayfinder ticket.",
+        );
+      }
+    },
+    [activeLinkedTicketInvocation, environmentId, mutateWayfinderCommand, setThreadError],
+  );
+  const onControlWayfinderResearch = useCallback(
+    async (action: WayfinderResearchAction) => {
+      if (!activeWayfinderInvocation) return;
+      const result = await controlWayfinderResearchCommand({
+        environmentId,
+        input: {
+          threadId: activeWayfinderInvocation.threadId,
+          skillRunId: activeWayfinderInvocation.skillRunId,
+          action,
+        },
+      });
+      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+        const error = squashAtomCommandFailure(result);
+        setThreadError(
+          activeWayfinderInvocation.threadId,
+          error instanceof Error ? error.message : "Failed to control Wayfinder research.",
+        );
+      }
+    },
+    [activeWayfinderInvocation, controlWayfinderResearchCommand, environmentId, setThreadError],
+  );
+  const toSpecSkill = activeThread
+    ? (providerStatuses
+        .find((provider) => provider.instanceId === activeThread.modelSelection.instanceId)
+        ?.skills.find((skill) => skill.name === "to-spec" && skill.enabled) ?? null)
+    : null;
+  const onStartWayfinderToSpec = useCallback(
+    async (acknowledgedIncomplete: boolean) => {
+      if (
+        !activeThread ||
+        !activeProject ||
+        !activeWayfinderInvocation ||
+        !activeWayfinderMap ||
+        !toSpecSkill ||
+        activeEnvironmentUnavailable
+      ) {
+        return;
+      }
+      const skillInvocationRequest = createWayfinderToSpecInvocationRequest({
+        skill: toSpecSkill,
+        sourceSkillRunId: activeWayfinderInvocation.skillRunId,
+        sourceThreadId: activeWayfinderInvocation.threadId,
+        destination: activeWayfinderMap.destination,
+        canonicalReference: {
+          number: activeWayfinderMap.canonicalReference.number,
+          url: activeWayfinderMap.canonicalReference.url,
+        },
+        wayfinderSynchronizedAt:
+          activeWayfinderInvocation.wayfinderSynchronizedAt ??
+          activeWayfinderMap.lastSynchronizedAt,
+        acknowledgedIncomplete,
+      });
+      if (skillInvocationRequest === null) return;
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const title = truncate(`Specification for ${activeWayfinderMap.canonicalReference.title}`);
+      const createResult = await createThread({
+        environmentId,
+        input: {
+          threadId: nextThreadId,
+          projectId: activeProject.id,
+          title,
+          modelSelection: activeThread.modelSelection,
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          createdAt,
+        },
+      });
+      let failure: AtomCommandResult<unknown, unknown> | null =
+        createResult._tag === "Failure" ? createResult : null;
+
+      if (failure === null) {
+        const startResult = await startThreadTurn({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: skillInvocationRequest.arguments ?? "Create a specification from Wayfinder.",
+              attachments: [],
+            },
+            modelSelection: activeThread.modelSelection,
+            titleSeed: title,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            skillInvocationRequest,
+            createdAt,
+          },
+        });
+        failure = startResult._tag === "Failure" ? startResult : null;
+      }
+
+      if (failure === null) {
+        const navigateResult = await settlePromise(() =>
+          navigate({
+            to: "/$environmentId/$threadId",
+            params: { environmentId: activeThread.environmentId, threadId: nextThreadId },
+          }),
+        );
+        failure = navigateResult._tag === "Failure" ? navigateResult : null;
+      }
+
+      if (failure !== null) {
+        await deleteThread({ environmentId, input: { threadId: nextThreadId } });
+        if (!isAtomCommandInterrupted(failure)) {
+          const error = squashAtomCommandFailure(failure);
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not start to-spec",
+              description: error instanceof Error ? error.message : "The handoff could not start.",
+            }),
+          );
+        }
+      }
+    },
+    [
+      activeEnvironmentUnavailable,
+      activeProject,
+      activeThread,
+      activeWayfinderInvocation,
+      activeWayfinderMap,
+      createThread,
+      deleteThread,
+      environmentId,
+      navigate,
+      startThreadTurn,
+      toSpecSkill,
+    ],
   );
 
   const setActivePendingUserInputQuestionIndex = useCallback(
@@ -5703,6 +6033,24 @@ function ChatViewContent(props: ChatViewProps) {
         timestampFormat={timestampFormat}
         mode="embedded"
       />
+    ) : activeRightPanelSurface?.kind === "wayfinder" && activeWayfinderMap ? (
+      <WayfinderWorkbench
+        map={activeWayfinderMap}
+        mutation={activeWayfinderMutation}
+        research={activeWayfinderInvocation?.wayfinderResearch ?? null}
+        onMutate={onMutateWayfinder}
+        onResearch={onControlWayfinderResearch}
+        ticketThreads={activeWayfinderWorkstream?.ticketThreads ?? []}
+        onReturnToThread={returnToWayfinderTicketThread}
+        assignedTicketNumber={activeLinkedTicketAction?.ticketNumber ?? null}
+        {...(activeLinkedTicketInvocation ? { onCompleteHitl: onCompleteWayfinderHitl } : {})}
+        synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
+        {...(activeWayfinderWorkstream ? { readiness: activeWayfinderWorkstream.readiness } : {})}
+        toSpecAvailable={toSpecSkill !== null}
+        onStartToSpec={onStartWayfinderToSpec}
+        connected={!activeEnvironmentUnavailable}
+        onReconcile={reconcileActiveWayfinderMap}
+      />
     ) : (activeRightPanelSurface?.kind === "files" || activeRightPanelSurface?.kind === "file") &&
       activeProject &&
       activeWorkspaceRoot ? (
@@ -5938,6 +6286,9 @@ function ChatViewContent(props: ChatViewProps) {
                             activePendingDraftAnswers={activePendingDraftAnswers}
                             activePendingQuestionIndex={activePendingQuestionIndex}
                             respondingRequestIds={respondingRequestIds}
+                            wayfinderDraft={wayfinderDraft}
+                            wayfinderPublication={wayfinderPublication}
+                            onPublishWayfinderDraft={onPublishWayfinderDraft}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
                             activePlan={activePlan as { turnId?: TurnId } | null}
@@ -5963,6 +6314,7 @@ function ChatViewContent(props: ChatViewProps) {
                             composerTerminalContextsRef={composerTerminalContextsRef}
                             composerElementContextsRef={composerElementContextsRef}
                             onSend={onSend}
+                            onExplicitSkillInvocation={onExplicitSkillInvocation}
                             onInterrupt={onInterrupt}
                             onImplementPlanInNewThread={onImplementPlanInNewThread}
                             onRespondToApproval={onRespondToApproval}
@@ -6134,9 +6486,11 @@ function ChatViewContent(props: ChatViewProps) {
           onAddTerminal={addTerminalSurface}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
+          onAddWayfinder={addWayfinderSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
+          wayfinderAvailable={activeWayfinderMap !== null}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -6161,9 +6515,11 @@ function ChatViewContent(props: ChatViewProps) {
             onAddTerminal={addTerminalSurface}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
+            onAddWayfinder={addWayfinderSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
+            wayfinderAvailable={activeWayfinderMap !== null}
           >
             {rightPanelContent}
           </RightPanelTabs>

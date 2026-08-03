@@ -3,6 +3,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentProjectSkillWorkstream } from "@t3tools/client-runtime/state/skill-runs";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -57,6 +58,8 @@ import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
 import { WorkspaceConnectionStatus } from "../home/WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "../home/workspace-connection-status";
+import { ProjectWorkstreamsShelf } from "../wayfinder/ProjectWorkstreamsShelf";
+import { environmentThreadShells } from "../../state/threads";
 import { SidebarHeaderActions } from "./sidebar-header-actions";
 import { SidebarFilterButton } from "./sidebar-filter-button";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
@@ -190,6 +193,7 @@ function ThreadNavigationSidebarPane(
   const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
   const projects = useProjects();
   const threads = useThreadShells();
+  const workstreams = useAtomValue(environmentThreadShells.workstreamsAtom);
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [headerIsOverContent, setHeaderIsOverContent] = useState(false);
@@ -330,6 +334,19 @@ function ThreadNavigationSidebarPane(
             selectedProjectRefs.has(scopedProjectKey(thread.environmentId, thread.projectId)),
           ),
     [selectedProjectRefs, threads],
+  );
+  const scopedWorkstreams = useMemo<ReadonlyArray<EnvironmentProjectSkillWorkstream>>(
+    () =>
+      workstreams.filter(
+        (workstream) =>
+          (options.selectedEnvironmentId === null ||
+            workstream.environmentId === options.selectedEnvironmentId) &&
+          (selectedProjectRefs === null ||
+            selectedProjectRefs.has(
+              scopedProjectKey(workstream.environmentId, workstream.projectId),
+            )),
+      ),
+    [options.selectedEnvironmentId, selectedProjectRefs, workstreams],
   );
   const scopedPendingTasks = useMemo(
     () =>
@@ -1127,6 +1144,14 @@ function ThreadNavigationSidebarPane(
             : "No threads yet"}
     </Text>
   );
+  const workstreamsShelf = (
+    <ProjectWorkstreamsShelf
+      workstreams={scopedWorkstreams}
+      projects={projects}
+      threads={threads}
+      onSelectThread={handleSelectThread}
+    />
+  );
 
   if (props.nativeChrome) {
     return (
@@ -1185,15 +1210,18 @@ function ThreadNavigationSidebarPane(
                 showsVerticalScrollIndicator={false}
                 style={styles.threadList}
                 ListHeaderComponent={
-                  showsConnectionStatus ? (
-                    <View className="px-1.5 pt-0.5 pb-2">
-                      <WorkspaceConnectionStatus
-                        onPress={props.onOpenEnvironmentSettings}
-                        state={catalogState}
-                        variant="sidebar"
-                      />
-                    </View>
-                  ) : null
+                  <>
+                    {showsConnectionStatus ? (
+                      <View className="px-1.5 pt-0.5 pb-2">
+                        <WorkspaceConnectionStatus
+                          onPress={props.onOpenEnvironmentSettings}
+                          state={catalogState}
+                          variant="sidebar"
+                        />
+                      </View>
+                    ) : null}
+                    {workstreamsShelf}
+                  </>
                 }
                 ListEmptyComponent={listEmpty}
               />
@@ -1241,6 +1269,7 @@ function ThreadNavigationSidebarPane(
               scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}
               style={styles.threadList}
+              ListHeaderComponent={workstreamsShelf}
               ListEmptyComponent={listEmpty}
             />
           </GestureDetector>

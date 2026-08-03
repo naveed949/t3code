@@ -7,6 +7,7 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentProjectSkillWorkstream } from "@t3tools/client-runtime/state/skill-runs";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -73,12 +74,14 @@ import {
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 import { WorkspaceConnectionStatus } from "./WorkspaceConnectionStatus";
 import { shouldShowWorkspaceConnectionStatus } from "./workspace-connection-status";
+import { ProjectWorkstreamsShelf } from "../wayfinder/ProjectWorkstreamsShelf";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
 interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly workstreams: ReadonlyArray<EnvironmentProjectSkillWorkstream>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly catalogState: WorkspaceState;
   readonly savedConnectionsById: Readonly<Record<string, SavedRemoteConnection>>;
@@ -348,6 +351,19 @@ export function HomeScreen(props: HomeScreenProps) {
             selectedProjectRefKeys.has(scopedProjectKey(thread.environmentId, thread.projectId)),
           ),
     [props.threads, selectedProjectRefKeys],
+  );
+  const scopedWorkstreams = useMemo(
+    () =>
+      props.workstreams.filter(
+        (workstream) =>
+          (props.selectedEnvironmentId === null ||
+            workstream.environmentId === props.selectedEnvironmentId) &&
+          (selectedProjectRefKeys === null ||
+            selectedProjectRefKeys.has(
+              scopedProjectKey(workstream.environmentId, workstream.projectId),
+            )),
+      ),
+    [props.selectedEnvironmentId, props.workstreams, selectedProjectRefKeys],
   );
   const scopedPendingTasks = useMemo(
     () =>
@@ -933,6 +949,11 @@ export function HomeScreen(props: HomeScreenProps) {
   // so the v1 check already covers v2.
   const hasAnyThreads =
     props.threads.some((thread) => thread.archivedAt === null) || props.pendingTasks.length > 0;
+  const hasAnyContent =
+    hasAnyThreads ||
+    scopedWorkstreams.some(
+      (workstream) => workstream.wayfinderMap !== null && workstream.linkedThreadIds.length > 0,
+    );
   const hasResults = projectGroups.length > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null
@@ -954,7 +975,7 @@ export function HomeScreen(props: HomeScreenProps) {
       </View>
     ) : null;
 
-  if (!hasAnyThreads) {
+  if (!hasAnyContent) {
     return (
       <View
         className="flex-1 items-center justify-center bg-screen px-8"
@@ -994,6 +1015,12 @@ export function HomeScreen(props: HomeScreenProps) {
   const listHeader = (
     <>
       {Platform.OS === "ios" ? null : <HomeTopContentSpacer />}
+      <ProjectWorkstreamsShelf
+        workstreams={scopedWorkstreams}
+        projects={props.projects}
+        threads={props.threads}
+        onSelectThread={props.onSelectThread}
+      />
 
       {shouldShowConnectionStatus && Platform.OS === "ios" ? (
         <View className="pb-4">

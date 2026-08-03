@@ -46,6 +46,10 @@ export type StartThreadTurnInput = CommandInput<"thread.turn.start">;
 export type InterruptThreadTurnInput = CommandInput<"thread.turn.interrupt">;
 export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond">;
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
+export type PublishWayfinderDraftInput = CommandInput<"thread.wayfinder.publish">;
+export type MutateWayfinderInput = CommandInput<"thread.wayfinder.mutate">;
+export type ReconcileWayfinderMapInput = CommandInput<"thread.wayfinder.reconcile">;
+export type ControlWayfinderResearchInput = CommandInput<"thread.wayfinder.research">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -271,6 +275,52 @@ export const respondToThreadUserInput: (input: RespondToThreadUserInputInput) =>
     return yield* dispatch({
       ...input,
       type: "thread.user-input.respond",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const publishWayfinderDraft: (input: PublishWayfinderDraftInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.publishWayfinderDraft")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.wayfinder.publish",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const mutateWayfinder: (input: MutateWayfinderInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.mutateWayfinder",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.wayfinder.mutate",
+    commandId: metadata.commandId,
+    actionId: input.actionId ?? metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const reconcileWayfinderMap: (input: ReconcileWayfinderMapInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.reconcileWayfinderMap")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.wayfinder.reconcile",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const controlWayfinderResearch: (input: ControlWayfinderResearchInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.controlWayfinderResearch")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.wayfinder.research",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

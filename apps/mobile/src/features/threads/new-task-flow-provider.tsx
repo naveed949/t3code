@@ -15,6 +15,7 @@ import {
   MessageId,
   ThreadId,
 } from "@t3tools/contracts";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 
@@ -715,6 +716,14 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       const projectCwd = usingPendingSnapshot
         ? editingPendingTask?.creation?.projectCwd
         : selectedProject.workspaceRoot;
+      const skillInvocationRequest = resolveNativeSkillRunInvocation({
+        kind: "leading-token",
+        text,
+        skills: selectedProviderSkills,
+      });
+      if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+        return null;
+      }
       return {
         environmentId: selectedProject.environmentId,
         threadId: ThreadId.make(metadata.threadId),
@@ -725,6 +734,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         modelSelection: draftModelSelection,
         runtimeMode: draft.runtimeMode ?? DEFAULT_RUNTIME_MODE,
         interactionMode: draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+        ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
         creation: {
           projectId: selectedProject.id,
           ...(projectTitle !== undefined ? { projectTitle } : {}),
@@ -749,6 +759,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
       selectedModel,
       selectedProject,
       selectedProjectDraftKey,
+      selectedProviderSkills,
       startFromOrigin,
       workspaceMode,
     ],

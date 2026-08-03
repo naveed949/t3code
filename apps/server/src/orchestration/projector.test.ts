@@ -5,11 +5,12 @@ import {
   ProviderDriverKind,
   ThreadId,
   type OrchestrationEvent,
+  type OrchestrationThreadActivity,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { describe, expect, it } from "vite-plus/test";
 
-import { createEmptyReadModel, projectEvent } from "./projector.ts";
+import { createEmptyReadModel, projectEvent, retainThreadActivities } from "./projector.ts";
 
 function makeEvent(input: {
   sequence: number;
@@ -955,5 +956,103 @@ describe("orchestration projector", () => {
     expect(thread?.checkpoints).toHaveLength(500);
     expect(thread?.checkpoints[0]?.turnId).toBe("turn-100");
     expect(thread?.checkpoints.at(-1)?.turnId).toBe("turn-599");
+  });
+
+  it("retains Wayfinder authority and scoped decisions beyond the activity window", () => {
+    const durableActivities: ReadonlyArray<OrchestrationThreadActivity> = [
+      {
+        id: EventId.make("event-wayfinder-old-0"),
+        tone: "info",
+        kind: "wayfinder.draft.started",
+        summary: "Old draft started",
+        payload: { skillRunId: "skill-run:wayfinder-old", canonical: false },
+        turnId: null,
+        createdAt: "2026-03-01T08:00:00.000Z",
+      },
+      {
+        id: EventId.make("event-wayfinder-old-1"),
+        tone: "info",
+        kind: "user-input.resolved",
+        summary: "Old decision resolved",
+        payload: {
+          skillRunId: "skill-run:wayfinder-old",
+          requestId: "request:wayfinder-old",
+          answers: { destination: "Old map" },
+        },
+        turnId: null,
+        createdAt: "2026-03-01T08:01:00.000Z",
+      },
+      {
+        id: EventId.make("event-wayfinder-durable-0"),
+        tone: "info",
+        kind: "wayfinder.draft.started",
+        summary: "Draft started",
+        payload: { skillRunId: "skill-run:wayfinder", canonical: false },
+        turnId: null,
+        createdAt: "2026-03-01T09:00:00.000Z",
+      },
+      {
+        id: EventId.make("event-wayfinder-durable-1"),
+        tone: "info",
+        kind: "user-input.resolved",
+        summary: "Decision resolved",
+        payload: {
+          skillRunId: "skill-run:wayfinder",
+          requestId: "request:wayfinder",
+          answers: { destination: "Reliable recovery" },
+        },
+        turnId: null,
+        createdAt: "2026-03-01T09:01:00.000Z",
+      },
+    ];
+    const fillerActivities: ReadonlyArray<OrchestrationThreadActivity> = Array.from(
+      { length: 501 },
+      (_, index) => ({
+        id: EventId.make(`event-filler-${index}`),
+        tone: "info",
+        kind: "tool.completed",
+        summary: "Filler",
+        payload: {},
+        turnId: null,
+        createdAt: `2026-03-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+      }),
+    );
+
+    const activities = retainThreadActivities([...durableActivities, ...fillerActivities]);
+    expect(activities.some((activity) => activity.kind === "wayfinder.draft.started")).toBe(true);
+    expect(
+      activities.some(
+        (activity) =>
+          activity.kind === "user-input.resolved" &&
+          activity.id === EventId.make("event-wayfinder-durable-1"),
+      ),
+    ).toBe(true);
+    expect(activities).toHaveLength(502);
+    expect(
+      activities.some((activity) => activity.id === EventId.make("event-wayfinder-old-0")),
+    ).toBe(false);
+  });
+
+  it("retains published Wayfinder authority beyond the activity window", () => {
+    const published: OrchestrationThreadActivity = {
+      id: EventId.make("event-wayfinder-published"),
+      tone: "info",
+      kind: "wayfinder.draft.published",
+      summary: "Published",
+      payload: { skillRunId: "skill-run:published" },
+      turnId: null,
+      createdAt: "2026-03-01T08:00:00.000Z",
+    };
+    const filler = Array.from({ length: 501 }, (_, index) => ({
+      id: EventId.make(`event-published-filler-${index}`),
+      tone: "info" as const,
+      kind: "tool.completed",
+      summary: "Filler",
+      payload: {},
+      turnId: null,
+      createdAt: `2026-03-01T10:${String(Math.floor(index / 60)).padStart(2, "0")}:${String(index % 60).padStart(2, "0")}.000Z`,
+    }));
+
+    expect(retainThreadActivities([published, ...filler])).toContainEqual(published);
   });
 });

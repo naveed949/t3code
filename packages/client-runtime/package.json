@@ -27,6 +27,10 @@
       "types": "./src/operations/index.ts",
       "default": "./src/operations/index.ts"
     },
+    "./operations/native-skill-runs": {
+      "types": "./src/operations/nativeSkillRuns.ts",
+      "default": "./src/operations/nativeSkillRuns.ts"
+    },
     "./operations/projects": {
       "types": "./src/operations/projects.ts",
       "default": "./src/operations/projects.ts"
@@ -130,6 +134,22 @@
     "./state/thread-settled": {
       "types": "./src/state/threadSettled.ts",
       "default": "./src/state/threadSettled.ts"
+    },
+    "./state/skill-runs": {
+      "types": "./src/state/skillRuns.ts",
+      "default": "./src/state/skillRuns.ts"
+    },
+    "./state/wayfinder-workbench": {
+      "types": "./src/state/wayfinderWorkbench.ts",
+      "default": "./src/state/wayfinderWorkbench.ts"
+    },
+    "./state/wayfinder-reconciliation": {
+      "types": "./src/state/wayfinderReconciliation.ts",
+      "default": "./src/state/wayfinderReconciliation.ts"
+    },
+    "./state/wayfinder-draft": {
+      "types": "./src/state/wayfinderDraft.ts",
+      "default": "./src/state/wayfinderDraft.ts"
     },
     "./state/thread-search": {
       "types": "./src/state/threadSearch.ts",

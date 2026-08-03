@@ -9,6 +9,7 @@ import type {
   RuntimeMode,
   ScopedThreadRef,
   ServerProvider,
+  SkillInvocationRequest,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -19,6 +20,7 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from "@t3tools/contracts";
 import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import {
@@ -87,11 +89,13 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import { nativeSkillActionPrompt, type NativeSkillMenuAction } from "./nativeSkillMenuActions";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
+import { ComposerWayfinderDraftPanel } from "./ComposerWayfinderDraftPanel";
 import { ComposerPlanFollowUpBanner } from "./ComposerPlanFollowUpBanner";
 import { ComposerControl, ComposerControlIcon, ComposerSelectControl } from "./ComposerControl";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
@@ -549,6 +553,8 @@ export interface ChatComposerProps {
   activePendingDraftAnswers: Record<string, PendingUserInputDraftAnswer>;
   activePendingQuestionIndex: number;
   respondingRequestIds: ApprovalRequestId[];
+  wayfinderDraft: import("@t3tools/contracts").WayfinderDraft | null;
+  wayfinderPublication: import("@t3tools/contracts").WayfinderPublication | null;
 
   // Plan
   showPlanFollowUpPrompt: boolean;
@@ -587,12 +593,14 @@ export interface ChatComposerProps {
 
   // Callbacks
   onSend: (e?: { preventDefault: () => void }) => void;
+  onExplicitSkillInvocation: (request: SkillInvocationRequest) => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
   onRespondToApproval: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
   ) => Promise<unknown>;
+  onPublishWayfinderDraft: () => void;
   onSelectActivePendingUserInputOption: (questionId: string, optionLabel: string) => void;
   onAdvanceActivePendingUserInput: () => void;
   onPreviousActivePendingUserInputQuestion: () => void;
@@ -650,6 +658,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingDraftAnswers,
     activePendingQuestionIndex,
     respondingRequestIds,
+    wayfinderDraft,
+    wayfinderPublication,
+    onPublishWayfinderDraft,
     showPlanFollowUpPrompt,
     activeProposedPlan,
     activePlan,
@@ -674,6 +685,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerTerminalContextsRef,
     composerElementContextsRef,
     onSend,
+    onExplicitSkillInvocation,
     onInterrupt,
     onImplementPlanInNewThread,
     onRespondToApproval,
@@ -1664,6 +1676,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     };
   }, [readComposerSnapshot]);
 
+  const applySkillPromptReplacement = useCallback(
+    (
+      item: Extract<ComposerCommandItem, { type: "skill" }>,
+      currentValue: string,
+      rangeStart: number,
+      rangeEnd: number,
+    ) => {
+      const replacement = `$${item.skill.name} `;
+      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        currentValue,
+        rangeEnd,
+        replacement,
+      );
+      return applyPromptReplacement(rangeStart, replacementRangeEnd, replacement, {
+        expectedText: currentValue.slice(rangeStart, replacementRangeEnd),
+      });
+    },
+    [applyPromptReplacement],
+  );
+
   const onSelectComposerItem = useCallback(
     (item: ComposerCommandItem) => {
       if (composerSelectLockRef.current) return;
@@ -1731,25 +1763,94 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return;
       }
       if (item.type === "skill") {
-        const replacement = `$${item.skill.name} `;
-        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        const request = resolveNativeSkillRunInvocation({
+          kind: "picker-selection",
+          skill: item.skill,
+        });
+        const applied = applySkillPromptReplacement(
+          item,
           snapshot.value,
-          trigger.rangeEnd,
-          replacement,
-        );
-        const applied = applyPromptReplacement(
           trigger.rangeStart,
-          replacementRangeEnd,
-          replacement,
-          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+          trigger.rangeEnd,
         );
         if (applied) {
+          if (request) {
+            onExplicitSkillInvocation(request);
+          }
           setComposerHighlightedItemId(null);
         }
         return;
       }
     },
-    [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
+    [
+      applyPromptReplacement,
+      applySkillPromptReplacement,
+      handleInteractionModeChange,
+      onExplicitSkillInvocation,
+      resolveActiveComposerTrigger,
+    ],
+  );
+
+  const onNativeSkillAction = useCallback(
+    (item: Extract<ComposerCommandItem, { type: "skill" }>, action: NativeSkillMenuAction) => {
+      const { snapshot, trigger } = resolveActiveComposerTrigger();
+      if (!trigger) return;
+      if (action === "generic") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      const request = resolveNativeSkillRunInvocation({
+        kind: "native-action",
+        skill: item.skill,
+        ...(action === "new-map"
+          ? { action: { id: "new-map" } }
+          : action === "continue-map"
+            ? { action: { id: "continue-map" } }
+            : {}),
+      });
+      if (request && "kind" in request && request.kind === "chooser") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      if (!request || !("skillName" in request)) return;
+      if (action === "new-map") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          nativeSkillActionPrompt(item.skill.name, action),
+          { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          onExplicitSkillInvocation(request);
+          onSend();
+        }
+        return;
+      }
+      if (applySkillPromptReplacement(item, snapshot.value, trigger.rangeStart, trigger.rangeEnd)) {
+        onExplicitSkillInvocation(request);
+        onSend();
+      }
+    },
+    [
+      applyPromptReplacement,
+      applySkillPromptReplacement,
+      onExplicitSkillInvocation,
+      onSend,
+      resolveActiveComposerTrigger,
+    ],
   );
 
   const onComposerMenuItemHighlighted = useCallback(
@@ -2711,6 +2812,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             scheduleComposerCollapseCheck();
           }}
         >
+          {!isComposerCollapsedMobile && wayfinderDraft ? (
+            <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+              <ComposerWayfinderDraftPanel
+                draft={wayfinderDraft}
+                publication={wayfinderPublication}
+                onPublish={onPublishWayfinderDraft}
+              />
+            </div>
+          ) : null}
           {!isComposerCollapsedMobile &&
             (activePendingApproval ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
@@ -2728,6 +2838,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   questionIndex={activePendingQuestionIndex}
                   onToggleOption={onSelectActivePendingUserInputOption}
                   onAdvance={onAdvanceActivePendingUserInput}
+                  isWayfinderDecision={
+                    wayfinderDraft?.proposedDecisions[0]?.requestId ===
+                    pendingUserInputs[0]?.requestId
+                  }
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -2768,6 +2882,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                 questionIndex={activePendingQuestionIndex}
                 onToggleOption={onSelectActivePendingUserInputOption}
                 onAdvance={onAdvanceActivePendingUserInput}
+                isWayfinderDecision={
+                  wayfinderDraft?.proposedDecisions[0]?.requestId ===
+                  pendingUserInputs[0]?.requestId
+                }
               />
               <div className="px-3 pb-3 sm:px-4">
                 <div
@@ -2906,6 +3024,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   activeItemId={activeComposerMenuItem?.id ?? null}
                   onHighlightedItemChange={onComposerMenuItemHighlighted}
                   onSelect={onSelectComposerItem}
+                  onNativeSkillAction={onNativeSkillAction}
                 />
               </ComposerCommandMenuLayer>
             )}

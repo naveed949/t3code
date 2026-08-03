@@ -1,0 +1,1124 @@
+import { assert, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import { ChildProcessSpawner } from "effect/unstable/process";
+
+import * as GitHubCli from "../sourceControl/GitHubCli.ts";
+import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
+import * as IssueTracker from "./IssueTracker.ts";
+
+const output = (stdout: string) => ({
+  exitCode: ChildProcessSpawner.ExitCode(0),
+  stdout,
+  stderr: "",
+  stdoutTruncated: false,
+  stderrTruncated: false,
+});
+
+const repository = {
+  canonicalKey: "github.com/t3tools/t3code",
+  locator: {
+    source: "git-remote" as const,
+    remoteName: "origin",
+    remoteUrl: "git@github.com:t3tools/t3code.git",
+  },
+  provider: "github" as const,
+  owner: "t3tools",
+  name: "t3code",
+};
+
+it("updates one Wayfinder map section without discarding canonical metadata", () => {
+  const body = [
+    "## Destination",
+    "",
+    "Old destination",
+    "",
+    "## Notes",
+    "",
+    "Keep this note",
+    "",
+    "<!-- t3-wayfinder-publication:key -->",
+  ].join("\n");
+
+  assert.strictEqual(
+    IssueTracker.replaceWayfinderMapSection(body, "destination", "New destination"),
+    [
+      "## Destination",
+      "",
+      "New destination",
+      "",
+      "## Notes",
+      "",
+      "Keep this note",
+      "",
+      "<!-- t3-wayfinder-publication:key -->",
+    ].join("\n"),
+  );
+});
+
+function layer(input: { readonly execute: GitHubCli.GitHubCli["Service"]["execute"] }) {
+  return IssueTracker.GitHubIssueTrackerLive.pipe(
+    Layer.provideMerge(Layer.mock(GitHubCli.GitHubCli)({ execute: input.execute })),
+    Layer.provideMerge(
+      Layer.mock(RepositoryIdentityResolver.RepositoryIdentityResolver)({
+        resolve: () => Effect.succeed(repository),
+      }),
+    ),
+  );
+}
+
+it.effect("updates a structured map field while preserving the publication marker", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    yield* tracker.updateWayfinderMapField({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 7,
+      field: "destination",
+      value: "New destination",
+    });
+
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(calls[0], [
+      "issue",
+      "view",
+      "7",
+      "--repo",
+      "t3tools/t3code",
+      "--json",
+      "body",
+    ]);
+    assert.ok(
+      calls[1]?.some((argument) => argument.includes("<!-- t3-wayfinder-publication:key -->")),
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              args[1] === "view"
+                ? JSON.stringify({
+                    body: "## Destination\n\nOld\n\n<!-- t3-wayfinder-publication:key -->",
+                  })
+                : "",
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("claims an open unassigned ticket and confirms canonical ownership", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  let issueReads = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claim = yield* tracker.claimIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
+    assert.ok(calls.some((args) => args.includes("--add-assignee")));
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            issueReads += 1;
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: issueReads === 1 ? [] : [{ login: "alice" }],
+                }),
+              ),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("reuses the viewer's canonical claim without assigning twice", () => {
+  let edits = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claim = yield* tracker.claimIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.deepStrictEqual(claim, { viewerLogin: "alice" });
+    assert.strictEqual(edits, 0);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            return Effect.succeed(
+              output(JSON.stringify({ state: "OPEN", assignees: [{ login: "alice" }] })),
+            );
+          }
+          if (args[0] === "issue" && args[1] === "edit") edits += 1;
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("loses a concurrent claim race without reporting ownership", () => {
+  let issueReads = 0;
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const result = yield* Effect.exit(
+      tracker.claimIssue({
+        cwd: "/project",
+        repository: project,
+        issueNumber: 43,
+      }),
+    );
+
+    assert.strictEqual(result._tag, "Failure");
+    assert.ok(
+      calls.some((args) => args.includes("--remove-assignee")),
+      "the losing claimant releases its own assignment",
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            issueReads += 1;
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: issueReads === 1 ? [] : [{ login: "bob" }, { login: "alice" }],
+                }),
+              ),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("releases only the viewer's canonical ticket claim", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    yield* tracker.releaseIssue({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+    });
+
+    assert.ok(calls.some((args) => args.includes("--remove-assignee")));
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            return Effect.succeed(
+              output(JSON.stringify({ state: "OPEN", assignees: [{ login: "alice" }] })),
+            );
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("claims separate frontier tickets independently", () => {
+  const assignees = new Map<number, string>();
+  const assignedIssues: number[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const claims = yield* Effect.all(
+      [43, 44].map((issueNumber) =>
+        tracker.claimIssue({
+          cwd: "/project",
+          repository: project,
+          issueNumber,
+        }),
+      ),
+      { concurrency: "unbounded" },
+    );
+
+    assert.deepStrictEqual(claims, [{ viewerLogin: "alice" }, { viewerLogin: "alice" }]);
+    assert.deepStrictEqual(
+      assignedIssues.sort((left, right) => left - right),
+      [43, 44],
+    );
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "api" && args[1] === "user") {
+            return Effect.succeed(output(JSON.stringify({ login: "alice" })));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            const issueNumber = Number(args[2]);
+            const assignee = assignees.get(issueNumber);
+            return Effect.succeed(
+              output(
+                JSON.stringify({
+                  state: "OPEN",
+                  assignees: assignee ? [{ login: assignee }] : [],
+                }),
+              ),
+            );
+          }
+          if (args[0] === "issue" && args[1] === "edit" && args.includes("--add-assignee")) {
+            const issueNumber = Number(args[2]);
+            assignees.set(issueNumber, "alice");
+            assignedIssues.push(issueNumber);
+          }
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("resolves a GitHub project and reads its native issue capabilities", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    assert.deepStrictEqual(project, {
+      owner: "t3tools",
+      name: "t3code",
+      canonicalKey: repository.canonicalKey,
+    });
+
+    const capabilities = yield* tracker.inspectCapabilities({
+      cwd: "/project",
+      repository: project!,
+    });
+    assert.deepStrictEqual(capabilities, {
+      supportsIssues: true,
+      canWriteIssues: true,
+      supportsChildRelationships: true,
+      supportsBlockingRelationships: true,
+      labels: ["wayfinder:map", "wayfinder:decision"],
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) =>
+          args[0] === "repo"
+            ? Effect.succeed(
+                output(
+                  JSON.stringify({
+                    hasIssuesEnabled: true,
+                    viewerPermission: "WRITE",
+                  }),
+                ),
+              )
+            : args[0] === "label"
+              ? Effect.succeed(
+                  output(
+                    JSON.stringify([{ name: "wayfinder:map" }, { name: "wayfinder:decision" }]),
+                  ),
+                )
+              : Effect.succeed(
+                  output(
+                    JSON.stringify({
+                      data: {
+                        __type: {
+                          fields: [
+                            { name: "addSubIssue" },
+                            { name: "removeSubIssue" },
+                            { name: "addBlockedBy" },
+                            { name: "removeBlockedBy" },
+                          ],
+                        },
+                      },
+                    }),
+                  ),
+                ),
+      }),
+    ),
+  ),
+);
+
+it.effect("resolves only an unambiguous GitHub issue number or URL", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const issue = yield* tracker.resolveIssue({
+      cwd: "/project",
+      repository: project!,
+      reference: "https://github.com/t3tools/t3code/issues/42",
+    });
+    assert.deepStrictEqual(issue, {
+      number: 42,
+      url: "https://github.com/t3tools/t3code/issues/42",
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () =>
+          Effect.succeed(
+            output(
+              JSON.stringify({ number: 42, url: "https://github.com/t3tools/t3code/issues/42" }),
+            ),
+          ),
+      }),
+    ),
+  ),
+);
+
+it.effect("creates publication artifacts through GitHub's canonical issue APIs", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+
+    yield* tracker.ensureLabel({
+      cwd: "/project",
+      repository: project,
+      name: "wayfinder:map",
+    });
+    const issue = yield* tracker.createIssue({
+      cwd: "/project",
+      repository: project,
+      key: "map",
+      idempotencyKey: "skill-run:publish:map",
+      title: "Choose a release plan",
+      body: "## Destination\n\nChoose a release plan",
+      labels: ["wayfinder:map"],
+    });
+    yield* tracker.addChild({
+      cwd: "/project",
+      repository: project,
+      parentNumber: issue.number,
+      childNumber: 43,
+    });
+    yield* tracker.addBlockedBy({
+      cwd: "/project",
+      repository: project,
+      blockedNumber: 44,
+      blockerNumber: 43,
+    });
+
+    assert.deepStrictEqual(issue, {
+      number: 42,
+      url: "https://github.com/t3tools/t3code/issues/42",
+    });
+    assert.deepStrictEqual(calls, [
+      [
+        "label",
+        "list",
+        "--repo",
+        "t3tools/t3code",
+        "--search",
+        "wayfinder:map",
+        "--json",
+        "name",
+        "--limit",
+        "100",
+      ],
+      [
+        "label",
+        "create",
+        "wayfinder:map",
+        "--repo",
+        "t3tools/t3code",
+        "--color",
+        "5319E7",
+        "--description",
+        "Managed by the Wayfinder Workbench",
+      ],
+      [
+        "issue",
+        "list",
+        "--repo",
+        "t3tools/t3code",
+        "--state",
+        "all",
+        "--search",
+        '"t3-wayfinder-publication:skill-run%3Apublish%3Amap" in:body',
+        "--json",
+        "number,url,body",
+        "--limit",
+        "10",
+      ],
+      [
+        "api",
+        "--method",
+        "POST",
+        "repos/t3tools/t3code/issues",
+        "-f",
+        "title=Choose a release plan",
+        "-f",
+        "body=## Destination\n\nChoose a release plan\n\n<!-- t3-wayfinder-publication:skill-run%3Apublish%3Amap -->",
+        "-f",
+        "labels[]=wayfinder:map",
+      ],
+      ["issue", "view", "42", "--repo", "t3tools/t3code", "--json", "id"],
+      ["issue", "view", "43", "--repo", "t3tools/t3code", "--json", "id"],
+      [
+        "api",
+        "graphql",
+        "-f",
+        "query=query($issueId:ID!){node(id:$issueId){... on Issue{subIssues(first:100){nodes{number}}}}}",
+        "-f",
+        "issueId=I_42",
+      ],
+      [
+        "api",
+        "graphql",
+        "-f",
+        "query=mutation($issueId:ID!,$subIssueId:ID!){addSubIssue(input:{issueId:$issueId,subIssueId:$subIssueId}){clientMutationId}}",
+        "-f",
+        "issueId=I_42",
+        "-f",
+        "subIssueId=I_43",
+      ],
+      ["issue", "view", "44", "--repo", "t3tools/t3code", "--json", "id"],
+      ["issue", "view", "43", "--repo", "t3tools/t3code", "--json", "id"],
+      [
+        "api",
+        "graphql",
+        "-f",
+        "query=query($issueId:ID!){node(id:$issueId){... on Issue{blockedBy(first:100){nodes{number}}}}}",
+        "-f",
+        "issueId=I_44",
+      ],
+      [
+        "api",
+        "graphql",
+        "-f",
+        "query=mutation($issueId:ID!,$blockingIssueId:ID!){addBlockedBy(input:{issueId:$issueId,blockingIssueId:$blockingIssueId}){clientMutationId}}",
+        "-f",
+        "issueId=I_44",
+        "-f",
+        "blockingIssueId=I_43",
+      ],
+    ]);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          if (args[0] === "label" && args[1] === "list") {
+            return Effect.succeed(output("[]"));
+          }
+          if (args[0] === "api" && args[1] === "--method") {
+            return Effect.succeed(output(JSON.stringify({ number: 42 })));
+          }
+          if (args[0] === "issue" && args[1] === "list") {
+            return Effect.succeed(output("[]"));
+          }
+          if (args[0] === "issue" && args[1] === "view") {
+            return Effect.succeed(output(JSON.stringify({ id: `I_${args[2]}` })));
+          }
+          return Effect.succeed(output("{}"));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("reuses an issue created before its publication receipt was persisted", () => {
+  let creates = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+    const issue = yield* tracker.createIssue({
+      cwd: "/project",
+      repository: project,
+      key: "map",
+      idempotencyKey: "skill-run:recovery:map",
+      title: "Recovered map",
+      body: "## Destination\n\nRecovered map",
+      labels: ["wayfinder:map"],
+    });
+
+    assert.deepStrictEqual(issue, {
+      number: 52,
+      url: "https://github.com/t3tools/t3code/issues/52",
+    });
+    assert.strictEqual(creates, 0);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          if (args[0] === "issue" && args[1] === "list") {
+            return Effect.succeed(
+              output(
+                JSON.stringify([
+                  {
+                    number: 52,
+                    url: "https://github.com/t3tools/t3code/issues/52",
+                    body: "Recovered\n\n<!-- t3-wayfinder-publication:skill-run%3Arecovery%3Amap -->",
+                  },
+                ]),
+              ),
+            );
+          }
+          if (args[0] === "api" && args[1] === "--method") creates += 1;
+          return Effect.succeed(output("{}"));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("loads an existing Wayfinder map with native children and dependencies", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: project!,
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+
+    assert.strictEqual(result.kind, "loaded");
+    if (result.kind !== "loaded") return;
+    assert.deepStrictEqual(result.map, {
+      canonicalReference: {
+        number: 42,
+        title: "Choose the release shape",
+        url: "https://github.com/t3tools/t3code/issues/42",
+        state: "open",
+      },
+      destination: "A release plan that is ready for specification.",
+      notes: "Use the research skill for external API facts.",
+      decisionsSoFar: [
+        {
+          title: "Choose a package format",
+          url: "https://github.com/t3tools/t3code/issues/40",
+          summary: "Use a deterministic archive.",
+        },
+        {
+          title: "Keep the first slice read-only.",
+          url: null,
+          summary: "",
+        },
+      ],
+      fogOfWar: ["Deployment ownership is not yet clear."],
+      outOfScope: ["Building the release is handled after specification."],
+      tickets: [
+        {
+          number: 43,
+          title: "Research hosting limits",
+          url: "https://github.com/t3tools/t3code/issues/43",
+          state: "open",
+          classification: "research",
+          claimedBy: null,
+          blockedBy: [],
+          blocks: [44],
+        },
+        {
+          number: 44,
+          title: "Choose the deployment target",
+          url: "https://github.com/t3tools/t3code/issues/44",
+          state: "open",
+          classification: "grilling",
+          claimedBy: null,
+          blockedBy: [43],
+          blocks: [],
+        },
+        {
+          number: 45,
+          title: "Record the package decision",
+          url: "https://github.com/t3tools/t3code/issues/45",
+          state: "closed",
+          classification: "task",
+          claimedBy: "maintainer",
+          blockedBy: [],
+          blocks: [],
+        },
+      ],
+      frontier: [43],
+      lastSynchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) =>
+          args[0] === "api"
+            ? Effect.succeed(
+                output(
+                  JSON.stringify({
+                    data: {
+                      repository: {
+                        issue: {
+                          number: 42,
+                          title: "Choose the release shape",
+                          url: "https://github.com/t3tools/t3code/issues/42",
+                          state: "OPEN",
+                          labels: {
+                            nodes: [{ name: "wayfinder:map" }],
+                            pageInfo: { hasNextPage: false },
+                          },
+                          body: [
+                            "## Destination",
+                            "",
+                            "A release plan that is ready for specification.",
+                            "",
+                            "## Notes",
+                            "",
+                            "Use the research skill for external API facts.",
+                            "",
+                            "## Decisions so far",
+                            "",
+                            "- [Choose a package format](https://github.com/t3tools/t3code/issues/40) — Use a deterministic archive.",
+                            "- Keep the first slice read-only.",
+                            "",
+                            "## Not yet specified",
+                            "",
+                            "- Deployment ownership is not yet clear.",
+                            "",
+                            "## Out of scope",
+                            "",
+                            "- Building the release is handled after specification.",
+                          ].join("\n"),
+                          subIssues: {
+                            nodes: [
+                              {
+                                number: 43,
+                                title: "Research hosting limits",
+                                url: "https://github.com/t3tools/t3code/issues/43",
+                                state: "OPEN",
+                                assignees: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:research" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [{ number: 44 }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                              {
+                                number: 44,
+                                title: "Choose the deployment target",
+                                url: "https://github.com/t3tools/t3code/issues/44",
+                                state: "OPEN",
+                                assignees: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:grilling" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [{ number: 43, state: "OPEN" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                              {
+                                number: 45,
+                                title: "Record the package decision",
+                                url: "https://github.com/t3tools/t3code/issues/45",
+                                state: "CLOSED",
+                                assignees: {
+                                  nodes: [{ login: "maintainer" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                labels: {
+                                  nodes: [{ name: "wayfinder:task" }],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blockedBy: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                                blocking: {
+                                  nodes: [],
+                                  pageInfo: { hasNextPage: false },
+                                },
+                              },
+                            ],
+                            pageInfo: { hasNextPage: false },
+                          },
+                        },
+                      },
+                    },
+                  }),
+                ),
+              )
+            : Effect.succeed(output("")),
+      }),
+    ),
+  ),
+);
+
+it.effect("rejects malformed and cross-repository issue references without invoking gh", () => {
+  let executions = 0;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    for (const reference of [
+      "42 and 43",
+      "https://github.com/other/repository/issues/42",
+      "https://example.com/t3tools/t3code/issues/42",
+    ]) {
+      assert.isNull(
+        yield* tracker.resolveIssue({ cwd: "/project", repository: project!, reference }),
+      );
+    }
+    assert.strictEqual(executions, 0);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () => {
+          executions += 1;
+          return Effect.succeed(output(""));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("rejects a truncated native relationship projection", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: {
+        canonicalKey: "github.com/t3tools/t3code",
+        owner: "t3tools",
+        name: "t3code",
+      },
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+    assert.strictEqual(result.kind, "truncated");
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () =>
+          Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Large map",
+                      url: "https://github.com/t3tools/t3code/issues/42",
+                      state: "OPEN",
+                      body: "",
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: true },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+      }),
+    ),
+  ),
+);
+
+it.effect("rejects a Wayfinder projection that exceeds the shared-shell payload budget", () =>
+  Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const result = yield* tracker.loadWayfinderMap({
+      cwd: "/project",
+      repository: {
+        canonicalKey: "github.com/t3tools/t3code",
+        owner: "t3tools",
+        name: "t3code",
+      },
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:00:00.000Z",
+    });
+    assert.strictEqual(result.kind, "over-budget");
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: () =>
+          Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Oversized map",
+                      url: "https://github.com/t3tools/t3code/issues/42",
+                      state: "OPEN",
+                      body: `## Notes\n\n${"x".repeat(300_000)}`,
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [],
+                        pageInfo: { hasNextPage: false },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          ),
+      }),
+    ),
+  ),
+);
+
+it.effect("uses lightweight revision evidence before reloading a visible map", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  const revision = `github:${JSON.stringify([
+    [
+      42,
+      "Release map",
+      "OPEN",
+      "2026-07-30T10:00:00.000Z",
+      2,
+      "2026-07-30T10:01:00.000Z",
+      ["wayfinder:map"],
+    ],
+    [
+      [
+        43,
+        "Research hosting",
+        "OPEN",
+        "2026-07-30T10:02:00.000Z",
+        1,
+        "2026-07-30T10:03:00.000Z",
+        ["alice"],
+        ["wayfinder:research"],
+        [[40, "CLOSED"]],
+        [44],
+      ],
+    ],
+  ])}`;
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = yield* tracker.resolveProjectRepository("/project");
+    const result = yield* tracker.reconcileWayfinderMap({
+      cwd: "/project",
+      repository: project!,
+      issueNumber: 42,
+      synchronizedAt: "2026-07-30T10:04:00.000Z",
+      currentRevision: revision,
+    });
+
+    assert.deepStrictEqual(result, { kind: "unchanged", revision });
+    assert.strictEqual(calls.length, 1);
+    assert.match(calls[0]?.join(" ") ?? "", /comments\(last:1\)/u);
+    assert.match(calls[0]?.join(" ") ?? "", /assignees/u);
+    assert.notMatch(calls[0]?.join(" ") ?? "", /\bbody\b/u);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              JSON.stringify({
+                data: {
+                  repository: {
+                    issue: {
+                      number: 42,
+                      title: "Release map",
+                      state: "OPEN",
+                      updatedAt: "2026-07-30T10:00:00.000Z",
+                      comments: {
+                        totalCount: 2,
+                        nodes: [{ updatedAt: "2026-07-30T10:01:00.000Z" }],
+                      },
+                      labels: {
+                        nodes: [{ name: "wayfinder:map" }],
+                        pageInfo: { hasNextPage: false },
+                      },
+                      subIssues: {
+                        nodes: [
+                          {
+                            number: 43,
+                            title: "Research hosting",
+                            state: "OPEN",
+                            updatedAt: "2026-07-30T10:02:00.000Z",
+                            comments: {
+                              totalCount: 1,
+                              nodes: [{ updatedAt: "2026-07-30T10:03:00.000Z" }],
+                            },
+                            assignees: {
+                              nodes: [{ login: "alice" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            labels: {
+                              nodes: [{ name: "wayfinder:research" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            blockedBy: {
+                              nodes: [{ number: 40, state: "CLOSED" }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                            blocking: {
+                              nodes: [{ number: 44 }],
+                              pageInfo: { hasNextPage: false },
+                            },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false },
+                      },
+                    },
+                  },
+                },
+              }),
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("preserves an existing publication label", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+
+    yield* tracker.ensureLabel({
+      cwd: "/project",
+      repository: project,
+      name: "wayfinder:map",
+    });
+
+    assert.deepStrictEqual(calls, [
+      [
+        "label",
+        "list",
+        "--repo",
+        "t3tools/t3code",
+        "--search",
+        "wayfinder:map",
+        "--json",
+        "name",
+        "--limit",
+        "100",
+      ],
+    ]);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(output(JSON.stringify([{ name: "wayfinder:map" }])));
+        },
+      }),
+    ),
+  );
+});
+
+it.effect("does not duplicate a canonically recorded resolution comment on resume", () => {
+  const calls: ReadonlyArray<string>[] = [];
+  return Effect.gen(function* () {
+    const tracker = yield* IssueTracker.IssueTracker;
+    const project = (yield* tracker.resolveProjectRepository("/project"))!;
+
+    yield* tracker.addIssueComment({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+      body: "Resolution: Keep the environment-owned path.",
+      idempotencyKey: "skill-run:43:resolution",
+    });
+    const confirmed = yield* tracker.hasIssueComment!({
+      cwd: "/project",
+      repository: project,
+      issueNumber: 43,
+      idempotencyKey: "skill-run:43:resolution",
+    });
+
+    assert.strictEqual(confirmed, true);
+    assert.strictEqual(calls.length, 2);
+    assert.deepStrictEqual(calls[0], [
+      "issue",
+      "view",
+      "43",
+      "--repo",
+      "t3tools/t3code",
+      "--json",
+      "comments",
+    ]);
+  }).pipe(
+    Effect.provide(
+      layer({
+        execute: ({ args }) => {
+          calls.push(args);
+          return Effect.succeed(
+            output(
+              JSON.stringify({
+                comments: [
+                  {
+                    body: [
+                      "Resolution: Keep the environment-owned path.",
+                      "",
+                      "<!-- t3-wayfinder-resolution:skill-run%3A43%3Aresolution -->",
+                    ].join("\n"),
+                  },
+                ],
+              }),
+            ),
+          );
+        },
+      }),
+    ),
+  );
+});

@@ -1,15 +1,27 @@
 import {
   EventId,
+  SkillRunId,
+  WayfinderMutationAction,
+  WorkstreamId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
 } from "@t3tools/contracts";
+import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
+import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import {
+  activeWayfinderDraftSkillRunId,
+  approvedWayfinderPublicationSkillRunId,
+  hasActiveWayfinderDraftAuthority,
+} from "../nativeSkills/WayfinderDraftMutationGuard.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
@@ -23,6 +35,94 @@ import {
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+const decodePublishedWayfinderPayload = Schema.decodeUnknownOption(
+  Schema.Struct({ skillRunId: SkillRunId }),
+);
+const decodeWayfinderMutationApprovalPayload = Schema.decodeUnknownOption(
+  Schema.Struct({
+    skillRunId: SkillRunId,
+    actionId: Schema.String,
+    action: WayfinderMutationAction,
+  }),
+);
+
+function sameWayfinderMutationAction(
+  left: WayfinderMutationAction,
+  right: WayfinderMutationAction,
+): boolean {
+  if (left.kind !== right.kind) return false;
+  switch (left.kind) {
+    case "update-map-field":
+      return right.kind === left.kind && left.field === right.field && left.value === right.value;
+    case "create-ticket":
+      return (
+        right.kind === left.kind &&
+        left.title === right.title &&
+        left.classification === right.classification
+      );
+    case "rename-ticket":
+      return (
+        right.kind === left.kind &&
+        left.ticketNumber === right.ticketNumber &&
+        left.title === right.title
+      );
+    case "classify-ticket":
+      return (
+        right.kind === left.kind &&
+        left.ticketNumber === right.ticketNumber &&
+        left.classification === right.classification
+      );
+    case "add-dependency":
+    case "remove-dependency":
+      return (
+        right.kind === left.kind &&
+        left.blockerNumber === right.blockerNumber &&
+        left.blockedNumber === right.blockedNumber
+      );
+    case "resolve-ticket":
+      return (
+        right.kind === left.kind &&
+        left.ticketNumber === right.ticketNumber &&
+        left.resolution === right.resolution
+      );
+    case "close-ticket":
+    case "reopen-ticket":
+    case "claim-ticket":
+    case "release-ticket":
+      return right.kind === left.kind && left.ticketNumber === right.ticketNumber;
+    case "complete-hitl-ticket":
+      return (
+        right.kind === left.kind &&
+        left.ticketNumber === right.ticketNumber &&
+        left.outcome === right.outcome &&
+        left.resolution === right.resolution &&
+        left.contextPointer === right.contextPointer &&
+        left.graduatedFog.length === right.graduatedFog.length &&
+        left.graduatedFog.every((ticket, ticketIndex) => {
+          const candidate = right.graduatedFog[ticketIndex];
+          return (
+            candidate !== undefined &&
+            ticket.key === candidate.key &&
+            ticket.fog === candidate.fog &&
+            ticket.title === candidate.title &&
+            ticket.classification === candidate.classification &&
+            ticket.blockedBy.length === candidate.blockedBy.length &&
+            ticket.blockedBy.every((blocker, blockerIndex) => {
+              const candidateBlocker = candidate.blockedBy[blockerIndex];
+              return (
+                candidateBlocker !== undefined &&
+                blocker.kind === candidateBlocker.kind &&
+                (blocker.kind === "ticket"
+                  ? candidateBlocker.kind === "ticket" &&
+                    blocker.ticketNumber === candidateBlocker.ticketNumber
+                  : candidateBlocker.kind === "graduated" && blocker.key === candidateBlocker.key)
+              );
+            })
+          );
+        })
+      );
+  }
+}
 
 // Session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -778,6 +878,125 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: `Proposed plan '${sourceProposedPlan?.planId}' belongs to thread '${sourceThread.id}' in a different project.`,
         });
       }
+      const requestedSkillInvocation = command.skillInvocation;
+      const handoffAction =
+        requestedSkillInvocation?.action?.id === "handoff-to-spec"
+          ? requestedSkillInvocation.action
+          : null;
+      let handoffWorkstreamId: WorkstreamId | null = null;
+      if (handoffAction !== null) {
+        if (
+          requestedSkillInvocation?.skill.name !== "to-spec" ||
+          requestedSkillInvocation.execution.mode !== "generic"
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder handoff requires generic to-spec execution.",
+          });
+        }
+        const wayfinderThread = yield* requireThread({
+          readModel,
+          command,
+          threadId: handoffAction.sourceThreadId,
+        });
+        const wayfinderInvocation = wayfinderThread.latestTurn?.skillInvocation;
+        if (wayfinderThread.projectId !== targetThread.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "to-spec provenance must reference a native Wayfinder map in the target project.",
+          });
+        }
+        const latestTurnHasSource =
+          wayfinderInvocation?.skillRunId === handoffAction.sourceSkillRunId &&
+          wayfinderInvocation.skill.name === "wayfinder" &&
+          wayfinderInvocation.execution.mode === "native" &&
+          wayfinderInvocation.wayfinderMap !== undefined;
+        if (!latestTurnHasSource) {
+          if (requestedSkillInvocation.reconnectWorkstreamId === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec provenance must resolve from a durable Wayfinder Skill Run.",
+            });
+          }
+          handoffWorkstreamId = requestedSkillInvocation.reconnectWorkstreamId;
+        } else {
+          const wayfinderMap = wayfinderInvocation.wayfinderMap;
+          const synchronizedAt =
+            wayfinderInvocation.wayfinderSynchronizedAt ?? wayfinderMap.lastSynchronizedAt;
+          if (
+            handoffAction.canonicalReference.number !== wayfinderMap.canonicalReference.number ||
+            handoffAction.canonicalReference.url !== wayfinderMap.canonicalReference.url ||
+            handoffAction.wayfinderSynchronizedAt !== synchronizedAt
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec provenance does not match the canonical synchronized Wayfinder map.",
+            });
+          }
+          const activeLinkedTicketNumbers = readModel.threads.flatMap((thread) => {
+            const invocation = thread.latestTurn?.skillInvocation;
+            const action = invocation?.action?.id === "work-ticket" ? invocation.action : null;
+            const active =
+              thread.latestTurn?.state === "running" ||
+              thread.session?.status === "starting" ||
+              thread.session?.status === "running";
+            return invocation?.workstreamId === wayfinderInvocation.workstreamId &&
+              action !== null &&
+              active
+              ? [action.ticketNumber]
+              : [];
+          });
+          const readiness = deriveWayfinderReadiness({
+            map: wayfinderMap,
+            synchronization: wayfinderInvocation.wayfinderSynchronization ?? null,
+            activeLinkedTicketNumbers,
+          });
+          if (!readiness.ready && !handoffAction.acknowledgedIncomplete) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Acknowledge the incomplete Wayfinder map before early to-spec handoff. Blockers: ${readiness.blockers.map((blocker) => blocker.kind).join(", ")}.`,
+            });
+          }
+          if (
+            requestedSkillInvocation.reconnectWorkstreamId !== undefined &&
+            requestedSkillInvocation.reconnectWorkstreamId !== wayfinderInvocation.workstreamId
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "to-spec reconnect Workstream does not match its Wayfinder provenance.",
+            });
+          }
+          handoffWorkstreamId = wayfinderInvocation.workstreamId;
+        }
+      }
+      const skillInvocationFields = requestedSkillInvocation
+        ? (({ reconnectWorkstreamId: _reconnectWorkstreamId, ...invocation }) => invocation)(
+            requestedSkillInvocation,
+          )
+        : undefined;
+      const skillInvocation = requestedSkillInvocation
+        ? {
+            ...skillInvocationFields,
+            workstreamId:
+              handoffWorkstreamId ??
+              requestedSkillInvocation.reconnectWorkstreamId ??
+              WorkstreamId.make(
+                `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
+              ),
+            skillRunId: SkillRunId.make(
+              `skill-run:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
+            ),
+            projectId: targetThread.projectId,
+            threadId: command.threadId,
+            createdAt: command.createdAt,
+            ...(command.skillInvocation.skill.name === "wayfinder" &&
+            command.skillInvocation.execution.mode === "native" &&
+            command.skillInvocation.action?.id === "new-map"
+              ? { wayfinderDraft: createEmptyWayfinderDraft(command.createdAt) }
+              : {}),
+          }
+        : undefined;
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -817,9 +1036,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(skillInvocation !== undefined ? { skillInvocation } : {}),
           createdAt: command.createdAt,
         },
       };
+      const draftStartedEvent =
+        skillInvocation?.wayfinderDraft !== undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  causationEventId: turnStartRequestedEvent.eventId,
+                  type: "thread.activity-appended",
+                  payload: {
+                    threadId: command.threadId,
+                    activity: {
+                      id: eventBase.eventId,
+                      tone: "info",
+                      kind: "wayfinder.draft.started",
+                      summary: "Unpublished Wayfinder draft started",
+                      payload: {
+                        workstreamId: skillInvocation.workstreamId,
+                        skillRunId: skillInvocation.skillRunId,
+                        canonical: false,
+                      },
+                      turnId: null,
+                      createdAt: command.createdAt,
+                    },
+                  },
+                }),
+              ),
+            )
+          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -858,7 +1111,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return [...lifecycleResetEvents, userMessageEvent, turnStartRequestedEvent];
+      return [
+        ...lifecycleResetEvents,
+        userMessageEvent,
+        turnStartRequestedEvent,
+        ...(draftStartedEvent ? [draftStartedEvent] : []),
+      ];
     }
 
     case "thread.turn.interrupt": {
@@ -884,11 +1142,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.approval.respond": {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       });
+      const acceptsExecutableAction =
+        command.decision === "accept" || command.decision === "acceptForSession";
+      if (acceptsExecutableAction && hasActiveWayfinderDraftAuthority(thread.activities)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Executable approvals are disabled while the Wayfinder map is an unpublished draft, ensuring GitHub remains unchanged.",
+        });
+      }
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -930,6 +1197,333 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           requestId: command.requestId,
           answers: command.answers,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.wayfinder.publish": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (activeWayfinderDraftSkillRunId(thread.activities) !== command.skillRunId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder publication requires the matching active unpublished draft.",
+        });
+      }
+      if (
+        thread.runtimeMode === "approval-required" &&
+        command.confirmed &&
+        approvedWayfinderPublicationSkillRunId(thread.activities) !== command.skillRunId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder publication confirmation requires a pending server approval.",
+        });
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-publication-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          runtimeMode: thread.runtimeMode,
+          confirmed: command.confirmed,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.wayfinder.mutate": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const actionId = command.actionId ?? command.commandId;
+      const invocation = thread.latestTurn?.skillInvocation;
+      const map =
+        invocation?.skillRunId === command.skillRunId ? invocation.wayfinderMap : undefined;
+      const published = thread.activities.some((activity) => {
+        if (activity.kind !== "wayfinder.draft.published") return false;
+        const payload = decodePublishedWayfinderPayload(activity.payload);
+        return Option.isSome(payload) && payload.value.skillRunId === command.skillRunId;
+      });
+      const workTicketAction = invocation?.action?.id === "work-ticket" ? invocation.action : null;
+      if (!published && workTicketAction === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder editing requires a published canonical map.",
+        });
+      }
+      if (
+        workTicketAction !== null &&
+        command.action.kind !== "complete-hitl-ticket" &&
+        !(
+          command.action.kind === "release-ticket" &&
+          command.action.ticketNumber === workTicketAction.ticketNumber
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `A linked HITL thread can work only its assigned ticket #${workTicketAction.ticketNumber}.`,
+        });
+      }
+      if (command.action.kind === "complete-hitl-ticket") {
+        if (workTicketAction === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder HITL completion requires a dedicated linked ticket thread.",
+          });
+        }
+        if (command.action.ticketNumber !== workTicketAction.ticketNumber) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `This linked thread can resolve only its assigned ticket #${workTicketAction.ticketNumber}.`,
+          });
+        }
+        const assignedTicket = map?.tickets.find(
+          (ticket) => ticket.number === workTicketAction.ticketNumber,
+        );
+        if (assignedTicket?.state !== "open" || assignedTicket.claimedBy === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder HITL completion requires the assigned canonical ticket claim.",
+          });
+        }
+        if (command.action.outcome === "out-of-scope" && command.action.graduatedFog.length > 0) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "An out-of-scope ticket cannot graduate new route decisions.",
+          });
+        }
+        if (
+          new Set(command.action.graduatedFog.map((graduated) => graduated.key)).size !==
+          command.action.graduatedFog.length
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Each graduated fog ticket requires a unique key.",
+          });
+        }
+        if (
+          command.action.graduatedFog.some((graduated) => !map?.fogOfWar.includes(graduated.fog))
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Graduated fog must exist in the synchronized canonical map.",
+          });
+        }
+        if (hasOpenBlockingRequest(thread)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Resolve the current user decision before completing this HITL ticket.",
+          });
+        }
+      }
+      if (command.action.kind === "claim-ticket") {
+        const action = command.action;
+        const ticket = map?.tickets.find((candidate) => candidate.number === action.ticketNumber);
+        const recoveringClaim =
+          invocation?.wayfinderMutation?.status === "failed" &&
+          invocation.wayfinderMutation.action.kind === "claim-ticket" &&
+          invocation.wayfinderMutation.action.ticketNumber === action.ticketNumber;
+        if (!ticket) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder claims require a ticket in the synchronized canonical map.",
+          });
+        }
+        if (ticket.state !== "open") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} must be open before it can be claimed.`,
+          });
+        }
+        if (ticket.claimedBy !== null && !recoveringClaim) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} is already claimed by ${ticket.claimedBy}.`,
+          });
+        }
+        if (!recoveringClaim && !map?.frontier.includes(ticket.number)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Wayfinder ticket #${ticket.number} is blocked and is not on the runnable frontier.`,
+          });
+        }
+      }
+      let approvalRequested = false;
+      let approvalResolved = false;
+      for (const activity of thread.activities) {
+        if (
+          activity.kind !== "wayfinder.mutation.approval-requested" &&
+          activity.kind !== "wayfinder.mutation.approval-resolved"
+        ) {
+          continue;
+        }
+        const payload = decodeWayfinderMutationApprovalPayload(activity.payload);
+        const matches =
+          Option.isSome(payload) &&
+          payload.value.skillRunId === command.skillRunId &&
+          payload.value.actionId === actionId &&
+          sameWayfinderMutationAction(payload.value.action, command.action);
+        if (matches) {
+          approvalRequested ||= activity.kind === "wayfinder.mutation.approval-requested";
+          approvalResolved ||= activity.kind === "wayfinder.mutation.approval-resolved";
+        }
+      }
+      const pendingApproval = approvalRequested && !approvalResolved;
+      if (thread.runtimeMode === "approval-required" && command.confirmed && !pendingApproval) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder mutation confirmation requires a pending server approval.",
+        });
+      }
+      const requested: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-mutation-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          actionId,
+          action: command.action,
+          runtimeMode: thread.runtimeMode,
+          confirmed: command.confirmed,
+          createdAt: command.createdAt,
+        },
+      };
+      if (thread.runtimeMode !== "approval-required" || !command.confirmed) return requested;
+      return [
+        requested,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-mutation-approval-resolved:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.mutation.approval-resolved",
+              summary: "Wayfinder change confirmed",
+              payload: {
+                skillRunId: command.skillRunId,
+                actionId,
+                action: command.action,
+              },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
+    }
+
+    case "thread.wayfinder.reconcile": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-reconciliation-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          reason: command.reason,
+          ...(command.expectedRevision !== undefined
+            ? { expectedRevision: command.expectedRevision }
+            : {}),
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.wayfinder.research": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const invocation = thread.latestTurn?.skillInvocation;
+      if (
+        invocation?.skillRunId !== command.skillRunId ||
+        invocation.wayfinderMap === undefined ||
+        invocation.action?.id === "work-ticket"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Wayfinder research controls require the canonical shared map run.",
+        });
+      }
+      const action = command.action;
+      if ("ticketNumber" in action) {
+        const ticket = invocation.wayfinderMap.tickets.find(
+          (candidate) => candidate.number === action.ticketNumber,
+        );
+        if (!ticket) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Wayfinder research controls require a ticket in the canonical map.",
+          });
+        }
+        if (action.kind === "start-ticket") {
+          if (ticket.state !== "open") {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder research ticket #${ticket.number} must be open.`,
+            });
+          }
+          if (ticket.classification !== "research") {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder ticket #${ticket.number} is not agent-only research.`,
+            });
+          }
+          if (
+            ticket.claimedBy !== null ||
+            !invocation.wayfinderMap.frontier.includes(ticket.number)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Wayfinder research ticket #${ticket.number} must be unblocked and unclaimed.`,
+            });
+          }
+        }
+      }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-research-requested",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          action: command.action,
+          launchMode: command.launchMode ?? "manual",
           createdAt: command.createdAt,
         },
       };
@@ -1204,6 +1798,172 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, activityAppendedEvent];
+    }
+
+    case "thread.wayfinder.publication.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-publication-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          publication: command.publication,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+      if (command.publication.status === "awaiting-approval") {
+        const approvalRequested: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-publication-approval:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.publication.approval-requested",
+              summary: "Wayfinder publication needs confirmation",
+              payload: { skillRunId: command.skillRunId },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        };
+        return [updated, approvalRequested];
+      }
+      if (command.publication.status !== "synchronized") return updated;
+      const published: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.activity-appended",
+        payload: {
+          threadId: command.threadId,
+          activity: {
+            id: EventId.make(`wayfinder-publication:${command.commandId}`),
+            tone: "info",
+            kind: "wayfinder.draft.published",
+            summary: "Wayfinder draft published and reconciled",
+            payload: {
+              skillRunId: command.skillRunId,
+              canonicalReference: command.wayfinderMap?.canonicalReference,
+            },
+            turnId: null,
+            createdAt: command.createdAt,
+          },
+        },
+      };
+      return [updated, published];
+    }
+
+    case "thread.wayfinder.mutation.update": {
+      yield* requireThread({ readModel, command, threadId: command.threadId });
+      const updated: Omit<OrchestrationEvent, "sequence"> = {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-mutation-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          mutation: command.mutation,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+      if (command.mutation.status !== "awaiting-approval") return updated;
+      return [
+        updated,
+        {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`wayfinder-mutation-approval:${command.commandId}`),
+              tone: "info",
+              kind: "wayfinder.mutation.approval-requested",
+              summary: "Wayfinder change needs confirmation",
+              payload: {
+                skillRunId: command.skillRunId,
+                actionId: command.mutation.actionId,
+                action: command.mutation.action,
+              },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        },
+      ];
+    }
+
+    case "thread.wayfinder.reconciliation.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-reconciliation-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          synchronization: command.synchronization,
+          ...(command.wayfinderMap !== undefined ? { wayfinderMap: command.wayfinderMap } : {}),
+        },
+      };
+    }
+
+    case "thread.wayfinder.research.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.wayfinder-research-updated",
+        payload: {
+          threadId: command.threadId,
+          skillRunId: command.skillRunId,
+          research: command.research,
+        },
+      };
     }
 
     default: {

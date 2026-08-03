@@ -14,6 +14,8 @@ import {
   OrchestrationProposedPlanId,
   OrchestrationCheckpointFile,
   OrchestrationCheckpointStatus,
+  SkillInvocation,
+  SkillRunId,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -39,6 +41,7 @@ export const ProjectionTurn = Schema.Struct({
   pendingMessageId: Schema.NullOr(MessageId),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  skillInvocation: Schema.NullOr(SkillInvocation),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
@@ -57,6 +60,7 @@ export const ProjectionTurnById = Schema.Struct({
   pendingMessageId: Schema.NullOr(MessageId),
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  skillInvocation: Schema.NullOr(SkillInvocation),
   assistantMessageId: Schema.NullOr(MessageId),
   state: ProjectionTurnState,
   requestedAt: IsoDateTime,
@@ -74,6 +78,7 @@ export const ProjectionPendingTurnStart = Schema.Struct({
   messageId: MessageId,
   sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
   sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
+  skillInvocation: Schema.NullOr(SkillInvocation),
   requestedAt: IsoDateTime,
 });
 export type ProjectionPendingTurnStart = typeof ProjectionPendingTurnStart.Type;
@@ -105,6 +110,13 @@ export const ClearCheckpointTurnConflictInput = Schema.Struct({
   checkpointTurnCount: NonNegativeInt,
 });
 export type ClearCheckpointTurnConflictInput = typeof ClearCheckpointTurnConflictInput.Type;
+
+export const UpdateProjectionSkillInvocationInput = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  skillInvocation: SkillInvocation,
+});
+export type UpdateProjectionSkillInvocationInput = typeof UpdateProjectionSkillInvocationInput.Type;
 
 export interface ProjectionTurnRepositoryShape {
   /**
@@ -154,6 +166,10 @@ export interface ProjectionTurnRepositoryShape {
    */
   readonly clearCheckpointTurnConflict: (
     input: ClearCheckpointTurnConflictInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  readonly updateSkillInvocation: (
+    input: UpdateProjectionSkillInvocationInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 
   /**

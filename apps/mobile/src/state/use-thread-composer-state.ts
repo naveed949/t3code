@@ -11,6 +11,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { resolveNativeSkillRunInvocation } from "@t3tools/client-runtime/operations/native-skill-runs";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
@@ -41,6 +42,7 @@ import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
+import { useEnvironmentServerConfig } from "./entities";
 
 export function appendReviewCommentToDraft(input: {
   readonly environmentId: EnvironmentId;
@@ -76,6 +78,7 @@ export function useThreadDraftForThread(input: {
 export function useThreadComposerState() {
   const { selectedThread: selectedThreadShell } = useThreadSelection();
   const selectedThreadDetail = useSelectedThreadDetail();
+  const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null);
   const composerDrafts = useAtomValue(composerDraftsAtom);
   const queuedMessagesByThreadKey = useThreadOutboxMessages();
 
@@ -149,6 +152,22 @@ export function useThreadComposerState() {
 
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
+    const selectedModelSelection = draft.modelSelection ?? thread.modelSelection;
+    const skills =
+      serverConfig?.providers.find(
+        (provider) => provider.instanceId === selectedModelSelection.instanceId,
+      )?.skills ?? [];
+    const skillInvocationRequest = resolveNativeSkillRunInvocation({
+      kind: "leading-token",
+      text,
+      skills,
+    });
+    if (skillInvocationRequest && "kind" in skillInvocationRequest) {
+      setPendingConnectionError(
+        "Choose one continuation issue number or GitHub issue URL before sending.",
+      );
+      return null;
+    }
     // Enqueue publishes the queued atom synchronously (the durable write
     // happens behind it), so clearing the draft here gives send feedback on
     // the tap frame instead of after file I/O. If the write fails the message
@@ -161,9 +180,10 @@ export function useThreadComposerState() {
       commandId: CommandId.make(metadata.commandId),
       text,
       attachments,
-      modelSelection: draft.modelSelection ?? thread.modelSelection,
+      modelSelection: selectedModelSelection,
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: draft.interactionMode ?? thread.interactionMode,
+      ...(skillInvocationRequest ? { skillInvocationRequest } : {}),
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey);
@@ -179,7 +199,7 @@ export function useThreadComposerState() {
       );
     });
     return messageId;
-  }, [selectedThreadDetail, selectedThreadShell]);
+  }, [selectedThreadDetail, selectedThreadShell, serverConfig]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {

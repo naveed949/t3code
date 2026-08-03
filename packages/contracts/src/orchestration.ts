@@ -20,8 +20,21 @@ import {
   TrimmedNonEmptyString,
   TrimmedString,
   TurnId,
+  WorkstreamId,
+  SkillRunId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  OptionalWayfinderDraft,
+  OptionalWayfinderMutation,
+  OptionalWayfinderResearchState,
+  OptionalWayfinderPublication,
+  WayfinderMutation,
+  WayfinderMutationAction,
+  WayfinderResearchAction,
+  WayfinderResearchState,
+  WayfinderPublication,
+} from "./nativeSkills.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
@@ -179,6 +192,167 @@ export const ChatAttachment = Schema.Union([ChatImageAttachment]);
 export type ChatAttachment = typeof ChatAttachment.Type;
 const UploadChatAttachment = Schema.Union([UploadChatImageAttachment]);
 export type UploadChatAttachment = typeof UploadChatAttachment.Type;
+
+export const SkillInvocationAction = Schema.Union([
+  Schema.Struct({ id: Schema.Literal("new-map") }),
+  Schema.Struct({ id: Schema.Literal("continue-map"), reference: TrimmedNonEmptyString }),
+  Schema.Struct({
+    id: Schema.Literal("handoff-to-spec"),
+    sourceSkillRunId: SkillRunId,
+    sourceThreadId: ThreadId,
+    canonicalReference: Schema.Struct({
+      number: Schema.Int.check(Schema.isGreaterThan(0)),
+      url: TrimmedNonEmptyString,
+    }),
+    wayfinderSynchronizedAt: IsoDateTime,
+    acknowledgedIncomplete: Schema.Boolean,
+  }),
+  Schema.Struct({
+    id: Schema.Literal("work-ticket"),
+    ticketNumber: Schema.Int.check(Schema.isGreaterThan(0)),
+    sourceSkillRunId: SkillRunId,
+    sourceThreadId: Schema.optional(ThreadId),
+  }),
+]);
+export type SkillInvocationAction = typeof SkillInvocationAction.Type;
+
+export const SkillInvocationRequest = Schema.Struct({
+  skillName: TrimmedNonEmptyString,
+  skillPath: TrimmedNonEmptyString,
+  arguments: Schema.optional(TrimmedNonEmptyString),
+  action: Schema.optional(SkillInvocationAction),
+  executionPreference: Schema.optional(Schema.Literal("generic")),
+});
+export type SkillInvocationRequest = typeof SkillInvocationRequest.Type;
+
+export const PinnedSkillIdentity = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  path: TrimmedNonEmptyString,
+  contentDigest: TrimmedNonEmptyString.check(Schema.isPattern(/^sha256:[a-f0-9]{64}$/)),
+});
+export type PinnedSkillIdentity = typeof PinnedSkillIdentity.Type;
+
+export const NativeSkillExecution = Schema.Struct({
+  mode: Schema.Literal("native"),
+  adapterId: TrimmedNonEmptyString,
+  adapterVersion: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+});
+export type NativeSkillExecution = typeof NativeSkillExecution.Type;
+
+export const GenericSkillExecution = Schema.Struct({
+  mode: Schema.Literal("generic"),
+  reason: Schema.Literals([
+    "unsupported-provider",
+    "unsupported-digest",
+    "unregistered-skill",
+    "user-selected-generic",
+  ]),
+});
+export type GenericSkillExecution = typeof GenericSkillExecution.Type;
+
+export const SkillExecution = Schema.Union([NativeSkillExecution, GenericSkillExecution]);
+export type SkillExecution = typeof SkillExecution.Type;
+
+export const WayfinderTicketState = Schema.Literals(["open", "closed"]);
+export type WayfinderTicketState = typeof WayfinderTicketState.Type;
+
+export const WayfinderTicketClassification = Schema.Literals([
+  "research",
+  "prototype",
+  "grilling",
+  "task",
+  "out-of-scope",
+  "unknown",
+]);
+export type WayfinderTicketClassification = typeof WayfinderTicketClassification.Type;
+
+export const WayfinderReconcileReason = Schema.Literals([
+  "open",
+  "reconnect",
+  "focus",
+  "manual",
+  "mutation",
+  "poll",
+  "resume",
+]);
+export type WayfinderReconcileReason = typeof WayfinderReconcileReason.Type;
+
+export const WayfinderSynchronizationState = Schema.Struct({
+  status: Schema.Literals(["synchronizing", "healthy", "unavailable", "conflict"]),
+  reason: WayfinderReconcileReason,
+  lastAttemptedAt: IsoDateTime,
+  lastSuccessfulAt: Schema.optional(IsoDateTime),
+  canMutate: Schema.Boolean,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  actualRevision: Schema.optional(TrimmedNonEmptyString),
+  message: Schema.optional(TrimmedNonEmptyString),
+});
+export type WayfinderSynchronizationState = typeof WayfinderSynchronizationState.Type;
+
+export const WayfinderMapProjection = Schema.Struct({
+  canonicalReference: Schema.Struct({
+    number: Schema.Int.check(Schema.isGreaterThan(0)),
+    title: TrimmedNonEmptyString,
+    url: TrimmedNonEmptyString,
+    state: WayfinderTicketState,
+    commentCount: Schema.optional(NonNegativeInt),
+  }),
+  revision: Schema.optional(TrimmedNonEmptyString),
+  destination: Schema.String,
+  notes: Schema.String,
+  decisionsSoFar: Schema.Array(
+    Schema.Struct({
+      title: TrimmedNonEmptyString,
+      url: Schema.NullOr(TrimmedNonEmptyString),
+      summary: Schema.String,
+    }),
+  ),
+  fogOfWar: Schema.Array(TrimmedNonEmptyString),
+  outOfScope: Schema.Array(TrimmedNonEmptyString),
+  tickets: Schema.Array(
+    Schema.Struct({
+      number: Schema.Int.check(Schema.isGreaterThan(0)),
+      title: TrimmedNonEmptyString,
+      url: TrimmedNonEmptyString,
+      state: WayfinderTicketState,
+      classification: WayfinderTicketClassification,
+      claimedBy: Schema.NullOr(TrimmedNonEmptyString),
+      blockedBy: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+      blocks: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+      commentCount: Schema.optional(NonNegativeInt),
+      lastCommentedAt: Schema.optional(IsoDateTime),
+    }),
+  ),
+  frontier: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
+  lastSynchronizedAt: IsoDateTime,
+});
+export type WayfinderMapProjection = typeof WayfinderMapProjection.Type;
+
+export const ResolvedSkillInvocation = Schema.Struct({
+  skill: PinnedSkillIdentity,
+  arguments: Schema.optional(TrimmedNonEmptyString),
+  action: Schema.optional(SkillInvocationAction),
+  execution: SkillExecution,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  wayfinderSynchronizedAt: Schema.optional(IsoDateTime),
+  wayfinderSynchronization: Schema.optional(WayfinderSynchronizationState),
+  reconnectWorkstreamId: Schema.optional(WorkstreamId),
+});
+export type ResolvedSkillInvocation = typeof ResolvedSkillInvocation.Type;
+
+export const SkillInvocation = Schema.Struct({
+  ...ResolvedSkillInvocation.fields,
+  workstreamId: WorkstreamId,
+  skillRunId: SkillRunId,
+  projectId: ProjectId,
+  threadId: ThreadId,
+  createdAt: IsoDateTime,
+  wayfinderDraft: OptionalWayfinderDraft,
+  wayfinderPublication: OptionalWayfinderPublication,
+  wayfinderMutation: OptionalWayfinderMutation,
+  wayfinderResearch: OptionalWayfinderResearchState,
+});
+export type SkillInvocation = typeof SkillInvocation.Type;
 
 export const ProjectScriptIcon = Schema.Literals([
   "play",
@@ -340,6 +514,7 @@ export const OrchestrationLatestTurn = Schema.Struct({
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(SkillInvocation),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
@@ -441,6 +616,7 @@ export const OrchestrationShellSnapshot = Schema.Struct({
   snapshotSequence: NonNegativeInt,
   projects: Schema.Array(OrchestrationProjectShell),
   threads: Schema.Array(OrchestrationThreadShell),
+  skillRuns: Schema.optional(Schema.Array(SkillInvocation)),
   updatedAt: IsoDateTime,
 });
 export type OrchestrationShellSnapshot = typeof OrchestrationShellSnapshot.Type;
@@ -460,6 +636,7 @@ export const OrchestrationShellStreamEvent = Schema.Union([
     kind: Schema.Literal("thread-upserted"),
     sequence: NonNegativeInt,
     thread: OrchestrationThreadShell,
+    skillRuns: Schema.optional(Schema.Array(SkillInvocation)),
   }),
   Schema.Struct({
     kind: Schema.Literal("thread-removed"),
@@ -700,6 +877,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(ResolvedSkillInvocation),
   createdAt: IsoDateTime,
 });
 
@@ -719,6 +897,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocationRequest: Schema.optional(SkillInvocationRequest),
   createdAt: IsoDateTime,
 });
 
@@ -745,6 +924,46 @@ const ThreadUserInputRespondCommand = Schema.Struct({
   threadId: ThreadId,
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderPublishCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.publish"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderMutateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.mutate"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  actionId: Schema.optional(TrimmedNonEmptyString),
+  action: WayfinderMutationAction,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  reason: WayfinderReconcileReason,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderResearchCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.research"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  action: WayfinderResearchAction,
+  launchMode: Schema.optional(Schema.Literal("automatic")),
   createdAt: IsoDateTime,
 });
 
@@ -782,6 +1001,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadWayfinderPublishCommand,
+  ThreadWayfinderMutateCommand,
+  ThreadWayfinderReconcileCommand,
+  ThreadWayfinderResearchCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -807,6 +1030,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadWayfinderPublishCommand,
+  ThreadWayfinderMutateCommand,
+  ThreadWayfinderReconcileCommand,
+  ThreadWayfinderResearchCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -877,6 +1104,45 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWayfinderPublicationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.publication.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  publication: WayfinderPublication,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderMutationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.mutation.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  mutation: WayfinderMutation,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderReconciliationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.reconciliation.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  synchronization: WayfinderSynchronizationState,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWayfinderResearchUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.wayfinder.research.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  research: WayfinderResearchState,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTitleRegenerationCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.title.regeneration.complete"),
   commandId: CommandId,
@@ -893,6 +1159,10 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadWayfinderPublicationUpdateCommand,
+  ThreadWayfinderMutationUpdateCommand,
+  ThreadWayfinderReconciliationUpdateCommand,
+  ThreadWayfinderResearchUpdateCommand,
   ThreadTitleRegenerationCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -923,6 +1193,14 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.turn-interrupt-requested",
   "thread.approval-response-requested",
   "thread.user-input-response-requested",
+  "thread.wayfinder-publication-requested",
+  "thread.wayfinder-publication-updated",
+  "thread.wayfinder-mutation-requested",
+  "thread.wayfinder-mutation-updated",
+  "thread.wayfinder-reconciliation-requested",
+  "thread.wayfinder-reconciliation-updated",
+  "thread.wayfinder-research-requested",
+  "thread.wayfinder-research-updated",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1075,6 +1353,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  skillInvocation: Schema.optional(SkillInvocation),
   createdAt: IsoDateTime,
 });
 
@@ -1096,6 +1375,67 @@ const ThreadUserInputResponseRequestedPayload = Schema.Struct({
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
   createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderPublicationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  runtimeMode: RuntimeMode,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderPublicationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  publication: WayfinderPublication,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+});
+
+export const ThreadWayfinderMutationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  actionId: TrimmedNonEmptyString,
+  action: WayfinderMutationAction,
+  runtimeMode: RuntimeMode,
+  confirmed: Schema.Boolean,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderMutationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  mutation: WayfinderMutation,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+});
+
+export const ThreadWayfinderReconciliationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  reason: WayfinderReconcileReason,
+  expectedRevision: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderReconciliationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  synchronization: WayfinderSynchronizationState,
+  wayfinderMap: Schema.optional(WayfinderMapProjection),
+});
+
+export const ThreadWayfinderResearchRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  action: WayfinderResearchAction,
+  launchMode: Schema.Literals(["automatic", "manual"]),
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWayfinderResearchUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  research: WayfinderResearchState,
 });
 
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
@@ -1256,6 +1596,46 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.user-input-response-requested"),
     payload: ThreadUserInputResponseRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-publication-requested"),
+    payload: ThreadWayfinderPublicationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-publication-updated"),
+    payload: ThreadWayfinderPublicationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-mutation-requested"),
+    payload: ThreadWayfinderMutationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-mutation-updated"),
+    payload: ThreadWayfinderMutationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-reconciliation-requested"),
+    payload: ThreadWayfinderReconciliationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-reconciliation-updated"),
+    payload: ThreadWayfinderReconciliationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-research-requested"),
+    payload: ThreadWayfinderResearchRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.wayfinder-research-updated"),
+    payload: ThreadWayfinderResearchUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1465,6 +1845,14 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    preflightBlockers: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          check: TrimmedNonEmptyString,
+          remediation: TrimmedNonEmptyString,
+        }),
+      ),
+    ),
   },
 ) {}
 

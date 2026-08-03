@@ -1,6 +1,15 @@
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  ClipboardList,
+  FileDiff,
+  Files,
+  Globe2,
+  MapIcon,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -44,9 +53,11 @@ interface RightPanelTabsProps {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddWayfinder: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  wayfinderAvailable: boolean;
   children: ReactNode;
 }
 
@@ -91,9 +102,11 @@ function RightPanelEmptyState(props: {
   onAddTerminal: () => void;
   onAddDiff: () => void;
   onAddFiles: () => void;
+  onAddWayfinder: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  wayfinderAvailable: boolean;
 }) {
   const actions = [
     {
@@ -127,6 +140,14 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
+    },
+    {
+      label: "Wayfinder",
+      description: "Inspect the synchronized decision map.",
+      icon: MapIcon,
+      available: props.wayfinderAvailable,
+      disabledReason: "No Wayfinder map is linked to this thread.",
+      onClick: props.onAddWayfinder,
     },
   ] as const;
 
@@ -205,6 +226,8 @@ function surfaceTitle(
       );
     case "plan":
       return "Plan";
+    case "wayfinder":
+      return "Wayfinder";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -266,6 +289,8 @@ function SurfaceIcon({
       return <TerminalSquare className="size-3.5 shrink-0" />;
     case "plan":
       return <ClipboardList className="size-3.5 shrink-0" />;
+    case "wayfinder":
+      return <MapIcon className="size-3.5 shrink-0" />;
   }
 }
 
@@ -471,6 +496,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <FileDiff />
                     Diff
                   </SurfaceMenuItem>
+                  <SurfaceMenuItem
+                    available={props.wayfinderAvailable}
+                    disabledReason="No Wayfinder map is linked to this thread."
+                    onClick={props.onAddWayfinder}
+                  >
+                    <MapIcon />
+                    Wayfinder
+                  </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -485,9 +518,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddTerminal={props.onAddTerminal}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
+            onAddWayfinder={props.onAddWayfinder}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            wayfinderAvailable={props.wayfinderAvailable}
           />
         ) : (
           props.children

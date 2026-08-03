@@ -40,6 +40,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { renderNativeWayfinderArguments } from "../../nativeSkills/WayfinderCompatibility.ts";
 
 import {
   ProviderAdapterRequestError,
@@ -1544,9 +1545,26 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       input.modelSelection?.instanceId === boundInstanceId
         ? getCodexServiceTierOptionValue(input.modelSelection)
         : undefined;
+    const nativeSkillInvocation =
+      input.skillInvocation?.execution.mode === "native" ? input.skillInvocation : undefined;
+    const nativeSkillArguments = nativeSkillInvocation
+      ? renderNativeWayfinderArguments(nativeSkillInvocation)
+      : undefined;
     return yield* session.runtime
       .sendTurn({
-        ...(input.input !== undefined ? { input: input.input } : {}),
+        ...(nativeSkillArguments !== undefined
+          ? { input: nativeSkillArguments }
+          : nativeSkillInvocation === undefined && input.input !== undefined
+            ? { input: input.input }
+            : {}),
+        ...(nativeSkillInvocation
+          ? {
+              skill: {
+                name: nativeSkillInvocation.skill.name,
+                path: nativeSkillInvocation.skill.path,
+              },
+            }
+          : {}),
         ...(input.modelSelection?.instanceId === boundInstanceId
           ? { model: input.modelSelection.model }
           : {}),

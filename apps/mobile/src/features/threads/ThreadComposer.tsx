@@ -69,6 +69,7 @@ import {
 } from "../../lib/providerOptions";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
+import { WayfinderLaunchChooser } from "./WayfinderLaunchChooser";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -725,6 +726,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             onPress={props.onReconnectEnvironment}
           />
         ) : null}
+
+        <WayfinderLaunchChooser
+          prompt={props.draftMessage}
+          onChangePrompt={props.onChangeDraftMessage}
+        />
 
         <ComposerSurface
           isDarkMode={isDarkMode}

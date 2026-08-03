@@ -9,6 +9,7 @@ This is a living glossary for T3 Code. It explains what common terms mean in thi
 - [Project and workspace](#project-and-workspace)
 - [Thread timeline](#thread-timeline)
 - [Orchestration](#orchestration)
+- [Skill runs](#skill-runs)
 - [Provider runtime](#provider-runtime)
 - [Checkpointing](#checkpointing)
 
@@ -79,6 +80,126 @@ The current materialized view of orchestration state. In [the contracts][1], it 
 #### Reactor
 
 A side-effecting service that handles follow-up work after events or runtime signals. Examples include [CheckpointReactor.ts][6], [ProviderCommandReactor.ts][12], and [ProviderRuntimeIngestion.ts][5].
+
+### Skill runs
+
+#### Workstream
+
+A project-scoped identity that groups related skill work. The first explicit skill invocation creates
+the Workstream identifier in [decider.ts][8]; clients derive its current representation from the
+shared project Skill Run list and each run's linked thread.
+
+#### Skill Run
+
+One execution of a pinned skill within a Workstream. Its durable invocation record includes the skill
+name, installed path, content digest, provider execution mode, owning project and thread, and creation
+time. Native compatibility is decided by [NativeSkillAdapterRegistry.ts][25].
+
+#### Wayfinder map
+
+The canonical GitHub issue map attached to a Wayfinder Workstream. Its synchronized
+projection records the destination, notes, decisions, fog of war, out-of-scope items, child-ticket
+states and dependency relationships, claims, classifications, canonical reference, and last sync
+time. Reconnecting to the same canonical map creates a new Skill Run in the existing Workstream.
+
+#### Wayfinder Workbench
+
+The client view of a synchronized Wayfinder map. Web and desktop expose it as a right-panel surface;
+mobile exposes a full-screen route. Both prioritize the **frontier**: open, unblocked, unclaimed
+child tickets that are ready to advance. Starting work claims a frontier ticket and opens its
+deterministic linked ticket thread; retry, return, release, and reclaim expose the reverse and
+recovery states on every client.
+
+The complete frontier-first ticket list is also the non-visual alternative to the dependency graph.
+The shared model keeps all supported tickets but caps the decorative graph at 100 nodes and 200
+stably sorted relationships. Web and desktop focus the Workbench heading when the panel opens;
+mobile exposes the same state and actions through a full-screen route. See
+[wayfinderWorkbench.ts][30].
+
+#### Wayfinder projection budget
+
+The server-side bound applied before a canonical map enters shared shell state. GitHub relationship
+connections stop at 100 entries, and the complete projected map may occupy at most 256 KiB when
+encoded as UTF-8 JSON. Preflight rejects an oversized map; reconciliation retains the last healthy
+projection as cached read-only state. See [WayfinderMapProjection.ts][31].
+
+#### HITL resolution
+
+The receipt-backed completion of one claimed Wayfinder decision in its dedicated linked thread.
+It records the canonical issue comment and context pointer before closing the assigned ticket.
+Newly specifiable fog may graduate into child tickets and native blocking relationships; work beyond
+the destination is classified and represented as out of scope instead of becoming a route decision.
+Verified artifacts and the claim survive interruption for explicit resume or release.
+
+#### Wayfinder readiness
+
+The receipt-backed completion decision for a synchronized map. Readiness requires a destination, no
+open decision tickets, no active linked ticket threads, no in-scope fog, no closed ticket with an
+unknown classification, and healthy tracker synchronization. The Workbench displays every failed
+invariant; closing the parent issue or narrating completion does not satisfy one.
+
+#### Wayfinder to-spec handoff
+
+An explicit, provenance-linked transition from a Wayfinder Skill Run to a separate generic
+`to-spec` Skill Run in the same project Workstream. The invocation retains its source Skill Run and
+thread, canonical issue reference, and synchronization receipt time. An incomplete map requires a
+recorded early-handoff acknowledgement, and T3 never starts this transition automatically.
+
+#### Wayfinder research run
+
+The visible background lifecycle for one agent-only `research` ticket. Only an open, unblocked,
+unclaimed research ticket may launch automatically; grilling, prototypes, and manual tasks always
+require the user. The Workstream projection retains its automatic/manual launch mode, queue,
+activity, output, cancellation, failure, retry, and resolution state. A checkpoint-backed structured
+result starts canonical resolution, while GitHub receipts and reconciliation confirm completion and
+frontier changes. See [WayfinderResearchReactor.ts][29].
+
+#### Wayfinder mutation
+
+One closed, structured action against a published Wayfinder map: edit a map field; create, rename,
+classify, resolve, close, reopen, claim, release, or complete a HITL decision ticket; or add or remove
+a blocking relationship. Its persisted state identifies the active action and whether it is
+awaiting approval, mutating, failed, or synchronized. A resumable HITL mutation also retains
+verified artifacts and its exact next step. GitHub receipts and reconciliation, rather than client
+optimism or assistant prose, confirm the canonical result.
+
+#### Wayfinder reconciliation
+
+The server-owned refresh flow that keeps a published Wayfinder projection aligned with GitHub. It
+uses lightweight revision evidence before loading the full graph and persists a structured healthy,
+unavailable, or conflict result. An unavailable map remains cached and read-only; stale mutation
+evidence never overwrites canonical GitHub state. See [WayfinderReconciliationReactor.ts][28].
+
+#### Native skill adapter
+
+A verified mapping from a pinned skill identity to a provider-native invocation mechanism. A missing
+provider mapping or a mismatched digest uses generic execution without claiming native support. See
+[NativeSkillAdapterRegistry.ts][25].
+
+#### Unpublished Wayfinder draft
+
+A non-canonical map owned by a native Wayfinder `new-map` Skill Run. It contains the destination,
+notes, confirmed decisions, agent proposals, candidate tickets, fog of war, out-of-scope entries,
+and proposed dependency edges. Clients recover it from the durable Skill Run and structured-input
+activities; GitHub is unchanged until a later publication flow. See [nativeSkills.ts][26].
+
+#### Decision Card
+
+The client surface for one pending Wayfinder choice. It presents the agent's recommendation,
+reasoning, bounded options, and a free-form answer without treating the proposal as confirmed.
+
+#### Decision receipt
+
+The structured record of the user's answer to a Decision Card. A matching
+`user-input.requested`/`user-input.resolved` pair produces the receipt and moves the proposal into
+confirmed draft state. See [wayfinderDraft.ts][27].
+
+#### Wayfinder publication
+
+The permission-aware server reactor that turns one confirmed unpublished draft into a canonical
+GitHub map. Its persisted progress records verified labels, issues, child relationships, blocking
+relationships, and the exact next step. Publication can resume those receipts idempotently; only a
+successful canonical reconciliation transfers authority to the synchronized Workbench projection.
 
 #### Receipt
 
@@ -179,3 +300,10 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts
 [24]: ./overview.md
+[25]: ../../apps/server/src/nativeSkills/NativeSkillAdapterRegistry.ts
+[26]: ../../packages/contracts/src/nativeSkills.ts
+[27]: ../../packages/client-runtime/src/state/wayfinderDraft.ts
+[28]: ../../apps/server/src/orchestration/Layers/WayfinderReconciliationReactor.ts
+[29]: ../../apps/server/src/orchestration/Layers/WayfinderResearchReactor.ts
+[30]: ../../packages/client-runtime/src/state/wayfinderWorkbench.ts
+[31]: ../../apps/server/src/nativeSkills/WayfinderMapProjection.ts

@@ -5,6 +5,7 @@ import * as Schema from "effect/Schema";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -23,8 +24,10 @@ import {
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
+  WayfinderSynchronizationState,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { SkillRunId, ThreadId } from "./baseSchemas.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -33,6 +36,7 @@ const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateComma
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload);
 const decodeProjectMetaUpdatedPayload = Schema.decodeUnknownEffect(ProjectMetaUpdatedPayload);
 const decodeThreadTurnStartCommand = Schema.decodeUnknownEffect(ThreadTurnStartCommand);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 const decodeThreadTurnStartRequestedPayload = Schema.decodeUnknownEffect(
   ThreadTurnStartRequestedPayload,
 );
@@ -53,6 +57,80 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeWayfinderSynchronizationState = Schema.decodeUnknownEffect(
+  WayfinderSynchronizationState,
+);
+
+it.effect("decodes a revision-scoped Wayfinder reconciliation request", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeClientOrchestrationCommand({
+      type: "thread.wayfinder.reconcile",
+      commandId: "cmd-wayfinder-refresh",
+      threadId: "thread-1",
+      skillRunId: "skill-run-1",
+      reason: "manual",
+      expectedRevision: "revision:before-refresh",
+      createdAt: "2026-07-30T16:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.type, "thread.wayfinder.reconcile");
+    if (parsed.type !== "thread.wayfinder.reconcile") return;
+    assert.strictEqual(parsed.reason, "manual");
+    assert.strictEqual(parsed.expectedRevision, "revision:before-refresh");
+  }),
+);
+
+it.effect("decodes user-controlled Wayfinder research actions", () =>
+  Effect.gen(function* () {
+    for (const action of [
+      { kind: "pause-automatic-launches" },
+      { kind: "resume-automatic-launches" },
+      { kind: "start-ticket", ticketNumber: 43 },
+      { kind: "cancel-ticket", ticketNumber: 43 },
+      { kind: "retry-ticket", ticketNumber: 43 },
+    ] as const) {
+      const parsed = yield* decodeClientOrchestrationCommand({
+        type: "thread.wayfinder.research",
+        commandId: `research:${action.kind}`,
+        threadId: "thread-1",
+        skillRunId: "skill-run-1",
+        action,
+        createdAt: "2026-07-31T10:00:00.000Z",
+      });
+      assert.strictEqual(parsed.type, "thread.wayfinder.research");
+      if (parsed.type === "thread.wayfinder.research") {
+        assert.strictEqual(parsed.action.kind, action.kind);
+      }
+    }
+  }),
+);
+
+it.effect("decodes structured Wayfinder conflict and outage states", () =>
+  Effect.gen(function* () {
+    const conflict = yield* decodeWayfinderSynchronizationState({
+      status: "conflict",
+      reason: "mutation",
+      lastAttemptedAt: "2026-07-30T16:01:00.000Z",
+      lastSuccessfulAt: "2026-07-30T16:00:00.000Z",
+      canMutate: false,
+      expectedRevision: "revision:expected",
+      actualRevision: "revision:actual",
+      message: "GitHub changed before this action completed.",
+    });
+    const unavailable = yield* decodeWayfinderSynchronizationState({
+      status: "unavailable",
+      reason: "poll",
+      lastAttemptedAt: "2026-07-30T16:02:00.000Z",
+      lastSuccessfulAt: "2026-07-30T16:00:00.000Z",
+      canMutate: false,
+      message: "GitHub is unavailable. The cached map is read-only.",
+    });
+
+    assert.strictEqual(conflict.canMutate, false);
+    assert.strictEqual(conflict.actualRevision, "revision:actual");
+    assert.strictEqual(unavailable.status, "unavailable");
+  }),
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -248,6 +326,181 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
     assert.strictEqual(parsed.modelSelection?.instanceId, "codex");
     assert.strictEqual(parsed.runtimeMode, "full-access");
     assert.strictEqual(parsed.interactionMode, DEFAULT_PROVIDER_INTERACTION_MODE);
+  }),
+);
+
+it.effect("decodes an explicit client skill invocation request without inferring from prose", () =>
+  Effect.gen(function* () {
+    const explicit = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-client",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-client",
+        role: "user",
+        text: "$wayfinder chart a release",
+        attachments: [],
+      },
+      skillInvocationRequest: {
+        skillName: "wayfinder",
+        skillPath: "/skills/wayfinder/SKILL.md",
+        arguments: "chart a release",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(explicit.type, "thread.turn.start");
+    if (explicit.type !== "thread.turn.start") return;
+    assert.deepStrictEqual(explicit.skillInvocationRequest, {
+      skillName: "wayfinder",
+      skillPath: "/skills/wayfinder/SKILL.md",
+      arguments: "chart a release",
+    });
+
+    const prose = yield* decodeClientOrchestrationCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-prose",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-prose",
+        role: "user",
+        text: "Tell me whether Wayfinder would help here",
+        attachments: [],
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(prose.type, "thread.turn.start");
+    if (prose.type !== "thread.turn.start") return;
+    assert.strictEqual(prose.skillInvocationRequest, undefined);
+  }),
+);
+
+it.effect("decodes a pinned server skill invocation", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-server",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-wayfinder-server",
+        role: "user",
+        text: "$wayfinder chart a release",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        arguments: "chart a release",
+        execution: {
+          mode: "native",
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+    assert.strictEqual(parsed.skillInvocation?.skill.name, "wayfinder");
+    assert.strictEqual(parsed.skillInvocation?.execution.mode, "native");
+  }),
+);
+
+it.effect("decodes a pinned linked-ticket invocation", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-wayfinder-ticket",
+      threadId: "thread-ticket-43",
+      message: {
+        messageId: "msg-wayfinder-ticket",
+        role: "user",
+        text: "Work canonical Wayfinder ticket #43.",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "wayfinder",
+          path: "/skills/wayfinder/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        action: {
+          id: "work-ticket",
+          ticketNumber: 43,
+          sourceSkillRunId: SkillRunId.make("skill-run:map"),
+        },
+        execution: {
+          mode: "native",
+          adapterId: "wayfinder",
+          adapterVersion: 1,
+        },
+        reconnectWorkstreamId: "workstream:release",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.skillInvocation?.action, {
+      id: "work-ticket",
+      ticketNumber: 43,
+      sourceSkillRunId: SkillRunId.make("skill-run:map"),
+    });
+    assert.strictEqual(parsed.skillInvocation?.reconnectWorkstreamId, "workstream:release");
+  }),
+);
+
+it.effect("decodes a generic to-spec invocation with canonical Wayfinder provenance", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-to-spec",
+      threadId: "thread-to-spec",
+      message: {
+        messageId: "msg-to-spec",
+        role: "user",
+        text: "Turn the completed Wayfinder map into a specification.",
+        attachments: [],
+      },
+      skillInvocation: {
+        skill: {
+          name: "to-spec",
+          path: "/skills/to-spec/SKILL.md",
+          contentDigest: "sha256:257e40665b28ae959ffdcb97d7a72b074360f4a3d201bd84786505308546e434",
+        },
+        action: {
+          id: "handoff-to-spec",
+          sourceSkillRunId: "skill-run:wayfinder",
+          sourceThreadId: "thread-wayfinder",
+          canonicalReference: {
+            number: 42,
+            url: "https://github.com/t3tools/t3code/issues/42",
+          },
+          wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+          acknowledgedIncomplete: false,
+        },
+        execution: {
+          mode: "generic",
+          reason: "user-selected-generic",
+        },
+        reconnectWorkstreamId: "workstream:release",
+      },
+      createdAt: "2026-01-02T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.skillInvocation?.action, {
+      id: "handoff-to-spec",
+      sourceSkillRunId: SkillRunId.make("skill-run:wayfinder"),
+      sourceThreadId: ThreadId.make("thread-wayfinder"),
+      canonicalReference: {
+        number: 42,
+        url: "https://github.com/t3tools/t3code/issues/42",
+      },
+      wayfinderSynchronizedAt: "2026-01-02T00:00:00.000Z",
+      acknowledgedIncomplete: false,
+    });
   }),
 );
 
