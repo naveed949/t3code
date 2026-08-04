@@ -78,6 +78,8 @@ describe("WorkflowPanel", () => {
     expect(markup).toContain("Current checkpoint or attention");
     expect(markup).toContain("Research #43 is active.");
     expect(markup).toContain("Ticket Frontier");
+    expect(markup).toContain('data-workflow-workspace-toggle="true"');
+    expect(markup).toContain("Open workspace");
     expect(markup).toContain('role="tree"');
     expect(markup).toContain('data-workflow-outline="complete"');
     expect(markup).toContain('role="treeitem"');

@@ -3,7 +3,7 @@ import type {
   WayfinderWorkflowViewModel,
 } from "@t3tools/client-runtime/state/wayfinder-workflow";
 import type { ThreadId } from "@t3tools/contracts";
-import { memo, type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { memo, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
 
@@ -140,9 +140,21 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
   readonly model: WayfinderWorkflowViewModel;
   readonly onOpenThread?: (threadId: ThreadId) => void;
   readonly initialSelectedNodeId?: string | null;
+  readonly selectedNodeId?: string | null;
+  readonly onSelectNode?: (nodeId: string | null) => void;
+  readonly onOpenWorkspace?: () => void;
 }) {
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+  const [internalSelectedNodeId, setInternalSelectedNodeId] = useState<string | null>(
     props.initialSelectedNodeId ?? null,
+  );
+  const selectedNodeId =
+    props.selectedNodeId === undefined ? internalSelectedNodeId : props.selectedNodeId;
+  const setSelectedNodeId = useCallback(
+    (nodeId: string | null) => {
+      if (props.selectedNodeId === undefined) setInternalSelectedNodeId(nodeId);
+      props.onSelectNode?.(nodeId);
+    },
+    [props.onSelectNode, props.selectedNodeId],
   );
   const nodeButtons = useRef(new Map<string, HTMLButtonElement>());
   const nodes = props.model.outline;
@@ -150,7 +162,7 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
 
   useEffect(() => {
     if (selectedNodeId !== null && selectedNode === null) setSelectedNodeId(null);
-  }, [selectedNode, selectedNodeId]);
+  }, [selectedNode, selectedNodeId, setSelectedNodeId]);
 
   const selectNode = (node: WayfinderWorkflowOutlineNode) => setSelectedNodeId(node.id);
   const moveFocus = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -274,6 +286,31 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
             ))}
           </ul>
         )}
+      </section>
+
+      <section aria-labelledby="workflow-workspace-toggle-heading" className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h4
+              id="workflow-workspace-toggle-heading"
+              className="text-xs font-semibold text-foreground"
+            >
+              Workflow Workspace
+            </h4>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Open the bounded graph when you need visual context beyond the compact panel.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground"
+            disabled={!props.onOpenWorkspace}
+            data-workflow-workspace-toggle="true"
+            onClick={props.onOpenWorkspace}
+          >
+            Open workspace
+          </button>
+        </div>
       </section>
 
       <section aria-labelledby="workflow-outline-heading" className="space-y-2">

@@ -6106,6 +6106,7 @@ function ChatViewContent(props: ChatViewProps) {
     ) : activeRightPanelSurface?.kind === "wayfinder" && activeWayfinderMap ? (
       <WayfinderWorkbench
         map={activeWayfinderMap}
+        workflowGraph={activeWayfinderWorkstream?.workflowAttachment?.workflowGraph ?? null}
         mutation={activeWayfinderMutation}
         research={activeWayfinderInvocation?.wayfinderResearch ?? null}
         onMutate={onMutateWayfinder}

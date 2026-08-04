@@ -25,6 +25,7 @@ import type {
   WayfinderResearchAction,
   WayfinderResearchState,
   WayfinderSynchronizationState,
+  WorkflowGraph,
 } from "@t3tools/contracts";
 import {
   deriveWayfinderReadiness,
@@ -34,9 +35,18 @@ import {
 import { ExternalLinkIcon, RefreshCwIcon } from "lucide-react";
 import { memo, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  Dialog,
+  DialogDescription,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "~/components/ui/dialog";
 import { cn } from "~/lib/utils";
 
 import { WorkflowPanel } from "./WorkflowPanel.tsx";
+import { WorkflowWorkspace } from "./WorkflowWorkspace.tsx";
 
 export function requestWayfinderToSpecStart(input: {
   readonly readiness: WayfinderReadiness;
@@ -557,8 +567,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly readiness?: WayfinderReadiness;
   readonly toSpecAvailable?: boolean;
   readonly onStartToSpec?: (acknowledgedIncomplete: boolean) => void;
+  readonly workflowGraph?: WorkflowGraph | null;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const [workflowWorkspaceOpen, setWorkflowWorkspaceOpen] = useState(false);
+  const [selectedWorkflowNodeId, setSelectedWorkflowNodeId] = useState<string | null>(null);
   const reconcileRef = useRef(props.onReconcile);
   reconcileRef.current = props.onReconcile;
   const lifecycleRef = useRef({
@@ -731,8 +744,33 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
 
         <WorkflowPanel
           model={workflowModel}
+          selectedNodeId={selectedWorkflowNodeId}
+          onSelectNode={setSelectedWorkflowNodeId}
+          onOpenWorkspace={() => setWorkflowWorkspaceOpen(true)}
           {...(props.onReturnToThread ? { onOpenThread: props.onReturnToThread } : {})}
         />
+
+        <Dialog open={workflowWorkspaceOpen} onOpenChange={setWorkflowWorkspaceOpen}>
+          <DialogPopup className="max-w-[min(96vw,1100px)]" bottomStickOnMobile={false}>
+            <DialogHeader>
+              <DialogTitle>Workflow Workspace</DialogTitle>
+              <DialogDescription>
+                Explore the bounded Compound Workflow Graph while the complete Workflow Outline
+                remains available in the panel.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogPanel className="min-h-0 overflow-y-auto">
+              <WorkflowWorkspace
+                model={workflowModel}
+                {...(props.workflowGraph !== undefined
+                  ? { workflowGraph: props.workflowGraph }
+                  : {})}
+                selectedNodeId={selectedWorkflowNodeId}
+                onSelectNode={setSelectedWorkflowNodeId}
+              />
+            </DialogPanel>
+          </DialogPopup>
+        </Dialog>
 
         <section
           aria-labelledby="wayfinder-completion"
