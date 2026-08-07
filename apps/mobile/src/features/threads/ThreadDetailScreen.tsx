@@ -17,6 +17,7 @@ import type {
   WayfinderDraft,
   WorkflowAttachment,
   WorkflowAttachmentHint,
+  WorkflowPrdDocument,
 } from "@t3tools/contracts";
 import * as Haptics from "expo-haptics";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -113,6 +114,7 @@ export interface ThreadDetailScreenProps {
   readonly onViewWorkflowArtifacts?: () => void;
   readonly onAcknowledgeWorkflowArtifact?: (artifactId: string) => void;
   readonly onResolveWorkflowStale?: () => void;
+  readonly onCompleteSpecification?: (document: WorkflowPrdDocument) => void;
   readonly workflowRunProvider?: ProviderInstanceId;
   readonly workflowRunProviderOptions?: ReadonlyArray<ProviderInstanceId>;
   readonly workflowRunRequiredSkillsByProvider?: ReadonlyMap<
@@ -432,6 +434,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onViewArtifacts={props.onViewWorkflowArtifacts}
                     onAcknowledgeArtifact={props.onAcknowledgeWorkflowArtifact}
                     onResolveStale={props.onResolveWorkflowStale}
+                    onCompleteSpecification={props.onCompleteSpecification}
                     defaultProviderInstanceId={props.workflowRunProvider}
                     {...(props.workflowRunProviderOptions
                       ? { providerOptions: props.workflowRunProviderOptions }

@@ -2,6 +2,7 @@ import { sha256 } from "@noble/hashes/sha2";
 import type {
   WayfinderMapProjection,
   WorkflowArtifact,
+  WorkflowArtifactDetail,
   WorkflowArtifactSourceStage,
   WorkflowAttachment,
   WorkflowAttachmentWayfinderData,
@@ -410,7 +411,7 @@ export function completeWorkflowSpecification(input: {
     logicalId,
     kind: "workflow-prd",
     state: "current",
-    document: input.document,
+    version: input.document.version,
     lineage: {
       workstreamId: input.attachment.workstreamId,
       sourceSkillRunId: input.stage.skillRunId,
@@ -435,6 +436,7 @@ export function completeWorkflowSpecification(input: {
   ]);
   return {
     ...input.attachment,
+    workflowVersion: (input.attachment.workflowVersion ?? 0) + 1,
     specificationStage: {
       ...input.stage,
       status: "completed",
@@ -451,6 +453,17 @@ export function completeWorkflowSpecification(input: {
       artifacts,
       updatedAt: input.completedAt,
     },
+  };
+}
+
+export function workflowSpecificationArtifactDetail(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly document: WorkflowPrdDocument;
+}): WorkflowArtifactDetail {
+  return {
+    artifactId: `workflow-prd:${input.attachment.workstreamId}:v${input.document.version}`,
+    kind: "workflow-prd",
+    document: input.document,
   };
 }
 

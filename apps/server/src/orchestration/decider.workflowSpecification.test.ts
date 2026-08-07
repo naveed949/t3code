@@ -261,6 +261,34 @@ function readModel(withRun = true): OrchestrationReadModel {
   };
 }
 
+function readModelWithRequiredSkillStatus(status: "missing" | "changed"): OrchestrationReadModel {
+  const model = readModel();
+  return {
+    ...model,
+    threads: model.threads.map((thread) => {
+      if (thread.id !== originThreadId || thread.workflowAttachment?.workflowRun === undefined) {
+        return thread;
+      }
+      return {
+        ...thread,
+        workflowAttachment: {
+          ...thread.workflowAttachment,
+          workflowRun: {
+            ...thread.workflowAttachment.workflowRun,
+            configuration: {
+              ...thread.workflowAttachment.workflowRun.configuration,
+              requiredSkills:
+                thread.workflowAttachment.workflowRun.configuration.requiredSkills.map(
+                  (requiredSkill) => ({ ...requiredSkill, status }),
+                ),
+            },
+          },
+        },
+      };
+    }),
+  };
+}
+
 async function applyEvents(
   model: OrchestrationReadModel,
   events: ReadonlyArray<Omit<OrchestrationEvent, "sequence">>,
@@ -306,7 +334,7 @@ function startToSpec(commandId: string) {
   };
 }
 
-function pendingCheckpointActivity() {
+function pendingCheckpointActivity(skillRunId: SkillRunId) {
   return {
     type: "thread.activity.append" as const,
     commandId: CommandId.make("specification-checkpoint-activity"),
@@ -318,6 +346,7 @@ function pendingCheckpointActivity() {
       summary: "Confirm the proposed specification test seam",
       payload: {
         requestId: ApprovalRequestId.make("request:specification-seam"),
+        skillRunId,
         questions: [
           {
             id: "seam",
@@ -368,6 +397,25 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
     }),
   );
 
+  it.effect("projects a capability block without starting a provider turn", () =>
+    Effect.gen(function* () {
+      const blocked = yield* decideOrchestrationCommand({
+        readModel: readModelWithRequiredSkillStatus("changed"),
+        command: startToSpec("specification-capability-changed"),
+      });
+      expect(normalizeEvents(blocked).map((event) => event.type)).toEqual([
+        "thread.workflow-specification-failed",
+      ]);
+      const projected = yield* Effect.promise(() =>
+        applyEvents(readModelWithRequiredSkillStatus("changed"), normalizeEvents(blocked)),
+      );
+      expect(projected.threads[0]?.workflowAttachment?.specificationStage).toMatchObject({
+        status: "capability-blocked",
+        failure: "The pinned Specification Required Skill is changed.",
+      });
+    }),
+  );
+
   it.effect("projects one durable checkpoint, resolves first response, and rejects replay", () =>
     Effect.gen(function* () {
       const started = yield* decideOrchestrationCommand({
@@ -377,9 +425,21 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
       const afterStart = yield* Effect.promise(() =>
         applyEvents(readModel(), normalizeEvents(started)),
       );
+      const stageAfterStart = afterStart.threads[0]?.workflowAttachment?.specificationStage;
+      expect(stageAfterStart).toBeDefined();
+      const unrelatedCheckpoint = yield* decideOrchestrationCommand({
+        readModel: afterStart,
+        command: {
+          ...pendingCheckpointActivity(SkillRunId.make("skill-run:unrelated")),
+          commandId: CommandId.make("unrelated-checkpoint-activity"),
+        },
+      });
+      expect(normalizeEvents(unrelatedCheckpoint).map((event) => event.type)).toEqual([
+        "thread.activity-appended",
+      ]);
       const checkpoint = yield* decideOrchestrationCommand({
         readModel: afterStart,
-        command: pendingCheckpointActivity(),
+        command: pendingCheckpointActivity(stageAfterStart!.skillRunId),
       });
       const afterCheckpoint = yield* Effect.promise(() =>
         applyEvents(afterStart, normalizeEvents(checkpoint)),
@@ -446,9 +506,11 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
         const afterStart = yield* Effect.promise(() =>
           applyEvents(readModel(), normalizeEvents(started)),
         );
+        const stageAfterStart = afterStart.threads[0]?.workflowAttachment?.specificationStage;
+        expect(stageAfterStart).toBeDefined();
         const checkpoint = yield* decideOrchestrationCommand({
           readModel: afterStart,
-          command: pendingCheckpointActivity(),
+          command: pendingCheckpointActivity(stageAfterStart!.skillRunId),
         });
         const afterCheckpoint = yield* Effect.promise(() =>
           applyEvents(afterStart, normalizeEvents(checkpoint)),
@@ -477,6 +539,8 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
             threadId: originThreadId,
             specificationThreadId,
             skillRunId: stageAfterResponse!.skillRunId,
+            expectedWorkstreamVersion:
+              afterResponse.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
             sourceWayfinderArtifactId,
             prd: {
               version: 1,
@@ -506,7 +570,7 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
           expect.arrayContaining([
             expect.objectContaining({
               kind: "workflow-prd",
-              document: expect.objectContaining({ version: 1 }),
+              version: 1,
               lineage: {
                 workstreamId,
                 sourceSkillRunId: stageAfterResponse!.skillRunId,
@@ -529,6 +593,8 @@ it.layer(NodeServices.layer)("Specification stage boundary", (it) => {
       const afterStart = yield* Effect.promise(() =>
         applyEvents(readModel(), normalizeEvents(started)),
       );
+      const stageAfterStart = afterStart.threads[0]?.workflowAttachment?.specificationStage;
+      expect(stageAfterStart).toBeDefined();
       const failed = yield* decideOrchestrationCommand({
         readModel: afterStart,
         command: {

@@ -2,6 +2,7 @@ import type {
   ProviderInstanceId,
   WorkflowAttachment,
   WorkflowAttachmentHint,
+  WorkflowPrdDocument,
   WorkflowRunConfiguration,
   WorkflowRunRequiredSkill,
 } from "@t3tools/contracts";
@@ -19,6 +20,7 @@ export function WorkflowAttachmentCard(props: {
   readonly onViewArtifacts?: () => void;
   readonly onAcknowledgeArtifact?: (artifactId: string) => void;
   readonly onResolveStale?: () => void;
+  readonly onCompleteSpecification?: (document: WorkflowPrdDocument) => void;
   readonly defaultProviderInstanceId?: ProviderInstanceId;
   readonly providerOptions?: ReadonlyArray<ProviderInstanceId>;
   readonly requiredSkillsByProvider?: ReadonlyMap<
@@ -36,6 +38,13 @@ export function WorkflowAttachmentCard(props: {
   const [executionLimit, setExecutionLimit] = useState<1 | 2>(1);
   const [selectedProvider, setSelectedProvider] = useState<ProviderInstanceId | null>(null);
   const [overrideProvider, setOverrideProvider] = useState<ProviderInstanceId | null>(null);
+  const [prdTitle, setPrdTitle] = useState("");
+  const [prdProblemStatement, setPrdProblemStatement] = useState("");
+  const [prdSolution, setPrdSolution] = useState("");
+  const [prdUserStories, setPrdUserStories] = useState("");
+  const [prdImplementationDecisions, setPrdImplementationDecisions] = useState("");
+  const [prdTestingDecisions, setPrdTestingDecisions] = useState("");
+  const [prdOutOfScope, setPrdOutOfScope] = useState("");
 
   if (props.attachment !== null) {
     const graph = props.attachment.workflowGraph;
@@ -46,6 +55,55 @@ export function WorkflowAttachmentCard(props: {
       .find((artifact) => artifact.marker.state !== "acknowledged");
     const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
     const specificationStage = props.attachment.specificationStage;
+    const currentWorkflowPrdVersion = Math.max(
+      0,
+      ...(graph?.artifacts ?? [])
+        .filter((artifact) => artifact.kind === "workflow-prd")
+        .map((artifact) => artifact.version),
+    );
+    const listLines = (value: string) =>
+      value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    const prdDocument = (): WorkflowPrdDocument | null => {
+      const userStories = listLines(prdUserStories);
+      const implementationDecisions = listLines(prdImplementationDecisions);
+      const testingDecisions = listLines(prdTestingDecisions);
+      const title = prdTitle.trim();
+      const problemStatement = prdProblemStatement.trim();
+      const solution = prdSolution.trim();
+      if (
+        title.length === 0 ||
+        problemStatement.length === 0 ||
+        solution.length === 0 ||
+        userStories.length === 0 ||
+        implementationDecisions.length === 0 ||
+        testingDecisions.length === 0
+      ) {
+        return null;
+      }
+      return {
+        version: currentWorkflowPrdVersion + 1,
+        title,
+        problemStatement,
+        solution,
+        userStories,
+        implementationDecisions,
+        testingDecisions,
+        outOfScope: listLines(prdOutOfScope),
+      };
+    };
+    const listFieldDefinitions: ReadonlyArray<readonly [string, string, (next: string) => void]> = [
+      ["User stories (one per line)", prdUserStories, setPrdUserStories],
+      [
+        "Implementation decisions (one per line)",
+        prdImplementationDecisions,
+        setPrdImplementationDecisions,
+      ],
+      ["Testing decisions (one per line)", prdTestingDecisions, setPrdTestingDecisions],
+      ["Out of scope (one per line)", prdOutOfScope, setPrdOutOfScope],
+    ];
 
     return (
       <View className="gap-2 rounded-[20px] border border-sky-300/35 bg-sky-50/90 p-4 dark:border-sky-300/15 dark:bg-sky-400/8">
@@ -79,6 +137,65 @@ export function WorkflowAttachmentCard(props: {
               <Text className="font-sans text-xs text-red-700 dark:text-red-300">
                 {specificationStage.failure}
               </Text>
+            ) : null}
+            {specificationStage.status === "running" &&
+            specificationStage.checkpoint?.status === "resolved" &&
+            props.onCompleteSpecification ? (
+              <View className="mt-2 gap-2 rounded-lg border border-violet-500/20 bg-white/50 p-2 dark:bg-neutral-950/30">
+                <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                  Record structured Workflow PRD
+                </Text>
+                <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+                  Enter the provider-confirmed fields. T3 does not infer workflow state from prose.
+                </Text>
+                <TextInput
+                  accessibilityLabel="Workflow PRD title"
+                  value={prdTitle}
+                  onChangeText={setPrdTitle}
+                  placeholder="Title"
+                  className="rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs dark:border-white/8 dark:bg-neutral-950/70"
+                />
+                <TextInput
+                  accessibilityLabel="Workflow PRD problem statement"
+                  value={prdProblemStatement}
+                  onChangeText={setPrdProblemStatement}
+                  placeholder="Problem statement"
+                  multiline
+                  className="min-h-[52px] rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs dark:border-white/8 dark:bg-neutral-950/70"
+                />
+                <TextInput
+                  accessibilityLabel="Workflow PRD solution"
+                  value={prdSolution}
+                  onChangeText={setPrdSolution}
+                  placeholder="Solution"
+                  multiline
+                  className="min-h-[52px] rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs dark:border-white/8 dark:bg-neutral-950/70"
+                />
+                {listFieldDefinitions.map(([label, value, setValue]) => (
+                  <TextInput
+                    key={label}
+                    accessibilityLabel={label}
+                    value={value}
+                    onChangeText={setValue}
+                    placeholder={label}
+                    multiline
+                    className="min-h-[52px] rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs dark:border-white/8 dark:bg-neutral-950/70"
+                  />
+                ))}
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Complete Specification"
+                  accessibilityState={{ disabled: prdDocument() === null }}
+                  disabled={prdDocument() === null}
+                  className="self-start rounded-lg bg-sky-500 px-3 py-2 disabled:bg-neutral-300 dark:disabled:bg-neutral-700"
+                  onPress={() => {
+                    const document = prdDocument();
+                    if (document !== null) props.onCompleteSpecification?.(document);
+                  }}
+                >
+                  <Text className="font-t3-bold text-xs text-white">Complete Specification</Text>
+                </Pressable>
+              </View>
             ) : null}
           </View>
         ) : null}

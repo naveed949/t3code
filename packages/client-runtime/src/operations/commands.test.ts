@@ -295,6 +295,7 @@ describe("environment commands", () => {
         threadId: ThreadId.make("thread-origin"),
         specificationThreadId: ThreadId.make("thread-specification"),
         skillRunId: SkillRunId.make("skill-run:to-spec"),
+        expectedWorkstreamVersion: 0,
         sourceWayfinderArtifactId: "wayfinder-map:29:revision:2",
         prd: {
           version: 1,
@@ -316,6 +317,7 @@ describe("environment commands", () => {
           threadId: "thread-origin",
           specificationThreadId: "thread-specification",
           skillRunId: "skill-run:to-spec",
+          expectedWorkstreamVersion: 0,
           sourceWayfinderArtifactId: "wayfinder-map:29:revision:2",
           prd: {
             version: 1,

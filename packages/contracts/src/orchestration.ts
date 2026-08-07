@@ -525,10 +525,22 @@ export const WorkflowArtifact = Schema.Union([
   Schema.Struct({
     ...WorkflowArtifactBaseFields,
     kind: Schema.Literal("workflow-prd"),
-    document: WorkflowPrdDocument,
+    version: Schema.Int.check(Schema.isGreaterThan(0)),
   }),
 ]);
 export type WorkflowArtifact = typeof WorkflowArtifact.Type;
+
+/**
+ * Full artifact content is loaded separately from the bounded graph metadata.
+ * Completion events retain this detail for a lazy Node Inspector query without
+ * putting the whole PRD into every workflow snapshot or graph delta.
+ */
+export const WorkflowArtifactDetail = Schema.Struct({
+  artifactId: TrimmedNonEmptyString,
+  kind: Schema.Literal("workflow-prd"),
+  document: WorkflowPrdDocument,
+});
+export type WorkflowArtifactDetail = typeof WorkflowArtifactDetail.Type;
 
 export const WorkflowSpecificationStageStatus = Schema.Literals([
   "running",
@@ -659,6 +671,9 @@ export const WorkflowAttachment = Schema.Struct({
   workflowRunPreview: Schema.optional(WorkflowRunPreview),
   workflowRun: Schema.optional(WorkflowRun),
   specificationStage: Schema.optional(WorkflowSpecificationStage),
+  // The optimistic command version is optional for attachments written before
+  // the Specification stage existed; those attachments start at version 0.
+  workflowVersion: Schema.optional(NonNegativeInt),
   attachedAt: IsoDateTime,
 });
 export type WorkflowAttachment = typeof WorkflowAttachment.Type;
@@ -1362,6 +1377,7 @@ const ThreadWorkflowSpecificationCompleteCommand = Schema.Struct({
   threadId: ThreadId,
   specificationThreadId: ThreadId,
   skillRunId: SkillRunId,
+  expectedWorkstreamVersion: NonNegativeInt,
   sourceWayfinderArtifactId: TrimmedNonEmptyString,
   prd: WorkflowPrdDocument,
   createdAt: IsoDateTime,
@@ -1932,6 +1948,7 @@ export const ThreadWorkflowSpecificationCheckpointResolvedPayload = Schema.Struc
 export const ThreadWorkflowSpecificationCompletedPayload = Schema.Struct({
   threadId: ThreadId,
   attachment: WorkflowAttachment,
+  artifact: WorkflowArtifactDetail,
 });
 
 export const ThreadWorkflowSpecificationFailedPayload = Schema.Struct({

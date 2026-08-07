@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   EventId,
   SkillRunId,
+  TrimmedNonEmptyString,
   UserInputQuestion,
   WayfinderMutationAction,
   WorkstreamId,
@@ -30,6 +31,7 @@ import {
   resolveWorkflowStaleness,
   synchronizeWorkflowAttachmentWayfinderData,
   viewWorkflowArtifacts,
+  workflowSpecificationArtifactDetail,
 } from "@t3tools/shared/workflowGraph";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -67,8 +69,18 @@ const decodeWayfinderMutationApprovalPayload = Schema.decodeUnknownOption(
     action: WayfinderMutationAction,
   }),
 );
-const decodeWorkflowCheckpointQuestions = Schema.decodeUnknownOption(
-  Schema.Array(UserInputQuestion),
+const decodeWorkflowCheckpointActivityPayload = Schema.decodeUnknownOption(
+  Schema.Struct({
+    requestId: ApprovalRequestId,
+    skillRunId: SkillRunId,
+    questions: Schema.Array(UserInputQuestion),
+  }),
+);
+const decodeActivityRequestMetadata = Schema.decodeUnknownOption(
+  Schema.Struct({ requestId: Schema.optional(ApprovalRequestId) }),
+);
+const decodeRuntimeErrorActivityPayload = Schema.decodeUnknownOption(
+  Schema.Struct({ message: Schema.optional(TrimmedNonEmptyString) }),
 );
 
 function isWorkflowAttachableWayfinderInvocation(invocation: SkillInvocation): boolean {
@@ -473,6 +485,7 @@ interface WorkflowSpecificationDispatchContext {
   readonly attachment: WorkflowAttachment;
   readonly requiredSkill: WorkflowRunRequiredSkill;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly capabilityBlocked?: string;
 }
 
 type WorkflowSpecificationDispatchValidation =
@@ -507,29 +520,57 @@ function workflowSpecificationContextForHandoff(input: {
       scopeIds.has(candidate.nodeId),
   );
   if (specificationSkills.length === 0) {
-    return { detail: "The confirmed Run Scope has no pinned to-spec Required Skill." };
+    return {
+      context: {
+        originThread,
+        attachment,
+        providerInstanceId: input.providerInstanceId,
+        requiredSkill: {
+          nodeId: `workflow:${input.workstreamId}`,
+          providerInstanceId: input.providerInstanceId,
+          stage: "specification",
+          skill: {
+            name: input.invocation.skill.name,
+            ...(input.invocation.skill.path !== undefined
+              ? { path: input.invocation.skill.path }
+              : {}),
+            ...(input.invocation.skill.contentDigest !== undefined
+              ? { contentDigest: input.invocation.skill.contentDigest }
+              : {}),
+          },
+          status: "missing",
+        },
+        capabilityBlocked: "The confirmed Run has no pinned to-spec capability.",
+      },
+    };
   }
   const requiredSkill = specificationSkills.find(
     (candidate) => candidate.providerInstanceId === input.providerInstanceId,
   );
   if (requiredSkill === undefined) {
-    return { detail: "The Specification provider does not match the pinned Required Skill." };
-  }
-  if (
-    requiredSkill.status !== "available" ||
-    requiredSkill.skill.path === undefined ||
-    requiredSkill.skill.contentDigest === undefined
-  ) {
-    return { detail: `The pinned Specification Required Skill is ${requiredSkill.status}.` };
-  }
-  if (
-    requiredSkill.skill.path !== input.invocation.skill.path ||
-    requiredSkill.skill.contentDigest !== input.invocation.skill.contentDigest
-  ) {
     return {
-      detail: "The requested to-spec skill does not match the immutable pinned Required Skill.",
+      context: {
+        originThread,
+        attachment,
+        providerInstanceId: input.providerInstanceId,
+        requiredSkill: {
+          ...specificationSkills[0]!,
+          providerInstanceId: input.providerInstanceId,
+          status: "missing",
+        },
+        capabilityBlocked: "The selected Specification provider has no pinned to-spec capability.",
+      },
     };
   }
+  const capabilityBlocked =
+    requiredSkill.status !== "available"
+      ? `The pinned Specification Required Skill is ${requiredSkill.status}.`
+      : requiredSkill.skill.path === undefined || requiredSkill.skill.contentDigest === undefined
+        ? "The pinned Specification Required Skill has no verified capability identity."
+        : requiredSkill.skill.path !== input.invocation.skill.path ||
+            requiredSkill.skill.contentDigest !== input.invocation.skill.contentDigest
+          ? "The requested to-spec skill does not match the immutable pinned Required Skill."
+          : undefined;
   const existingStage = attachment.specificationStage;
   if (
     existingStage !== undefined &&
@@ -547,6 +588,7 @@ function workflowSpecificationContextForHandoff(input: {
       attachment,
       requiredSkill,
       providerInstanceId: input.providerInstanceId,
+      ...(capabilityBlocked !== undefined ? { capabilityBlocked } : {}),
     },
   };
 }
@@ -576,24 +618,32 @@ function workflowSpecificationForThread(
   return { originThread, attachment, stage };
 }
 
+function incrementWorkflowVersion(attachment: WorkflowAttachment): WorkflowAttachment {
+  return {
+    ...attachment,
+    workflowVersion: (attachment.workflowVersion ?? 0) + 1,
+  };
+}
+
 function workflowCheckpointFromActivity(input: {
   readonly activity: OrchestrationThread["activities"][number];
   readonly stage: WorkflowSpecificationStage;
 }): WorkflowCheckpointRequest | null {
   if (input.activity.kind !== "user-input.requested") return null;
-  if (typeof input.activity.payload !== "object" || input.activity.payload === null) return null;
-  const payload = input.activity.payload as Record<string, unknown>;
-  if (typeof payload.requestId !== "string") return null;
-  const questions = Option.getOrUndefined(decodeWorkflowCheckpointQuestions(payload.questions));
-  if (questions === undefined || questions.length === 0) return null;
+  if (input.activity.turnId === null) return null;
+  const payload = Option.getOrUndefined(
+    decodeWorkflowCheckpointActivityPayload(input.activity.payload),
+  );
+  if (payload === undefined || payload.skillRunId !== input.stage.skillRunId) return null;
+  if (payload.questions.length === 0) return null;
   return {
-    requestId: ApprovalRequestId.make(payload.requestId),
+    requestId: payload.requestId,
     kind: "specification-test-seam",
     workstreamId: input.stage.workstreamId,
     originThreadId: input.stage.originThreadId,
     specificationThreadId: input.stage.specificationThreadId,
     skillRunId: input.stage.skillRunId,
-    questions,
+    questions: payload.questions,
     status: "pending",
     requestedAt: input.activity.createdAt,
   };
@@ -1415,6 +1465,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               : {}),
           }
         : undefined;
+      const workflowSpecificationCapabilityBlockedEvent =
+        workflowSpecificationContext?.capabilityBlocked !== undefined &&
+        skillInvocation !== undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: workflowSpecificationContext.originThread.id,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  type: "thread.workflow-specification-failed",
+                  payload: {
+                    threadId: workflowSpecificationContext.originThread.id,
+                    attachment: incrementWorkflowVersion({
+                      ...workflowSpecificationContext.attachment,
+                      specificationStage: {
+                        status: "capability-blocked",
+                        workstreamId: workflowSpecificationContext.attachment.workstreamId,
+                        nodeId: workflowSpecificationContext.requiredSkill.nodeId,
+                        originThreadId: workflowSpecificationContext.originThread.id,
+                        specificationThreadId: command.threadId,
+                        skillRunId: skillInvocation.skillRunId,
+                        providerInstanceId: workflowSpecificationContext.providerInstanceId,
+                        skill: skillInvocation.skill,
+                        failure: workflowSpecificationContext.capabilityBlocked,
+                        startedAt: command.createdAt,
+                        updatedAt: command.createdAt,
+                      },
+                    }),
+                  },
+                }),
+              ),
+            )
+          : null;
       const userMessageEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -1547,7 +1633,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             })
           : null;
       const workflowSpecificationDispatchedEvent =
-        workflowSpecificationContext !== null && skillInvocation !== undefined
+        workflowSpecificationContext !== null &&
+        workflowSpecificationContext.capabilityBlocked === undefined &&
+        skillInvocation !== undefined
           ? yield* withEventBase({
               aggregateKind: "thread",
               aggregateId: workflowSpecificationContext.originThread.id,
@@ -1561,7 +1649,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                   type: "thread.workflow-specification-dispatched",
                   payload: {
                     threadId: workflowSpecificationContext.originThread.id,
-                    attachment: {
+                    attachment: incrementWorkflowVersion({
                       ...workflowSpecificationContext.attachment,
                       specificationStage: {
                         status: "running",
@@ -1575,7 +1663,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                         startedAt: command.createdAt,
                         updatedAt: command.createdAt,
                       },
-                    },
+                    }),
                   },
                 }),
               ),
@@ -1618,6 +1706,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             updatedAt: command.createdAt,
           },
         });
+      }
+      if (workflowSpecificationCapabilityBlockedEvent !== null) {
+        return [workflowSpecificationCapabilityBlockedEvent];
       }
       return [
         ...lifecycleResetEvents,
@@ -1714,7 +1805,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             detail: "The Specification checkpoint response is stale or already resolved.",
           });
         }
-        const nextAttachment: WorkflowAttachment = {
+        const nextAttachment = incrementWorkflowVersion({
           ...workflowCheckpoint.attachment,
           specificationStage: {
             ...stage,
@@ -1727,7 +1818,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             },
             updatedAt: command.createdAt,
           },
-        };
+        });
         const workflowCheckpointResolvedEvent: Omit<OrchestrationEvent, "sequence"> = {
           ...(yield* withEventBase({
             aggregateKind: "thread",
@@ -2088,6 +2179,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Specification completion does not match the authorized Skill Run.",
         });
       }
+      const currentWorkflowVersion = attachment.workflowVersion ?? 0;
+      if (command.expectedWorkstreamVersion !== currentWorkflowVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Stale Workstream version ${command.expectedWorkstreamVersion}; current version is ${currentWorkflowVersion}. Refresh the Workflow Projection before retrying.`,
+        });
+      }
       if (stage.status === "completed") {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -2114,7 +2212,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       const previousPrdVersion = attachment.workflowGraph?.artifacts.reduce(
         (version, artifact) =>
-          artifact.kind === "workflow-prd" ? Math.max(version, artifact.document.version) : version,
+          artifact.kind === "workflow-prd" ? Math.max(version, artifact.version) : version,
         0,
       );
       if (previousPrdVersion !== undefined && command.prd.version <= previousPrdVersion) {
@@ -2141,6 +2239,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           attachment: nextAttachment,
+          artifact: workflowSpecificationArtifactDetail({
+            attachment,
+            document: command.prd,
+          }),
         },
       };
     }
@@ -2555,7 +2657,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                   type: "thread.workflow-specification-failed",
                   payload: {
                     threadId: workflowSpecification.originThread.id,
-                    attachment: {
+                    attachment: incrementWorkflowVersion({
                       ...workflowSpecification.attachment,
                       specificationStage: {
                         ...workflowSpecification.stage,
@@ -2576,7 +2678,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                           : {}),
                         updatedAt: command.createdAt,
                       },
-                    },
+                    }),
                   },
                 }),
               ),
@@ -2748,14 +2850,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
-      const requestId =
-        typeof command.activity.payload === "object" &&
-        command.activity.payload !== null &&
-        "requestId" in command.activity.payload &&
-        typeof (command.activity.payload as { requestId?: unknown }).requestId === "string"
-          ? ((command.activity.payload as { requestId: string })
-              .requestId as OrchestrationEvent["metadata"]["requestId"])
-          : undefined;
+      const decodedRequestMetadata = Option.getOrUndefined(
+        decodeActivityRequestMetadata(command.activity.payload),
+      );
+      const requestId = decodedRequestMetadata?.requestId;
       const activityAppendedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -2783,11 +2881,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         workflowSpecification?.stage.checkpoint?.requestId === checkpoint.requestId;
       const runtimeFailure =
         workflowSpecification !== null && command.activity.kind === "runtime.error"
-          ? typeof command.activity.payload === "object" && command.activity.payload !== null
-            ? typeof (command.activity.payload as { message?: unknown }).message === "string"
-              ? (command.activity.payload as { message: string }).message
-              : command.activity.summary
-            : command.activity.summary
+          ? (Option.getOrUndefined(decodeRuntimeErrorActivityPayload(command.activity.payload))
+              ?.message ?? command.activity.summary)
           : null;
       const workflowSpecificationEvent =
         workflowSpecification !== null &&
@@ -2815,12 +2910,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                         failure: runtimeFailure,
                         updatedAt: command.createdAt,
                       }
-                    : {
-                        ...workflowSpecification.stage,
-                        status: "checkpoint",
-                        checkpoint: checkpoint as WorkflowCheckpointRequest,
-                        updatedAt: command.createdAt,
-                      };
+                    : checkpoint === null
+                      ? workflowSpecification.stage
+                      : {
+                          ...workflowSpecification.stage,
+                          status: "checkpoint",
+                          checkpoint,
+                          updatedAt: command.createdAt,
+                        };
                 return {
                   ...eventBase,
                   causationEventId: activityAppendedEvent.eventId,
@@ -2830,10 +2927,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                       : "thread.workflow-specification-checkpointed",
                   payload: {
                     threadId: workflowSpecification.originThread.id,
-                    attachment: {
+                    attachment: incrementWorkflowVersion({
                       ...workflowSpecification.attachment,
                       specificationStage: nextStage,
-                    },
+                    }),
                   },
                 };
               }),

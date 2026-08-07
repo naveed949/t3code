@@ -20,6 +20,7 @@ import {
   type WayfinderMutationAction,
   type WayfinderResearchAction,
   type WorkflowRunConfiguration,
+  type WorkflowPrdDocument,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -1249,6 +1250,10 @@ function ChatViewContent(props: ChatViewProps) {
   const resolveWorkflowStaleCommand = useAtomCommand(threadEnvironment.resolveWorkflowStale, {
     reportFailure: false,
   });
+  const completeWorkflowSpecificationCommand = useAtomCommand(
+    threadEnvironment.completeWorkflowSpecification,
+    { reportFailure: false },
+  );
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1750,6 +1755,35 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, confirmWorkflowRunCommand],
+  );
+  const completeWorkflowSpecification = useCallback(
+    (prd: WorkflowPrdDocument) => {
+      const attachment = activeThread?.workflowAttachment;
+      const stage = attachment?.specificationStage;
+      const sourceArtifact = attachment?.workflowGraph?.artifacts.find(
+        (artifact) => artifact.kind === "wayfinder-map" && artifact.state === "current",
+      );
+      if (
+        !activeThread ||
+        attachment === undefined ||
+        stage === undefined ||
+        sourceArtifact === undefined
+      ) {
+        return;
+      }
+      void completeWorkflowSpecificationCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeThread.id,
+          specificationThreadId: stage.specificationThreadId,
+          skillRunId: stage.skillRunId,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          sourceWayfinderArtifactId: sourceArtifact.id,
+          prd,
+        },
+      });
+    },
+    [activeThread, completeWorkflowSpecificationCommand],
   );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!activeThread) return;
@@ -6335,6 +6369,7 @@ function ChatViewContent(props: ChatViewProps) {
                         onViewArtifacts={viewWorkflowArtifacts}
                         onAcknowledgeArtifact={acknowledgeWorkflowArtifact}
                         onResolveStale={resolveWorkflowStale}
+                        onCompleteSpecification={completeWorkflowSpecification}
                         defaultProviderInstanceId={activeThread.modelSelection.instanceId}
                         providerOptions={providerStatuses.map((provider) => provider.instanceId)}
                         requiredSkillsByProvider={deriveWorkflowRunRequiredSkillsByProvider(

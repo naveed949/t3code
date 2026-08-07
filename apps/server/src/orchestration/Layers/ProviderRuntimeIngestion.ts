@@ -18,7 +18,6 @@ import {
   type ProviderRuntimeEvent,
   type SkillRunId,
 } from "@t3tools/contracts";
-import { isNativeWayfinderDraftInvocation } from "@t3tools/shared/wayfinderDraft";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
@@ -312,7 +311,7 @@ function requestKindFromCanonicalRequestType(
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
-  wayfinderSkillRunId?: SkillRunId,
+  skillRunId?: SkillRunId,
 ): ReadonlyArray<OrchestrationThreadActivity> {
   const maybeSequence = (() => {
     const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number };
@@ -464,7 +463,7 @@ export function runtimeEventToActivities(
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
             questions: event.payload.questions,
-            ...(wayfinderSkillRunId ? { skillRunId: wayfinderSkillRunId } : {}),
+            ...(skillRunId ? { skillRunId } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -483,7 +482,7 @@ export function runtimeEventToActivities(
           payload: {
             ...(event.requestId ? { requestId: event.requestId } : {}),
             answers: event.payload.answers,
-            ...(wayfinderSkillRunId ? { skillRunId: wayfinderSkillRunId } : {}),
+            ...(skillRunId ? { skillRunId } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -1770,7 +1769,7 @@ const make = Effect.gen(function* () {
         }
       }
 
-      const wayfinderSkillRunId =
+      const skillRunId =
         (event.type === "user-input.requested" || event.type === "user-input.resolved") &&
         eventTurnId !== undefined
           ? yield* projectionTurnRepository
@@ -1780,13 +1779,11 @@ const make = Effect.gen(function* () {
                   const invocation =
                     Option.getOrNull(turn)?.skillInvocation ??
                     Option.getOrNull(pendingTurnStart)?.skillInvocation;
-                  return isNativeWayfinderDraftInvocation(invocation)
-                    ? invocation.skillRunId
-                    : undefined;
+                  return invocation?.skillRunId;
                 }),
               )
           : undefined;
-      const activities = runtimeEventToActivities(event, taskTitle, wayfinderSkillRunId);
+      const activities = runtimeEventToActivities(event, taskTitle, skillRunId);
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, "thread-activity-append").pipe(
           Effect.flatMap((commandId) =>
