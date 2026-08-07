@@ -381,14 +381,22 @@ export const WorkflowRunProviderAssignment = Schema.Struct({
 });
 export type WorkflowRunProviderAssignment = typeof WorkflowRunProviderAssignment.Type;
 
+export const WorkflowRunTargetVerification = Schema.Struct({
+  fixedPoint: Schema.Literals(["verified", "missing", "unverified"]),
+  workstreamBaseline: Schema.Literals(["verified", "missing", "unverified"]),
+  remoteTarget: Schema.Literals(["verified", "missing", "unverified"]),
+});
+export type WorkflowRunTargetVerification = typeof WorkflowRunTargetVerification.Type;
+
 export const WorkflowRunRequiredSkill = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  providerInstanceId: ProviderInstanceId,
   stage: TrimmedNonEmptyString,
-  // Capability discovery may only know a provider's advertised path before
-  // dispatch. The digest becomes mandatory at dispatch; an absent digest is
-  // therefore represented as a truthful `missing` capability.
   skill: Schema.Struct({
     name: TrimmedNonEmptyString,
-    path: TrimmedNonEmptyString,
+    // A missing provider capability has no path. Never invent a path merely
+    // to make a client-supplied capability look discovered.
+    path: Schema.optional(TrimmedNonEmptyString),
     contentDigest: Schema.optional(TrimmedNonEmptyString),
   }),
   status: Schema.Literals(["available", "missing", "changed"]),
@@ -413,6 +421,7 @@ export const WorkflowRunConfiguration = Schema.Struct({
   fixedPoint: TrimmedNonEmptyString,
   workstreamBaseline: TrimmedNonEmptyString,
   remoteTarget: TrimmedNonEmptyString,
+  targetVerification: Schema.optional(WorkflowRunTargetVerification),
   // The environment owns this ceiling. A client can choose a lower execution
   // limit but cannot claim a larger capacity during preflight.
   environmentAutomationCapacity: Schema.Literal(2),
@@ -435,7 +444,10 @@ export const WorkflowRun = Schema.Struct({
   status: Schema.Literal("confirmed"),
   authorityGranted: Schema.Literal(true),
   confirmedAt: IsoDateTime,
-  immutableAtDispatch: Schema.optional(IsoDateTime),
+  // The command identity is retained with the immutable configuration so a
+  // replay cannot silently create a second dispatch for the same run.
+  dispatchIdentity: CommandId,
+  immutableAtDispatch: IsoDateTime,
 });
 export type WorkflowRun = typeof WorkflowRun.Type;
 

@@ -378,6 +378,14 @@ type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
 
+const WORKFLOW_RUN_AUTHORITY = {
+  createWorktree: true,
+  runProvider: true,
+  mutateTracker: false,
+  pushBaseline: false,
+  createDraftPullRequest: false,
+} as const;
+
 function workflowRunBlockers(
   configuration: WorkflowRunConfiguration,
   attachment: OrchestrationThread["workflowAttachment"],
@@ -397,6 +405,9 @@ function workflowRunBlockers(
   if (configuration.executionLimit > configuration.environmentAutomationCapacity) {
     blockers.push("Execution Limit exceeds Environment Automation Capacity.");
   }
+  if (stableStringify(configuration.authority) !== stableStringify(WORKFLOW_RUN_AUTHORITY)) {
+    blockers.push("Run authority does not match the server-granted Workflow Run authority.");
+  }
   if (!/^[0-9a-f]{40}$/i.test(configuration.fixedPoint)) {
     blockers.push("Fixed Point must be a full commit SHA.");
   }
@@ -406,14 +417,41 @@ function workflowRunBlockers(
   if (!/^[^\s/]+\/\S+$/.test(configuration.remoteTarget)) {
     blockers.push("Remote Target must be remote/branch.");
   }
+  const targetVerification = configuration.targetVerification;
+  if (targetVerification === undefined || targetVerification.fixedPoint !== "verified") {
+    blockers.push("Fixed Point was not verified by the server against the repository.");
+  }
+  if (targetVerification === undefined || targetVerification.workstreamBaseline !== "verified") {
+    blockers.push("Workstream Baseline was not verified from the Fixed Point.");
+  }
+  if (targetVerification === undefined || targetVerification.remoteTarget !== "verified") {
+    blockers.push("Remote Target was not verified by the server.");
+  }
   for (const override of configuration.providerOverrides) {
     if (!scopeIds.has(override.nodeId)) {
       blockers.push(`Provider override ${override.nodeId} is outside the exact Run Scope.`);
     }
   }
+  const requiredSkillIdentities = new Set<string>();
   for (const skill of configuration.requiredSkills) {
+    const expectedProvider =
+      configuration.providerOverrides.find((override) => override.nodeId === skill.nodeId)
+        ?.providerInstanceId ?? configuration.defaultProviderInstanceId;
+    if (!scopeIds.has(skill.nodeId)) {
+      blockers.push(`Required Skill ${skill.skill.name} is outside the exact Run Scope.`);
+    }
+    if (skill.providerInstanceId !== expectedProvider) {
+      blockers.push(`Required Skill ${skill.skill.name} is not pinned to its selected provider.`);
+    }
+    const identity = `${skill.nodeId}:${skill.providerInstanceId}:${skill.stage}:${skill.skill.name}`;
+    if (!requiredSkillIdentities.add(identity)) {
+      blockers.push(`Required Skill ${skill.skill.name} has a duplicate dispatch identity.`);
+    }
     if (skill.status !== "available") {
       blockers.push(`Required Skill ${skill.skill.name} is ${skill.status}.`);
+    }
+    if (skill.status === "available" && skill.skill.contentDigest === undefined) {
+      blockers.push(`Required Skill ${skill.skill.name} has no server-pinned content digest.`);
     }
   }
   return blockers;
@@ -1658,6 +1696,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: "confirmed" as const,
           authorityGranted: true as const,
           confirmedAt: command.createdAt,
+          dispatchIdentity: command.commandId,
           immutableAtDispatch: command.createdAt,
         },
       };

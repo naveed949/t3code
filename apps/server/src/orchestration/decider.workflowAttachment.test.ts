@@ -779,6 +779,8 @@ it.layer(NodeServices.layer)("Workflow Run confirmation boundary", (it) => {
         providerOverrides: [],
         requiredSkills: [
           {
+            nodeId: workflowNodeId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
             stage: "implementation",
             skill: {
               name: "implement",
@@ -792,6 +794,11 @@ it.layer(NodeServices.layer)("Workflow Run confirmation boundary", (it) => {
         fixedPoint: "b6c5a7527a9a9fe21672ababec55fd773bbffa0b",
         workstreamBaseline: "feature/development-workflow",
         remoteTarget: "origin/feature/development-workflow",
+        targetVerification: {
+          fixedPoint: "verified" as const,
+          workstreamBaseline: "verified" as const,
+          remoteTarget: "verified" as const,
+        },
         environmentAutomationCapacity: 2 as const,
         executionLimit: 1,
         authority: {

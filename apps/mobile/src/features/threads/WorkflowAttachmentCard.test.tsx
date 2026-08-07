@@ -1,4 +1,4 @@
-import { SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
+import { ProviderInstanceId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
 import type { ReactNode } from "react";
 import { expect, it, vi } from "vite-plus/test";
 
@@ -163,4 +163,34 @@ it("exposes durable workflow marker and stale-resolution controls on mobile", ()
   expect(markup).toContain("33 new or changed upstream artifacts.");
   expect(markup).toContain('aria-label="Acknowledge latest workflow update"');
   expect(markup).toContain('aria-label="Accept upstream workflow update"');
+});
+
+it("exposes provider selection, override, and Workflow Run actions on mobile", () => {
+  const provider = ProviderInstanceId.make("codex");
+  const markup = renderToStaticMarkup(
+    <WorkflowAttachmentCard
+      hint={null}
+      attachment={{
+        originThreadId: ThreadId.make("thread-origin"),
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-08-03T12:00:00.000Z",
+        },
+        attachedAt: "2026-08-03T12:00:00.000Z",
+      }}
+      defaultProviderInstanceId={provider}
+      providerOptions={[provider]}
+      requiredSkillsByProvider={new Map([[provider, []]])}
+      onPreflightRun={() => undefined}
+      onConfirmRun={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain("Default Provider");
+  expect(markup).toContain("Workstream Provider Override");
+  expect(markup).toContain('aria-label="Run read-only workflow preflight"');
 });

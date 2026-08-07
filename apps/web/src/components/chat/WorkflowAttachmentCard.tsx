@@ -259,7 +259,11 @@ function WorkflowRunControls(props: {
   if (props.attachment.workflowRun) {
     return (
       <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs">
-        Workflow Run confirmed. Authority is recorded for the exact scope and configuration.
+        <p className="font-medium">Workflow Run confirmed.</p>
+        <WorkflowRunSummary
+          configuration={props.attachment.workflowRun.configuration}
+          authorityGranted={props.attachment.workflowRun.authorityGranted}
+        />
       </div>
     );
   }
@@ -352,17 +356,23 @@ function WorkflowRunControls(props: {
         </select>
       </label>
       {preview ? (
-        <p
+        <div
           className={
             preview.status === "blocked"
               ? "text-[11px] text-amber-700"
               : "text-[11px] text-emerald-700"
           }
         >
-          {preview.status === "blocked"
-            ? preview.blockers.join(" ")
-            : "Preflight passed. Review the exact authority above."}
-        </p>
+          <p>
+            {preview.status === "blocked"
+              ? preview.blockers.join(" ")
+              : "Read-only preflight passed. Confirm this exact persisted configuration."}
+          </p>
+          <WorkflowRunSummary
+            configuration={preview.configuration}
+            authorityGranted={preview.authorityGranted}
+          />
+        </div>
       ) : null}
       <div className="flex gap-2">
         <button
@@ -384,5 +394,68 @@ function WorkflowRunControls(props: {
         ) : null}
       </div>
     </div>
+  );
+}
+
+function WorkflowRunSummary(props: {
+  readonly configuration: WorkflowRunConfiguration;
+  readonly authorityGranted: boolean;
+}) {
+  const scope = props.configuration.runScope
+    .map((node) => `${node.label} (${node.nodeId})`)
+    .join(", ");
+  const overrides = props.configuration.providerOverrides
+    .map((override) => `${override.nodeId} → ${override.providerInstanceId}`)
+    .join(", ");
+  const verification = props.configuration.targetVerification;
+  return (
+    <dl className="mt-2 grid gap-0.5 text-[11px] text-muted-foreground">
+      <div>
+        <dt className="inline font-medium">Run Scope:</dt> <dd className="inline">{scope}</dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Provider:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.defaultProviderInstanceId}
+          {overrides.length > 0 ? `; overrides ${overrides}` : "; no overrides"}
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Fixed Point:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.fixedPoint} ({verification?.fixedPoint ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Baseline:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.workstreamBaseline} (
+          {verification?.workstreamBaseline ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Remote Target:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.remoteTarget} ({verification?.remoteTarget ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Execution:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.executionLimit}/{props.configuration.environmentAutomationCapacity}
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Authority:</dt>{" "}
+        <dd className="inline">
+          {props.authorityGranted ? "granted" : "not granted"}; create worktree{" "}
+          {props.configuration.authority.createWorktree ? "yes" : "no"}, run provider{" "}
+          {props.configuration.authority.runProvider ? "yes" : "no"}, tracker mutation{" "}
+          {props.configuration.authority.mutateTracker ? "yes" : "no"}, push{" "}
+          {props.configuration.authority.pushBaseline ? "yes" : "no"}, draft PR{" "}
+          {props.configuration.authority.createDraftPullRequest ? "yes" : "no"}
+        </dd>
+      </div>
+    </dl>
   );
 }

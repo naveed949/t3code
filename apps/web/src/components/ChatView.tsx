@@ -20,7 +20,6 @@ import {
   type WayfinderMutationAction,
   type WayfinderResearchAction,
   type WorkflowRunConfiguration,
-  type WorkflowRunRequiredSkill,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -41,6 +40,7 @@ import {
   findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import { deriveWorkflowRunRequiredSkillsByProvider } from "@t3tools/client-runtime/state/workflow-run";
 import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   parseScopedThreadKey,
@@ -257,38 +257,6 @@ import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { WorkflowAttachmentCard } from "./chat/WorkflowAttachmentCard";
 
-function deriveWorkflowRunRequiredSkills(
-  providers: ReadonlyArray<ServerProvider>,
-): ReadonlyArray<WorkflowRunRequiredSkill> {
-  const provider = providers[0];
-  const stages = [
-    ["specification", "to-spec"],
-    ["ticketing", "to-tickets"],
-    ["implementation", "implement"],
-    ["review", "code-review"],
-  ] as const;
-  return stages.map(([stage, name]) => {
-    const skill = provider?.skills.find((candidate) => candidate.name === name);
-    return {
-      stage,
-      skill: {
-        name,
-        path: skill?.path ?? `/skills/${name}/SKILL.md`,
-      },
-      status: skill?.enabled === true ? "available" : "missing",
-    };
-  });
-}
-
-function deriveWorkflowRunRequiredSkillsByProvider(
-  providers: ReadonlyArray<ServerProvider>,
-): ReadonlyMap<ProviderInstanceId, ReadonlyArray<WorkflowRunRequiredSkill>> {
-  return new Map(
-    providers.map(
-      (provider) => [provider.instanceId, deriveWorkflowRunRequiredSkills([provider])] as const,
-    ),
-  );
-}
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -6364,6 +6332,7 @@ function ChatViewContent(props: ChatViewProps) {
                         providerOptions={providerStatuses.map((provider) => provider.instanceId)}
                         requiredSkillsByProvider={deriveWorkflowRunRequiredSkillsByProvider(
                           providerStatuses,
+                          `workflow:${activeThread.workflowAttachment?.workstreamId ?? "unknown"}`,
                         )}
                         onPreflightRun={preflightWorkflowRun}
                         onConfirmRun={confirmWorkflowRun}

@@ -20,7 +20,11 @@ export function WorkflowAttachmentCard(props: {
   readonly onAcknowledgeArtifact?: (artifactId: string) => void;
   readonly onResolveStale?: () => void;
   readonly defaultProviderInstanceId?: ProviderInstanceId;
-  readonly requiredSkills?: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly providerOptions?: ReadonlyArray<ProviderInstanceId>;
+  readonly requiredSkillsByProvider?: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
   readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
 }) {
@@ -30,6 +34,8 @@ export function WorkflowAttachmentCard(props: {
   const [baseline, setBaseline] = useState("");
   const [remoteTarget, setRemoteTarget] = useState("");
   const [executionLimit, setExecutionLimit] = useState<1 | 2>(1);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderInstanceId | null>(null);
+  const [overrideProvider, setOverrideProvider] = useState<ProviderInstanceId | null>(null);
 
   if (props.attachment !== null) {
     const graph = props.attachment.workflowGraph;
@@ -54,7 +60,12 @@ export function WorkflowAttachmentCard(props: {
           <WorkflowRunControls
             attachment={props.attachment}
             defaultProviderInstanceId={props.defaultProviderInstanceId}
-            requiredSkills={props.requiredSkills ?? []}
+            providerOptions={props.providerOptions ?? [props.defaultProviderInstanceId]}
+            selectedProvider={selectedProvider ?? props.defaultProviderInstanceId}
+            overrideProvider={overrideProvider}
+            onSelectedProviderChange={setSelectedProvider}
+            onOverrideProviderChange={setOverrideProvider}
+            requiredSkillsByProvider={props.requiredSkillsByProvider ?? new Map()}
             fixedPoint={fixedPoint}
             baseline={baseline}
             remoteTarget={remoteTarget}
@@ -68,23 +79,36 @@ export function WorkflowAttachmentCard(props: {
           />
         ) : null}
         {props.attachment.workflowRun ? (
-          <Text
-            accessibilityRole="text"
-            className="font-sans text-xs text-emerald-700 dark:text-emerald-300"
-          >
-            Workflow Run confirmed. Exact scope, provider, baseline, and granted authority are
-            recorded.
-          </Text>
+          <View className="gap-1 rounded-xl border border-emerald-500/25 bg-emerald-50/70 p-3 dark:bg-emerald-400/10">
+            <Text
+              accessibilityRole="text"
+              className="font-t3-bold text-xs text-emerald-700 dark:text-emerald-300"
+            >
+              Workflow Run confirmed.
+            </Text>
+            <WorkflowRunSummary
+              configuration={props.attachment.workflowRun.configuration}
+              authorityGranted={props.attachment.workflowRun.authorityGranted}
+            />
+          </View>
         ) : props.attachment.workflowRunPreview ? (
-          <Text
-            accessibilityRole="text"
-            className="font-sans text-xs text-amber-700 dark:text-amber-300"
-          >
-            Workflow Run preflight: {props.attachment.workflowRunPreview.status}.
-            {props.attachment.workflowRunPreview.blockers.length > 0
-              ? ` ${props.attachment.workflowRunPreview.blockers.join(" ")}`
-              : " Review the exact scope and authority on web or desktop to confirm."}
-          </Text>
+          <View className="gap-1 rounded-xl border border-amber-400/30 bg-amber-50/70 p-3 dark:bg-amber-400/10">
+            <Text
+              accessibilityRole="text"
+              className="font-t3-bold text-xs text-amber-700 dark:text-amber-300"
+            >
+              Workflow Run preflight: {props.attachment.workflowRunPreview.status}.
+            </Text>
+            {props.attachment.workflowRunPreview.blockers.length > 0 ? (
+              <Text className="font-sans text-xs text-amber-700 dark:text-amber-300">
+                {props.attachment.workflowRunPreview.blockers.join(" ")}
+              </Text>
+            ) : null}
+            <WorkflowRunSummary
+              configuration={props.attachment.workflowRunPreview.configuration}
+              authorityGranted={props.attachment.workflowRunPreview.authorityGranted}
+            />
+          </View>
         ) : null}
         {props.onOpenWorkstream ? (
           <Pressable
@@ -224,7 +248,13 @@ export function WorkflowAttachmentCard(props: {
 function WorkflowRunControls(props: {
   readonly attachment: WorkflowAttachment;
   readonly defaultProviderInstanceId: ProviderInstanceId;
-  readonly requiredSkills: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly providerOptions: ReadonlyArray<ProviderInstanceId>;
+  readonly selectedProvider: ProviderInstanceId;
+  readonly overrideProvider: ProviderInstanceId | null;
+  readonly requiredSkillsByProvider: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
   readonly fixedPoint: string;
   readonly baseline: string;
   readonly remoteTarget: string;
@@ -233,15 +263,26 @@ function WorkflowRunControls(props: {
   readonly onBaselineChange: (value: string) => void;
   readonly onRemoteTargetChange: (value: string) => void;
   readonly onExecutionLimitChange: (value: 1 | 2) => void;
+  readonly onSelectedProviderChange: (value: ProviderInstanceId) => void;
+  readonly onOverrideProviderChange: (value: ProviderInstanceId | null) => void;
   readonly onPreflightRun: (configuration: WorkflowRunConfiguration) => void;
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
 }) {
   const configuration = (): WorkflowRunConfiguration => ({
     workflowGoal: props.attachment.workflowGoal,
     runScope: [{ nodeId: `workflow:${props.attachment.workstreamId}`, label: "Workstream" }],
-    defaultProviderInstanceId: props.defaultProviderInstanceId,
-    providerOverrides: [],
-    requiredSkills: props.requiredSkills,
+    defaultProviderInstanceId: props.selectedProvider,
+    providerOverrides:
+      props.overrideProvider === null
+        ? []
+        : [
+            {
+              nodeId: `workflow:${props.attachment.workstreamId}`,
+              providerInstanceId: props.overrideProvider,
+            },
+          ],
+    requiredSkills:
+      props.requiredSkillsByProvider.get(props.overrideProvider ?? props.selectedProvider) ?? [],
     fixedPoint: props.fixedPoint.trim(),
     workstreamBaseline: props.baseline.trim(),
     remoteTarget: props.remoteTarget.trim(),
@@ -265,6 +306,65 @@ function WorkflowRunControls(props: {
       <Text className="font-sans text-xs text-neutral-600 dark:text-neutral-300">
         Exact scope: Workstream. Capacity: 2. Authority: create worktree and run provider.
       </Text>
+      <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+        Default Provider
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        {props.providerOptions.map((provider) => (
+          <Pressable
+            key={provider}
+            accessibilityRole="radio"
+            accessibilityLabel={`Use ${provider} as the default provider`}
+            accessibilityState={{ selected: props.selectedProvider === provider }}
+            className={`rounded-lg border px-2 py-1.5 ${
+              props.selectedProvider === provider
+                ? "border-sky-600 bg-sky-100 dark:bg-sky-400/20"
+                : "border-neutral-300 bg-white/60 dark:border-neutral-700 dark:bg-neutral-950/30"
+            }`}
+            onPress={() => props.onSelectedProviderChange(provider)}
+          >
+            <Text className="font-sans text-xs text-neutral-800 dark:text-neutral-100">
+              {provider}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+      <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+        Workstream Provider Override
+      </Text>
+      <View className="flex-row flex-wrap gap-2">
+        <Pressable
+          accessibilityRole="radio"
+          accessibilityLabel="Inherit the default workflow provider"
+          accessibilityState={{ selected: props.overrideProvider === null }}
+          className={`rounded-lg border px-2 py-1.5 ${
+            props.overrideProvider === null
+              ? "border-sky-600 bg-sky-100 dark:bg-sky-400/20"
+              : "border-neutral-300 bg-white/60 dark:border-neutral-700 dark:bg-neutral-950/30"
+          }`}
+          onPress={() => props.onOverrideProviderChange(null)}
+        >
+          <Text className="font-sans text-xs text-neutral-800 dark:text-neutral-100">Inherit</Text>
+        </Pressable>
+        {props.providerOptions.map((provider) => (
+          <Pressable
+            key={provider}
+            accessibilityRole="radio"
+            accessibilityLabel={`Use ${provider} for this workflow workstream`}
+            accessibilityState={{ selected: props.overrideProvider === provider }}
+            className={`rounded-lg border px-2 py-1.5 ${
+              props.overrideProvider === provider
+                ? "border-sky-600 bg-sky-100 dark:bg-sky-400/20"
+                : "border-neutral-300 bg-white/60 dark:border-neutral-700 dark:bg-neutral-950/30"
+            }`}
+            onPress={() => props.onOverrideProviderChange(provider)}
+          >
+            <Text className="font-sans text-xs text-neutral-800 dark:text-neutral-100">
+              {provider}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
       {(
         [
           ["Fixed Point", props.fixedPoint, props.onFixedPointChange],
@@ -314,6 +414,50 @@ function WorkflowRunControls(props: {
           </Pressable>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+function WorkflowRunSummary(props: {
+  readonly configuration: WorkflowRunConfiguration;
+  readonly authorityGranted: boolean;
+}) {
+  const scope = props.configuration.runScope
+    .map((node) => `${node.label} (${node.nodeId})`)
+    .join(", ");
+  const overrides = props.configuration.providerOverrides
+    .map((override) => `${override.nodeId} -> ${override.providerInstanceId}`)
+    .join(", ");
+  const verification = props.configuration.targetVerification;
+  return (
+    <View className="gap-0.5">
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Scope: {scope}
+      </Text>
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Provider: {props.configuration.defaultProviderInstanceId}; {overrides || "no overrides"}
+      </Text>
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Fixed Point: {props.configuration.fixedPoint} ({verification?.fixedPoint ?? "unverified"})
+      </Text>
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Baseline: {props.configuration.workstreamBaseline} (
+        {verification?.workstreamBaseline ?? "unverified"})
+      </Text>
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Remote Target: {props.configuration.remoteTarget} (
+        {verification?.remoteTarget ?? "unverified"})
+      </Text>
+      <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+        Execution: {props.configuration.executionLimit}/
+        {props.configuration.environmentAutomationCapacity}; authority{" "}
+        {props.authorityGranted ? "granted" : "not granted"} (worktree{" "}
+        {props.configuration.authority.createWorktree ? "yes" : "no"}, provider{" "}
+        {props.configuration.authority.runProvider ? "yes" : "no"}, tracker{" "}
+        {props.configuration.authority.mutateTracker ? "yes" : "no"}, push{" "}
+        {props.configuration.authority.pushBaseline ? "yes" : "no"}, draft PR{" "}
+        {props.configuration.authority.createDraftPullRequest ? "yes" : "no"})
+      </Text>
     </View>
   );
 }

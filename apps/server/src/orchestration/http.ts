@@ -86,12 +86,38 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           yield* annotateEnvironmentRequest(args.endpoint.name);
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope);
           const providers =
-            args.payload.type === "thread.turn.start" &&
-            args.payload.skillInvocationRequest !== undefined
+            (args.payload.type === "thread.turn.start" &&
+              args.payload.skillInvocationRequest !== undefined) ||
+            args.payload.type === "thread.workflow.run.preflight" ||
+            args.payload.type === "thread.workflow.run.confirm"
               ? yield* providerRegistry.getProviders
               : undefined;
+          const workflowRunCommand =
+            args.payload.type === "thread.workflow.run.preflight" ||
+            args.payload.type === "thread.workflow.run.confirm";
           const normalizedCommand = yield* normalizeDispatchCommand(args.payload, {
             ...(providers ? { providers } : {}),
+            ...(workflowRunCommand
+              ? {
+                  getWorkflowRunWorkspaceRoot: (threadId) =>
+                    projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+                      Effect.flatMap((thread) =>
+                        Option.match(thread, {
+                          onNone: () => Effect.succeed(null),
+                          onSome: (shell) =>
+                            projectionSnapshotQuery.getProjectShellById(shell.projectId).pipe(
+                              Effect.map((project) =>
+                                Option.match(project, {
+                                  onNone: () => null,
+                                  onSome: (value) => value.workspaceRoot,
+                                }),
+                              ),
+                            ),
+                        }),
+                      ),
+                    ),
+                }
+              : {}),
             getWayfinderHandoffSource: (skillRunId) =>
               loadWayfinderHandoffSource(projectionSnapshotQuery, skillRunId),
           }).pipe(Effect.catch(() => failEnvironmentInvalidRequest("invalid_command")));

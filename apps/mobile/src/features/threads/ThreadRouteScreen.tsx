@@ -11,6 +11,7 @@ import {
   findThreadWayfinderWorkstream,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import { deriveWorkflowRunRequiredSkillsByProvider } from "@t3tools/client-runtime/state/workflow-run";
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import * as Option from "effect/Option";
 import { Atom } from "effect/unstable/reactivity";
@@ -974,6 +975,15 @@ function ThreadRouteContent(
     connectionState: routeConnectionState,
   });
   const serverConfig = routeEnvironmentRuntime?.serverConfig ?? null;
+  const workflowRunNodeId = selectedThread.workflowAttachment
+    ? `workflow:${selectedThread.workflowAttachment.workstreamId}`
+    : "workflow:unattached";
+  const workflowRunProviderOptions =
+    serverConfig?.providers.map((provider) => provider.instanceId) ?? [];
+  const workflowRunRequiredSkillsByProvider = deriveWorkflowRunRequiredSkillsByProvider(
+    serverConfig?.providers ?? [],
+    workflowRunNodeId,
+  );
   const renderThreadRouteBody = (showActionControls: boolean) => (
     <>
       <ThreadGitControls {...threadGitControlProps} showActionControls={showActionControls} />
@@ -1033,6 +1043,8 @@ function ThreadRouteContent(
           onAcknowledgeWorkflowArtifact={acknowledgeWorkflowArtifact}
           onResolveWorkflowStale={resolveWorkflowStale}
           workflowRunProvider={selectedThread?.modelSelection.instanceId}
+          workflowRunProviderOptions={workflowRunProviderOptions}
+          workflowRunRequiredSkillsByProvider={workflowRunRequiredSkillsByProvider}
           onPreflightWorkflowRun={preflightWorkflowRun}
           onConfirmWorkflowRun={confirmWorkflowRun}
           {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}

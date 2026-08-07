@@ -114,6 +114,11 @@ export interface ThreadDetailScreenProps {
   readonly onAcknowledgeWorkflowArtifact?: (artifactId: string) => void;
   readonly onResolveWorkflowStale?: () => void;
   readonly workflowRunProvider?: ProviderInstanceId;
+  readonly workflowRunProviderOptions?: ReadonlyArray<ProviderInstanceId>;
+  readonly workflowRunRequiredSkillsByProvider?: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<import("@t3tools/contracts").WorkflowRunRequiredSkill>
+  >;
   readonly onPreflightWorkflowRun?: (
     configuration: import("@t3tools/contracts").WorkflowRunConfiguration,
   ) => void;
@@ -428,6 +433,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onAcknowledgeArtifact={props.onAcknowledgeWorkflowArtifact}
                     onResolveStale={props.onResolveWorkflowStale}
                     defaultProviderInstanceId={props.workflowRunProvider}
+                    {...(props.workflowRunProviderOptions
+                      ? { providerOptions: props.workflowRunProviderOptions }
+                      : {})}
+                    {...(props.workflowRunRequiredSkillsByProvider
+                      ? { requiredSkillsByProvider: props.workflowRunRequiredSkillsByProvider }
+                      : {})}
                     onPreflightRun={props.onPreflightWorkflowRun}
                     onConfirmRun={props.onConfirmWorkflowRun}
                   />

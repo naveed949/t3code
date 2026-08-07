@@ -281,4 +281,90 @@ effectIt.layer(
       });
     }),
   );
+
+  it.effect(
+    "replaces client capability claims with server-discovered Workflow Run identities",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const tempDirectory = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-normalizer-workflow-run-",
+        });
+        const skillNames = ["to-spec", "to-tickets", "implement", "code-review"] as const;
+        const skills = yield* Effect.forEach(skillNames, (name) =>
+          Effect.gen(function* () {
+            const skillPath = path.join(tempDirectory, `${name}.md`);
+            yield* fileSystem.writeFileString(skillPath, `# ${name}`);
+            return { name, path: skillPath, enabled: true };
+          }),
+        );
+        const provider = {
+          driver: ProviderDriverKind.make("codex"),
+          instanceId: ProviderInstanceId.make("codex"),
+          enabled: true,
+          installed: true,
+          version: "1.0.0",
+          status: "ready" as const,
+          auth: { status: "authenticated" as const },
+          checkedAt: "2026-01-01T00:00:00.000Z",
+          models: [],
+          slashCommands: [],
+          skills,
+        };
+        const normalized = yield* normalizeDispatchCommand(
+          {
+            type: "thread.workflow.run.preflight",
+            commandId: CommandId.make("workflow-run-preflight-normalizer"),
+            threadId: ThreadId.make("thread-workflow-run"),
+            configuration: {
+              workflowGoal: "Ship a release.",
+              runScope: [{ nodeId: "workflow:release", label: "Release" }],
+              defaultProviderInstanceId: provider.instanceId,
+              providerOverrides: [],
+              requiredSkills: [],
+              fixedPoint: "b6c5a7527a9a9fe21672ababec55fd773bbffa0b",
+              workstreamBaseline: "feature/development-workflow",
+              remoteTarget: "origin/feature/development-workflow",
+              environmentAutomationCapacity: 2,
+              executionLimit: 1,
+              authority: {
+                createWorktree: false,
+                runProvider: false,
+                mutateTracker: true,
+                pushBaseline: true,
+                createDraftPullRequest: true,
+              },
+            },
+            createdAt: clientCreatedAt,
+          },
+          { providers: [provider] },
+        );
+
+        expect(normalized.type).toBe("thread.workflow.run.preflight");
+        if (normalized.type !== "thread.workflow.run.preflight") return;
+        expect(normalized.configuration.authority).toEqual({
+          createWorktree: true,
+          runProvider: true,
+          mutateTracker: false,
+          pushBaseline: false,
+          createDraftPullRequest: false,
+        });
+        expect(normalized.configuration.requiredSkills).toHaveLength(4);
+        const implementationSkill = normalized.configuration.requiredSkills.find(
+          (skill) => skill.skill.name === "implement",
+        );
+        expect(implementationSkill).toMatchObject({
+          nodeId: "workflow:release",
+          providerInstanceId: provider.instanceId,
+          status: "available",
+          skill: { name: "implement", contentDigest: expect.stringMatching(/^sha256:/) },
+        });
+        expect(normalized.configuration.targetVerification).toEqual({
+          fixedPoint: "unverified",
+          workstreamBaseline: "unverified",
+          remoteTarget: "unverified",
+        });
+      }),
+  );
 });
