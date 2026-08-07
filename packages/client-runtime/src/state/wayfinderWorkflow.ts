@@ -4,6 +4,8 @@ import type {
   WayfinderMutation,
   WayfinderResearchState,
   WayfinderSynchronizationState,
+  WorkflowAttachment,
+  WorkflowTicketImplementation,
 } from "@t3tools/contracts";
 import {
   describeWayfinderReadinessBlocker,
@@ -32,6 +34,7 @@ export interface WayfinderWorkflowAction {
     | "retry-research"
     | "retry-thread-linkage"
     | "start-research"
+    | "start-ticket-implementation"
     | "start-work";
   readonly label: string;
   readonly enabled: boolean;
@@ -53,6 +56,7 @@ export interface WayfinderWorkflowOutlineNode {
     readonly blockedBy: ReadonlyArray<number>;
     readonly enables: ReadonlyArray<number>;
   };
+  readonly ticketImplementation?: WorkflowTicketImplementation | null;
   readonly linkedThreadId: ThreadId | null;
   readonly allowedActions: ReadonlyArray<WayfinderWorkflowAction>;
   readonly accessibilityLabel: string;
@@ -186,8 +190,19 @@ function nodeAttention(input: {
 function nodeState(input: {
   readonly ticket: WayfinderMapProjection["tickets"][number];
   readonly frontier: ReadonlySet<number>;
+  readonly ticketImplementation: WorkflowTicketImplementation | null;
+  readonly workflowRunnable: boolean;
 }): WayfinderWorkflowOutlineNode["state"] {
   if (input.ticket.state === "closed") return { kind: "completed", label: "Completed" };
+  if (
+    input.ticketImplementation?.status === "dispatching" ||
+    input.ticketImplementation?.status === "implementing" ||
+    input.ticketImplementation?.status === "reviewing" ||
+    input.ticketImplementation?.status === "reviewed"
+  ) {
+    return { kind: "active", label: "Active" };
+  }
+  if (input.workflowRunnable) return { kind: "runnable", label: "Runnable" };
   if (input.frontier.has(input.ticket.number)) return { kind: "runnable", label: "Runnable" };
   if (input.ticket.claimedBy !== null) return { kind: "active", label: "Active" };
   return { kind: "blocked", label: "Blocked" };
@@ -207,6 +222,8 @@ function allowedActions(input: {
   readonly linkedThreadId: ThreadId | null;
   readonly mutation: WayfinderMutation | null;
   readonly research: ReturnType<typeof deriveWayfinderResearchModel>["tickets"][number] | null;
+  readonly ticketImplementation: WorkflowTicketImplementation | null;
+  readonly workflowRunnable: boolean;
   readonly mutationsEnabled: boolean;
 }): ReadonlyArray<WayfinderWorkflowAction> {
   const actions: WayfinderWorkflowAction[] = [
@@ -261,6 +278,21 @@ function allowedActions(input: {
       }),
     );
   }
+  if (
+    input.workflowRunnable &&
+    (input.ticketImplementation === null ||
+      input.ticketImplementation.status === "failed" ||
+      input.ticketImplementation.status === "needs-correction")
+  ) {
+    actions.push(
+      action({
+        id: "start-ticket-implementation",
+        label:
+          input.ticketImplementation === null ? "Start implementation" : "Retry implementation",
+        enabled: input.mutationsEnabled,
+      }),
+    );
+  }
   if (claim.canRelease) {
     actions.push(
       action({ id: "release-ticket", label: "Release", enabled: input.mutationsEnabled }),
@@ -277,6 +309,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly readiness: WayfinderReadiness;
   readonly mutationsEnabled: boolean;
+  readonly workflowAttachment?: WorkflowAttachment | null;
 }): WayfinderWorkflowViewModel {
   const frontier = new Set(input.map.frontier);
   const linkedThreadByTicket = new Map(
@@ -291,6 +324,16 @@ export function deriveWayfinderWorkflowViewModel(input: {
   });
   const researchByTicket = new Map(
     researchModel.tickets.map((ticket) => [ticket.ticketNumber, ticket] as const),
+  );
+  const ticketImplementationByNumber = new Map(
+    [...(input.workflowAttachment?.ticketImplementations ?? [])]
+      .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
+      .map((implementation) => [implementation.ticketNumber, implementation] as const),
+  );
+  const workflowTicketNodes = new Map(
+    (input.workflowAttachment?.workflowGraph?.nodes ?? [])
+      .filter((node): node is Extract<typeof node, { kind: "ticket" }> => node.kind === "ticket")
+      .map((node) => [node.ticketNumber, node] as const),
   );
   const attention =
     mutationAttention(input.mutation) ??
@@ -314,11 +357,23 @@ export function deriveWayfinderWorkflowViewModel(input: {
       ticketNumber: ticketThread.ticketNumber,
       label: `Ticket #${ticketThread.ticketNumber} has an active linked thread.`,
     }));
+  const activeImplementationRuns = [...ticketImplementationByNumber.values()]
+    .filter((implementation) =>
+      ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+    )
+    .map((implementation) => ({
+      kind: "ticket" as const,
+      ticketNumber: implementation.ticketNumber,
+      label: `Ticket #${implementation.ticketNumber} implementation is ${implementation.status}.`,
+    }));
   const orderedTickets = [...input.map.tickets].sort((left, right) => left.number - right.number);
   const outline = orderedTickets.map((ticket) => {
     const research = researchByTicket.get(ticket.number) ?? null;
     const linkedThreadId = linkedThreadByTicket.get(ticket.number) ?? null;
-    const state = nodeState({ ticket, frontier });
+    const ticketImplementation = ticketImplementationByNumber.get(ticket.number) ?? null;
+    const workflowTicketNode = workflowTicketNodes.get(ticket.number);
+    const workflowRunnable = workflowTicketNode?.implementationAvailability?.canStart === true;
+    const state = nodeState({ ticket, frontier, ticketImplementation, workflowRunnable });
     const attentionForNode = nodeAttention({
       ticketNumber: ticket.number,
       mutation: input.mutation,
@@ -339,6 +394,12 @@ export function deriveWayfinderWorkflowViewModel(input: {
         ? `Last comment ${ticket.lastCommentedAt}.`
         : `Projection synchronized ${input.map.lastSynchronizedAt}.`,
       ...(research ? [`Research run: ${research.status}.`] : []),
+      ...(ticketImplementation
+        ? [
+            `Ticket implementation: ${ticketImplementation.status}.`,
+            `Implementation Fixed Point: ${ticketImplementation.fixedPoint}.`,
+          ]
+        : []),
     ];
     const relationships = [
       blockedBy.length > 0
@@ -346,6 +407,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
         : null,
       enables.length > 0 ? `Enables ${enables.map((number) => `#${number}`).join(", ")}.` : null,
       linkedThreadId !== null ? "Has a linked thread." : null,
+      ticketImplementation ? `Ticket implementation is ${ticketImplementation.status}.` : null,
       attentionForNode.kind !== "none" ? attentionForNode.label : null,
     ].filter((relationship): relationship is string => relationship !== null);
     return {
@@ -358,6 +420,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
       evidence,
       history,
       lineage: { blockedBy, enables },
+      ticketImplementation,
       linkedThreadId,
       allowedActions: allowedActions({
         ticket,
@@ -365,6 +428,8 @@ export function deriveWayfinderWorkflowViewModel(input: {
         linkedThreadId,
         mutation: input.mutation,
         research,
+        ticketImplementation,
+        workflowRunnable,
         mutationsEnabled: input.mutationsEnabled,
       }),
       accessibilityLabel: [
@@ -395,7 +460,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
         url: input.map.canonicalReference.url,
       },
       attention,
-      activeRuns: [...activeResearch, ...activeTicketRuns],
+      activeRuns: [...activeResearch, ...activeTicketRuns, ...activeImplementationRuns],
       ticketFrontier,
       progress: {
         completed,

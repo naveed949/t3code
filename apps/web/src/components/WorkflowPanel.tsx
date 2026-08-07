@@ -23,7 +23,12 @@ export function nextWorkflowOutlineIndex(
 function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
   readonly onOpenThread?: (threadId: ThreadId) => void;
+  readonly onStartTicketImplementation?: (nodeId: string) => void;
 }) {
+  const implementation = props.node.ticketImplementation ?? null;
+  const implementationAction = props.node.allowedActions.find(
+    (action) => action.id === "start-ticket-implementation" && action.enabled,
+  );
   return (
     <aside
       aria-labelledby="workflow-node-inspector-heading"
@@ -112,6 +117,81 @@ function WorkflowNodeInspector(props: {
         )}
       </section>
 
+      <section aria-labelledby="workflow-node-ticket-implementation">
+        <h5
+          id="workflow-node-ticket-implementation"
+          className="text-xs font-semibold text-foreground"
+        >
+          Ticket implementation
+        </h5>
+        {implementation ? (
+          <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+            <p className="font-medium text-foreground">
+              Milestone: {implementation.status.replaceAll("-", " ")}
+            </p>
+            <p>Fixed Point: {implementation.fixedPoint}</p>
+            <p>Implementation thread: {implementation.implementationThreadId ?? "Pending"}</p>
+            <p>Worktree: {implementation.worktreePath ?? "Pending"}</p>
+            <p>Branch: {implementation.branch ?? "Pending"}</p>
+            {implementation.diff ? (
+              <p>
+                Diff: {implementation.diff.files.length} files, +{implementation.diff.additions} -
+                {implementation.diff.deletions}
+              </p>
+            ) : (
+              <p>Diff: Not captured.</p>
+            )}
+            <p>
+              Validation:{" "}
+              {implementation.validation.length === 0
+                ? "Not recorded."
+                : implementation.validation
+                    .map((evidence) => `${evidence.name}: ${evidence.status}`)
+                    .join(", ")}
+            </p>
+            {implementation.review ? (
+              <div className="rounded border border-border/70 p-2">
+                <p className="font-medium text-foreground">
+                  Code Review: {implementation.review.status}
+                </p>
+                <p>{implementation.review.summary}</p>
+                {implementation.review.findings.length > 0 ? (
+                  <ul className="mt-1 space-y-1">
+                    {implementation.review.findings.map((finding) => (
+                      <li key={`${finding.severity}:${finding.summary}`}>
+                        {finding.severity}: {finding.summary}
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            ) : (
+              <p>Code Review: Pending structured evidence.</p>
+            )}
+          </div>
+        ) : (
+          <p className="mt-1 text-xs text-muted-foreground">Not started.</p>
+        )}
+        {implementation?.implementationThreadId && props.onOpenThread ? (
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground"
+            onClick={() => props.onOpenThread?.(implementation.implementationThreadId!)}
+          >
+            Open implementation thread
+          </button>
+        ) : null}
+        {implementationAction && props.onStartTicketImplementation ? (
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground"
+            onClick={() => props.onStartTicketImplementation?.(props.node.id)}
+          >
+            {implementationAction.label}
+          </button>
+        ) : null}
+      </section>
+
       <section aria-labelledby="workflow-node-actions">
         <h5 id="workflow-node-actions" className="text-xs font-semibold text-foreground">
           Allowed Actions
@@ -139,6 +219,7 @@ function WorkflowNodeInspector(props: {
 export const WorkflowPanel = memo(function WorkflowPanel(props: {
   readonly model: WayfinderWorkflowViewModel;
   readonly onOpenThread?: (threadId: ThreadId) => void;
+  readonly onStartTicketImplementation?: (nodeId: string) => void;
   readonly initialSelectedNodeId?: string | null;
   readonly selectedNodeId?: string | null;
   readonly onSelectNode?: (nodeId: string | null) => void;
@@ -319,8 +400,8 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
             Workflow Outline
           </h4>
           <p className="mt-1 text-xs text-muted-foreground">
-            Complete projected nodes and relationships. Select a node to inspect it; selection does
-            not dispatch workflow work.
+            Complete projected nodes and relationships. Select a node to inspect it and start an
+            eligible ticket implementation.
           </p>
         </div>
         <ol
@@ -379,6 +460,9 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
         <WorkflowNodeInspector
           node={selectedNode}
           {...(props.onOpenThread ? { onOpenThread: props.onOpenThread } : {})}
+          {...(props.onStartTicketImplementation
+            ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
         />
       ) : (
         <p className="text-xs text-muted-foreground">

@@ -218,6 +218,10 @@
     "./workflowGraph": {
       "types": "./src/workflowGraph.ts",
       "import": "./src/workflowGraph.ts"
+    },
+    "./workflowTicketImplementation": {
+      "types": "./src/workflowTicketImplementation.ts",
+      "import": "./src/workflowTicketImplementation.ts"
     }
   },
   "scripts": {

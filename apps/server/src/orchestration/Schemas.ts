@@ -48,6 +48,8 @@ import {
   ThreadWorkflowTicketBatchPublicationRequestedPayload as ContractsThreadWorkflowTicketBatchPublicationRequestedPayloadSchema,
   ThreadWorkflowTicketBatchPublicationUpdatedPayload as ContractsThreadWorkflowTicketBatchPublicationUpdatedPayloadSchema,
   ThreadWorkflowTicketingFailedPayload as ContractsThreadWorkflowTicketingFailedPayloadSchema,
+  ThreadWorkflowTicketImplementationRequestedPayload as ContractsThreadWorkflowTicketImplementationRequestedPayloadSchema,
+  ThreadWorkflowTicketImplementationUpdatedPayload as ContractsThreadWorkflowTicketImplementationUpdatedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -126,3 +128,7 @@ export const ThreadWorkflowTicketBatchPublicationUpdatedPayload =
   ContractsThreadWorkflowTicketBatchPublicationUpdatedPayloadSchema;
 export const ThreadWorkflowTicketingFailedPayload =
   ContractsThreadWorkflowTicketingFailedPayloadSchema;
+export const ThreadWorkflowTicketImplementationRequestedPayload =
+  ContractsThreadWorkflowTicketImplementationRequestedPayloadSchema;
+export const ThreadWorkflowTicketImplementationUpdatedPayload =
+  ContractsThreadWorkflowTicketImplementationUpdatedPayloadSchema;

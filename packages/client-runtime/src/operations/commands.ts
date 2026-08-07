@@ -61,6 +61,8 @@ export type ResolveWorkflowStaleInput = CommandInput<"thread.workflow.stale.reso
 export type CompleteWorkflowSpecificationInput =
   CommandInput<"thread.workflow.specification.complete">;
 export type PublishWorkflowTicketBatchInput = CommandInput<"thread.workflow.ticketing.publish">;
+export type StartWorkflowTicketImplementationInput =
+  CommandInput<"thread.workflow.ticket-implementation.start">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -448,6 +450,20 @@ export const publishWorkflowTicketBatch: (input: PublishWorkflowTicketBatchInput
       createdAt: metadata.createdAt,
     });
   });
+
+export const startWorkflowTicketImplementation: (
+  input: StartWorkflowTicketImplementationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.startWorkflowTicketImplementation")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.ticket-implementation.start",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
 
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.revertThreadCheckpoint")(function* (input) {

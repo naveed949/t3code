@@ -588,6 +588,10 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.reconcileWayfinderMap,
     "reconcile Wayfinder map",
   );
+  const startWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.startTicketImplementation,
+    "start ticket implementation",
+  );
   const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
@@ -768,6 +772,7 @@ function WayfinderWorkbenchContent(props: {
     synchronization,
     readiness: workflowReadiness,
     mutationsEnabled,
+    workflowAttachment: workstream?.workflowAttachment ?? null,
   });
   const toSpecSkill =
     serverConfig?.providers
@@ -837,6 +842,24 @@ function WayfinderWorkbenchContent(props: {
         ]),
     });
   };
+  const startTicketImplementation = useCallback(
+    (ticketNodeId: string) => {
+      const attachment = workstream?.workflowAttachment;
+      if (attachment === null || attachment === undefined) return;
+      const metadata = makeTurnCommandMetadata();
+      void startWorkflowTicketImplementationCommand({
+        environmentId: props.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          ticketNodeId,
+          actionIdentity: `mobile:${metadata.commandId}`,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+        },
+      });
+    },
+    [props.environmentId, startWorkflowTicketImplementationCommand, workstream],
+  );
 
   return (
     <ScrollView
@@ -914,7 +937,11 @@ function WayfinderWorkbenchContent(props: {
         )}
       </View>
 
-      <WorkflowPanel model={workflowPresentation} onOpenThread={props.onReturnToThread} />
+      <WorkflowPanel
+        model={workflowPresentation}
+        onOpenThread={props.onReturnToThread}
+        onStartTicketImplementation={startTicketImplementation}
+      />
 
       {linkedTicketAction === null ? (
         <View className="gap-3 rounded-xl border border-border bg-card p-4">

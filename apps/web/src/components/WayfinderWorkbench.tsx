@@ -25,6 +25,7 @@ import type {
   WayfinderResearchAction,
   WayfinderResearchState,
   WayfinderSynchronizationState,
+  WorkflowAttachment,
   WorkflowGraph,
 } from "@t3tools/contracts";
 import {
@@ -568,6 +569,8 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly toSpecAvailable?: boolean;
   readonly onStartToSpec?: (acknowledgedIncomplete: boolean) => void;
   readonly workflowGraph?: WorkflowGraph | null;
+  readonly workflowAttachment?: WorkflowAttachment | null;
+  readonly onStartTicketImplementation?: (nodeId: string) => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [workflowWorkspaceOpen, setWorkflowWorkspaceOpen] = useState(false);
@@ -666,6 +669,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
     synchronization: props.synchronization,
     readiness: workflowReadiness,
     mutationsEnabled,
+    workflowAttachment: props.workflowAttachment ?? null,
   });
   const startToSpec = () => {
     if (!props.onStartToSpec) return;
@@ -748,6 +752,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           onSelectNode={setSelectedWorkflowNodeId}
           onOpenWorkspace={() => setWorkflowWorkspaceOpen(true)}
           {...(props.onReturnToThread ? { onOpenThread: props.onReturnToThread } : {})}
+          {...(props.onStartTicketImplementation
+            ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
         />
 
         <Dialog open={workflowWorkspaceOpen} onOpenChange={setWorkflowWorkspaceOpen}>

@@ -14,6 +14,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -721,6 +722,121 @@ export const WorkflowTicketingStage = Schema.Struct({
 });
 export type WorkflowTicketingStage = typeof WorkflowTicketingStage.Type;
 
+export const WorkflowTicketImplementationStatus = Schema.Literals([
+  "dispatching",
+  "implementing",
+  "reviewing",
+  "reviewed",
+  "needs-correction",
+  "failed",
+]);
+export type WorkflowTicketImplementationStatus = typeof WorkflowTicketImplementationStatus.Type;
+
+export const WorkflowTicketImplementationAvailability = Schema.Struct({
+  status: Schema.Literals([
+    "available",
+    "blocked",
+    "active",
+    "reviewed",
+    "needs-correction",
+    "failed",
+  ]),
+  canStart: Schema.Boolean,
+  reason: TrimmedNonEmptyString,
+});
+export type WorkflowTicketImplementationAvailability =
+  typeof WorkflowTicketImplementationAvailability.Type;
+
+export const WorkflowValidationEvidence = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  status: Schema.Literals(["passed", "failed", "not-run"]),
+  command: Schema.optional(TrimmedNonEmptyString),
+  detail: Schema.optional(Schema.String),
+  recordedAt: IsoDateTime,
+});
+export type WorkflowValidationEvidence = typeof WorkflowValidationEvidence.Type;
+const WorkflowTicketImplementationValidationList = Schema.Array(WorkflowValidationEvidence).check(
+  Schema.isMaxLength(128),
+);
+
+export const WorkflowDiffEvidenceFile = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type WorkflowDiffEvidenceFile = typeof WorkflowDiffEvidenceFile.Type;
+const WorkflowTicketImplementationDiffFiles = Schema.Array(WorkflowDiffEvidenceFile).check(
+  Schema.isMaxLength(512),
+);
+
+export const WorkflowDiffEvidence = Schema.Struct({
+  fixedPoint: TrimmedNonEmptyString,
+  files: WorkflowTicketImplementationDiffFiles,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+  capturedAt: IsoDateTime,
+});
+export type WorkflowDiffEvidence = typeof WorkflowDiffEvidence.Type;
+
+export const WorkflowCodeReviewFinding = Schema.Struct({
+  severity: Schema.Literals(["must-fix", "suggestion"]),
+  summary: TrimmedNonEmptyString,
+  file: Schema.optional(TrimmedNonEmptyString),
+  line: Schema.optional(PositiveInt),
+});
+export type WorkflowCodeReviewFinding = typeof WorkflowCodeReviewFinding.Type;
+
+const WorkflowTicketImplementationAcceptanceCriteria = Schema.String.check(
+  Schema.isMaxLength(32_000),
+);
+const WorkflowTicketImplementationReviewFindings = Schema.Array(WorkflowCodeReviewFinding).check(
+  Schema.isMaxLength(128),
+);
+
+export const WorkflowCodeReviewEvidence = Schema.Struct({
+  status: Schema.Literals(["passed", "must-fix"]),
+  skillRunId: SkillRunId,
+  fixedPoint: TrimmedNonEmptyString,
+  summary: TrimmedNonEmptyString,
+  findings: WorkflowTicketImplementationReviewFindings,
+  completedAt: IsoDateTime,
+});
+export type WorkflowCodeReviewEvidence = typeof WorkflowCodeReviewEvidence.Type;
+
+/**
+ * Projection-owned evidence for one ticket implementation. A `reviewed`
+ * implementation is deliberately not a completed ticket: integration and
+ * publication remain downstream workflow stages.
+ */
+export const WorkflowTicketImplementation = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  workstreamId: WorkstreamId,
+  nodeId: TrimmedNonEmptyString,
+  ticketKey: TrimmedNonEmptyString,
+  ticketNumber: PositiveInt,
+  title: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
+  status: WorkflowTicketImplementationStatus,
+  originThreadId: ThreadId,
+  implementationThreadId: Schema.NullOr(ThreadId),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  fixedPoint: TrimmedNonEmptyString,
+  acceptanceCriteria: WorkflowTicketImplementationAcceptanceCriteria,
+  providerInstanceId: ProviderInstanceId,
+  implementSkill: PinnedSkillIdentity,
+  reviewSkill: PinnedSkillIdentity,
+  implementationSkillRunId: Schema.NullOr(SkillRunId),
+  reviewSkillRunId: Schema.NullOr(SkillRunId),
+  validation: WorkflowTicketImplementationValidationList,
+  diff: Schema.NullOr(WorkflowDiffEvidence),
+  review: Schema.NullOr(WorkflowCodeReviewEvidence),
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowTicketImplementation = typeof WorkflowTicketImplementation.Type;
+
 export const WorkflowStaleResolution = Schema.Literal("accept-upstream");
 export type WorkflowStaleResolution = typeof WorkflowStaleResolution.Type;
 
@@ -761,6 +877,8 @@ export const WorkflowGraphNode = Schema.Union([
     state: Schema.Literals(["current", "stale"]),
     sourceArtifactId: Schema.NullOr(TrimmedNonEmptyString),
     includedInRun: Schema.Boolean,
+    held: Schema.optional(Schema.Boolean),
+    implementationAvailability: Schema.optional(WorkflowTicketImplementationAvailability),
     resolution: WorkflowGraphNodeResolution,
     staleAt: Schema.optional(IsoDateTime),
   }),
@@ -829,6 +947,7 @@ export const WorkflowAttachment = Schema.Struct({
   specificationStage: Schema.optional(WorkflowSpecificationStage),
   ticketingStage: Schema.optional(WorkflowTicketingStage),
   trackerProjection: Schema.optional(WorkflowTrackerProjection),
+  ticketImplementations: Schema.optional(Schema.Array(WorkflowTicketImplementation)),
   // The optimistic command version is optional for attachments written before
   // the Specification stage existed; those attachments start at version 0.
   workflowVersion: Schema.optional(NonNegativeInt),
@@ -1553,6 +1672,17 @@ const ThreadWorkflowTicketingPublishCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketImplementationStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  ticketNodeId: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1600,6 +1730,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowStaleResolveCommand,
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
+  ThreadWorkflowTicketImplementationStartCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1638,6 +1769,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowStaleResolveCommand,
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
+  ThreadWorkflowTicketImplementationStartCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1729,6 +1861,27 @@ const ThreadWorkflowTicketingPublicationUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketImplementationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  implementation: WorkflowTicketImplementation,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.review.record"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  review: WorkflowCodeReviewEvidence,
+  validation: Schema.Array(WorkflowValidationEvidence),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWayfinderMutationUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.wayfinder.mutation.update"),
   commandId: CommandId,
@@ -1776,6 +1929,8 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadRevertCompleteCommand,
   ThreadWayfinderPublicationUpdateCommand,
   ThreadWorkflowTicketingPublicationUpdateCommand,
+  ThreadWorkflowTicketImplementationUpdateCommand,
+  ThreadWorkflowTicketImplementationReviewRecordCommand,
   ThreadWayfinderMutationUpdateCommand,
   ThreadWayfinderReconciliationUpdateCommand,
   ThreadWayfinderResearchUpdateCommand,
@@ -1837,6 +1992,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-ticket-batch-publication-requested",
   "thread.workflow-ticket-batch-publication-updated",
   "thread.workflow-ticketing-failed",
+  "thread.workflow-ticket-implementation-requested",
+  "thread.workflow-ticket-implementation-updated",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -2181,6 +2338,19 @@ export const ThreadWorkflowTicketingFailedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowTicketImplementationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  implementation: WorkflowTicketImplementation,
+  attachment: WorkflowAttachment,
+  createdAt: IsoDateTime,
+});
+
+export const ThreadWorkflowTicketImplementationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  implementation: WorkflowTicketImplementation,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -2479,6 +2649,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-ticketing-failed"),
     payload: ThreadWorkflowTicketingFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-ticket-implementation-requested"),
+    payload: ThreadWorkflowTicketImplementationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-ticket-implementation-updated"),
+    payload: ThreadWorkflowTicketImplementationUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

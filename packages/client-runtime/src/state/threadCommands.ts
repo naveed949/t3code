@@ -21,6 +21,7 @@ import {
   type AcknowledgeWorkflowArtifactInput,
   type ResolveWorkflowStaleInput,
   type CompleteWorkflowSpecificationInput,
+  type StartWorkflowTicketImplementationInput,
   type RevertThreadCheckpointInput,
   type SetThreadInteractionModeInput,
   type SetThreadRuntimeModeInput,
@@ -50,6 +51,7 @@ import {
   acknowledgeWorkflowArtifact,
   resolveWorkflowStale,
   completeWorkflowSpecification,
+  startWorkflowTicketImplementation,
   revertThreadCheckpoint,
   setThreadInteractionMode,
   setThreadRuntimeMode,
@@ -83,6 +85,7 @@ export type {
   AcknowledgeWorkflowArtifactInput,
   ResolveWorkflowStaleInput,
   CompleteWorkflowSpecificationInput,
+  StartWorkflowTicketImplementationInput,
   RevertThreadCheckpointInput,
   SetThreadInteractionModeInput,
   SetThreadRuntimeModeInput,
@@ -265,6 +268,13 @@ export function createThreadEnvironmentAtoms<R, E>(
     completeWorkflowSpecification: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:complete-workflow-specification",
       execute: (input: CompleteWorkflowSpecificationInput) => completeWorkflowSpecification(input),
+      scheduler,
+      concurrency,
+    }),
+    startTicketImplementation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:start-ticket-implementation",
+      execute: (input: StartWorkflowTicketImplementationInput) =>
+        startWorkflowTicketImplementation(input),
       scheduler,
       concurrency,
     }),

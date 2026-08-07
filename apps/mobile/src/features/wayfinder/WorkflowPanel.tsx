@@ -12,8 +12,13 @@ import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onStartTicketImplementation?: (nodeId: string) => void;
 }) {
   const canonicalEvidence = props.node.evidence.find((evidence) => evidence.url !== undefined);
+  const implementation = props.node.ticketImplementation ?? null;
+  const implementationAction = props.node.allowedActions.find(
+    (action) => action.id === "start-ticket-implementation" && action.enabled,
+  );
   return (
     <View
       accessibilityRole="summary"
@@ -100,6 +105,91 @@ function WorkflowNodeInspector(props: {
         )}
       </View>
 
+      <View>
+        <Text accessibilityRole="header" className="text-xs font-semibold text-foreground">
+          Ticket implementation
+        </Text>
+        {implementation ? (
+          <View className="mt-1 gap-1">
+            <Text className="text-xs font-semibold text-foreground">
+              Milestone: {implementation.status.replaceAll("-", " ")}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Fixed Point: {implementation.fixedPoint}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Implementation thread: {implementation.implementationThreadId ?? "Pending"}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Worktree: {implementation.worktreePath ?? "Pending"}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Branch: {implementation.branch ?? "Pending"}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Diff:{" "}
+              {implementation.diff
+                ? `${implementation.diff.files.length} files, +${implementation.diff.additions} -${implementation.diff.deletions}`
+                : "Not captured."}
+            </Text>
+            <Text className="text-xs text-foreground-muted">
+              Validation:{" "}
+              {implementation.validation.length === 0
+                ? "Not recorded."
+                : implementation.validation
+                    .map((evidence) => `${evidence.name}: ${evidence.status}`)
+                    .join(", ")}
+            </Text>
+            {implementation.review ? (
+              <View className="rounded border border-border p-2">
+                <Text className="text-xs font-semibold text-foreground">
+                  Code Review: {implementation.review.status}
+                </Text>
+                <Text className="mt-1 text-xs text-foreground-muted">
+                  {implementation.review.summary}
+                </Text>
+                {implementation.review.findings.map((finding) => (
+                  <Text
+                    key={`${finding.severity}:${finding.summary}`}
+                    className="mt-1 text-xs text-foreground-muted"
+                  >
+                    {finding.severity}: {finding.summary}
+                  </Text>
+                ))}
+              </View>
+            ) : (
+              <Text className="text-xs text-foreground-muted">
+                Code Review: Pending structured evidence.
+              </Text>
+            )}
+          </View>
+        ) : (
+          <Text className="mt-1 text-xs text-foreground-muted">Not started.</Text>
+        )}
+        {implementation?.implementationThreadId ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => props.onOpenThread(implementation.implementationThreadId!)}
+          >
+            <Text className="text-xs font-semibold text-foreground">
+              Open implementation thread
+            </Text>
+          </Pressable>
+        ) : null}
+        {implementationAction && props.onStartTicketImplementation ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => props.onStartTicketImplementation?.(props.node.id)}
+          >
+            <Text className="text-xs font-semibold text-foreground">
+              {implementationAction.label}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+
       <View
         accessibilityRole="summary"
         accessibilityLabel={`Allowed Actions: ${props.node.allowedActions
@@ -131,6 +221,7 @@ function WorkflowNodeInspector(props: {
 export function WorkflowPanel(props: {
   readonly model: WayfinderWorkflowViewModel;
   readonly onOpenThread: (threadId: ThreadId) => void;
+  readonly onStartTicketImplementation?: (nodeId: string) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = props.model.outline.find((node) => node.id === selectedNodeId) ?? null;
@@ -258,7 +349,8 @@ export function WorkflowPanel(props: {
           Workflow Outline
         </Text>
         <Text className="text-xs leading-5 text-foreground-muted">
-          Complete projected nodes and relationships. Selecting a node only opens its inspector.
+          Complete projected nodes and relationships. Selecting a node opens its inspector and any
+          eligible implementation action.
         </Text>
         <View className="gap-2">
           {props.model.outline.map((node) => (
@@ -289,7 +381,13 @@ export function WorkflowPanel(props: {
       </View>
 
       {selectedNode ? (
-        <WorkflowNodeInspector node={selectedNode} onOpenThread={props.onOpenThread} />
+        <WorkflowNodeInspector
+          node={selectedNode}
+          onOpenThread={props.onOpenThread}
+          {...(props.onStartTicketImplementation
+            ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
+        />
       ) : (
         <Text className="text-xs text-foreground-muted">
           Select a workflow node to inspect evidence, history, lineage, linked threads, and Allowed

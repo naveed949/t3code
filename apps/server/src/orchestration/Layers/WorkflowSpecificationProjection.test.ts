@@ -36,7 +36,10 @@ import {
 } from "../Services/RuntimeReceiptBus.ts";
 import { TicketBatchPublicationReactor } from "../Services/TicketBatchPublicationReactor.ts";
 import { TicketBatchPublicationReactorLive } from "./TicketBatchPublicationReactor.ts";
+import { WorkflowTicketImplementationReactor } from "../Services/WorkflowTicketImplementationReactor.ts";
+import { WorkflowTicketImplementationReactorLive } from "./WorkflowTicketImplementationReactor.ts";
 import * as IssueTracker from "../../nativeSkills/IssueTracker.ts";
+import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
 
 const orchestrationLayer = OrchestrationEngineLive.pipe(
   Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -193,12 +196,44 @@ const ticketPublicationReceiptLayer = Layer.succeed(
 );
 
 const ticketingEngineLayer = it.layer(
-  TicketBatchPublicationReactorLive.pipe(
+  Layer.mergeAll(TicketBatchPublicationReactorLive, WorkflowTicketImplementationReactorLive).pipe(
     Layer.provideMerge(orchestrationLayer),
     Layer.provideMerge(projectionSnapshotLayer),
     Layer.provideMerge(receiptLayer),
     Layer.provideMerge(Layer.succeed(IssueTracker.IssueTracker, fakeTicketTracker)),
     Layer.provideMerge(ticketPublicationReceiptLayer),
+    Layer.provideMerge(
+      Layer.mock(GitWorkflowService.GitWorkflowService)({
+        listRefs: () =>
+          Effect.succeed({
+            refs: [],
+            isRepo: true,
+            hasPrimaryRemote: true,
+            nextCursor: null,
+            totalCount: 0,
+          }),
+        createWorktree: (input) =>
+          Effect.succeed({
+            worktree: {
+              path: "/tmp/t3-workflow-ticket-implementation-worktree",
+              refName: input.newRefName ?? input.refName,
+            },
+          }),
+        localStatus: () =>
+          Effect.succeed({
+            isRepo: true,
+            hasPrimaryRemote: true,
+            isDefaultRef: false,
+            refName: "feature/development-workflow",
+            hasWorkingTreeChanges: true,
+            workingTree: {
+              files: [{ path: "apps/server/src/workflow.ts", insertions: 12, deletions: 3 }],
+              insertions: 12,
+              deletions: 3,
+            },
+          }),
+      } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
+    ),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(
       ServerConfig.layerTest(process.cwd(), {
@@ -224,6 +259,28 @@ function workflowConfiguration(workstreamId: string): WorkflowRunConfiguration {
           name: "to-spec",
           path: "/skills/to-spec/SKILL.md",
           contentDigest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+        status: "available",
+      },
+      {
+        nodeId: `workflow:${workstreamId}`,
+        providerInstanceId,
+        stage: "implementation",
+        skill: {
+          name: "implement",
+          path: "/skills/implement/SKILL.md",
+          contentDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        },
+        status: "available",
+      },
+      {
+        nodeId: `workflow:${workstreamId}`,
+        providerInstanceId,
+        stage: "review",
+        skill: {
+          name: "code-review",
+          path: "/skills/code-review/SKILL.md",
+          contentDigest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
         },
         status: "available",
       },
@@ -548,6 +605,7 @@ ticketingEngineLayer(
           const snapshots = yield* ProjectionSnapshotQuery;
           const receipts = yield* OrchestrationCommandReceiptRepository;
           const reactor = yield* TicketBatchPublicationReactor;
+          const implementationReactor = yield* WorkflowTicketImplementationReactor;
 
           trackerCreatedIssues.length = 0;
           trackerLabels.length = 0;
@@ -966,6 +1024,7 @@ ticketingEngineLayer(
           assert.equal(publicationStage.status, "running");
           const publicationCommandId = CommandId.make("ticketing-projection-publication");
           yield* reactor.start();
+          yield* implementationReactor.start();
           const publicationResult = yield* engine.dispatch({
             type: "thread.workflow.ticketing.publish",
             commandId: publicationCommandId,
@@ -1036,6 +1095,176 @@ ticketingEngineLayer(
             projectedAttachment.workflowRun?.configuration.runScope.map((scope) => scope.nodeId) ??
               [],
             "ticket:tracker:38",
+          );
+
+          const implementationStartCommandId = CommandId.make(
+            "ticketing-projection-implementation-start",
+          );
+          const implementationStartResult = yield* engine.dispatch({
+            type: "thread.workflow.ticket-implementation.start",
+            commandId: implementationStartCommandId,
+            threadId: originThreadId,
+            ticketNodeId: "ticket:ticket-batch-publication",
+            actionIdentity: "ticket-implementation:37:integration",
+            expectedWorkstreamVersion: projectedAttachment.workflowVersion ?? 0,
+            confirmed: true,
+            createdAt: "2026-08-08T12:04:00.000Z",
+          });
+          yield* implementationReactor.drain;
+          const implementationReceipt = yield* receipts.getByCommandId({
+            commandId: implementationStartCommandId,
+          });
+          if (Option.isNone(implementationReceipt)) {
+            throw new Error("implementation start command receipt was not persisted");
+          }
+          assert.equal(implementationReceipt.value.status, "accepted");
+          assert.equal(
+            implementationReceipt.value.resultSequence,
+            implementationStartResult.sequence,
+          );
+
+          const afterImplementation = yield* snapshots.getSnapshot();
+          const implementation = afterImplementation.threads.find(
+            (thread) => thread.id === originThreadId,
+          )?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(implementation);
+          assert.equal(implementation.status, "implementing");
+          assert.equal(implementation.fixedPoint, fixedPoint);
+          assert.isNotNull(implementation.implementationThreadId);
+          assert.isNotNull(implementation.implementationSkillRunId);
+          assert.isTrue(
+            ticketPublicationReceipts.some(
+              (receipt) =>
+                receipt.type === "workflow.ticket-implementation.progress" &&
+                receipt.status === "implementing" &&
+                receipt.actionIdentity === "ticket-implementation:37:integration",
+            ),
+          );
+
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-implementation-running"),
+            threadId: implementation.implementationThreadId!,
+            session: {
+              threadId: implementation.implementationThreadId!,
+              status: "running",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.make("turn:ticket-implementation"),
+              lastError: null,
+              updatedAt: "2026-08-08T12:04:30.000Z",
+            },
+            createdAt: "2026-08-08T12:04:30.000Z",
+          });
+          yield* implementationReactor.drain;
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-implementation-ready"),
+            threadId: implementation.implementationThreadId!,
+            session: {
+              threadId: implementation.implementationThreadId!,
+              status: "ready",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.make("turn:ticket-implementation"),
+              lastError: null,
+              updatedAt: "2026-08-08T12:05:00.000Z",
+            },
+            createdAt: "2026-08-08T12:05:00.000Z",
+          });
+          yield* implementationReactor.drain;
+
+          const afterReviewDispatch = yield* snapshots.getSnapshot();
+          const reviewing = afterReviewDispatch.threads.find(
+            (thread) => thread.id === originThreadId,
+          )?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(reviewing);
+          assert.equal(reviewing.status, "reviewing");
+          assert.equal(reviewing.diff?.fixedPoint, fixedPoint);
+          assert.isNotNull(reviewing.reviewSkillRunId);
+
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-review-running"),
+            threadId: reviewing.implementationThreadId!,
+            session: {
+              threadId: reviewing.implementationThreadId!,
+              status: "running",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.make("turn:ticket-implementation-review"),
+              lastError: null,
+              updatedAt: "2026-08-08T12:05:30.000Z",
+            },
+            createdAt: "2026-08-08T12:05:30.000Z",
+          });
+          yield* implementationReactor.drain;
+          yield* engine.dispatch({
+            type: "thread.message.assistant.delta",
+            commandId: CommandId.make("ticketing-projection-review-result-delta"),
+            threadId: reviewing.implementationThreadId!,
+            messageId: MessageId.make("assistant:ticket-implementation-review"),
+            turnId: TurnId.make("turn:ticket-implementation-review"),
+            delta:
+              '<t3-ticket-implementation-review-result>{"status":"passed","summary":"The pinned review found no must-fix findings.","findings":[],"validation":[{"name":"focused orchestration tests","status":"passed","command":"vp test run apps/server/src/orchestration/decider.workflowTicketing.test.ts"}]}</t3-ticket-implementation-review-result>',
+            createdAt: "2026-08-08T12:05:45.000Z",
+          });
+          yield* engine.dispatch({
+            type: "thread.message.assistant.complete",
+            commandId: CommandId.make("ticketing-projection-review-result-complete"),
+            threadId: reviewing.implementationThreadId!,
+            messageId: MessageId.make("assistant:ticket-implementation-review"),
+            turnId: TurnId.make("turn:ticket-implementation-review"),
+            createdAt: "2026-08-08T12:05:50.000Z",
+          });
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-review-ready"),
+            threadId: reviewing.implementationThreadId!,
+            session: {
+              threadId: reviewing.implementationThreadId!,
+              status: "ready",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: TurnId.make("turn:ticket-implementation-review"),
+              lastError: null,
+              updatedAt: "2026-08-08T12:06:00.000Z",
+            },
+            createdAt: "2026-08-08T12:06:00.000Z",
+          });
+          yield* implementationReactor.drain;
+          const reviewReadySnapshot = yield* snapshots.getSnapshot();
+          const reviewThread = reviewReadySnapshot.threads.find(
+            (thread) => thread.id === reviewing.implementationThreadId,
+          );
+          assert.equal(reviewThread?.latestTurn?.skillInvocation?.skill.name, "code-review");
+          assert.equal(
+            reviewThread?.latestTurn?.state,
+            "completed",
+            `reviewRun=${String(reviewing.reviewSkillRunId)} latestRun=${String(reviewThread?.latestTurn?.skillInvocation?.skillRunId)}`,
+          );
+          assert.equal(
+            reviewThread?.latestTurn?.skillInvocation?.skillRunId,
+            reviewing.reviewSkillRunId,
+          );
+          const reviewedSnapshot = yield* snapshots.getSnapshot();
+          const reviewed = reviewedSnapshot.threads.find((thread) => thread.id === originThreadId)
+            ?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(reviewed);
+          assert.equal(reviewed.status, "reviewed");
+          assert.equal(reviewed.review?.status, "passed");
+          assert.equal(reviewed.review?.fixedPoint, fixedPoint);
+          assert.equal(reviewed.validation[0]?.status, "passed");
+          assert.isTrue(
+            ticketPublicationReceipts.some(
+              (receipt) =>
+                receipt.type === "workflow.ticket-implementation.progress" &&
+                receipt.status === "reviewed",
+            ),
           );
         }),
     );

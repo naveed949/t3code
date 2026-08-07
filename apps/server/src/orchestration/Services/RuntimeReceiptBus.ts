@@ -23,6 +23,7 @@ import {
   TurnId,
   WayfinderReconcileReason,
   WayfinderResearchTicketStatus,
+  WorkflowTicketImplementationStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import * as Context from "effect/Context";
@@ -111,6 +112,20 @@ export const WorkflowTicketBatchPublicationProgressReceipt = Schema.Struct({
 export type WorkflowTicketBatchPublicationProgressReceipt =
   typeof WorkflowTicketBatchPublicationProgressReceipt.Type;
 
+export const WorkflowTicketImplementationProgressReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.ticket-implementation.progress"),
+  threadId: ThreadId,
+  ticketNodeId: Schema.String,
+  implementationId: Schema.String,
+  actionIdentity: Schema.String,
+  phase: Schema.Literals(["worktree", "implementation", "review"]),
+  status: WorkflowTicketImplementationStatus,
+  createdAt: IsoDateTime,
+  message: Schema.NullOr(Schema.String),
+});
+export type WorkflowTicketImplementationProgressReceipt =
+  typeof WorkflowTicketImplementationProgressReceipt.Type;
+
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
   CheckpointDiffFinalizedReceipt,
@@ -120,6 +135,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WayfinderReconciliationCompletedReceipt,
   WayfinderResearchProgressReceipt,
   WorkflowTicketBatchPublicationProgressReceipt,
+  WorkflowTicketImplementationProgressReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 
