@@ -3,6 +3,7 @@ import type {
   ThreadId,
   WorkflowAttachment,
   WorkflowAttachmentHint,
+  WorkflowPrdDocument,
   WorkflowRunConfiguration,
   WorkflowRunRequiredSkill,
 } from "@t3tools/contracts";
@@ -19,6 +20,7 @@ export function WorkflowAttachmentCard(props: {
   readonly onViewArtifacts?: () => void;
   readonly onAcknowledgeArtifact?: (artifactId: string) => void;
   readonly onResolveStale?: () => void;
+  readonly onCompleteSpecification?: (document: WorkflowPrdDocument) => void;
   readonly defaultProviderInstanceId?: ProviderInstanceId;
   readonly providerOptions?: ReadonlyArray<ProviderInstanceId>;
   readonly requiredSkillsByProvider?: ReadonlyMap<
@@ -36,6 +38,13 @@ export function WorkflowAttachmentCard(props: {
   const [executionLimit, setExecutionLimit] = useState<1 | 2>(1);
   const [selectedProvider, setSelectedProvider] = useState<ProviderInstanceId | null>(null);
   const [overrideProvider, setOverrideProvider] = useState<ProviderInstanceId | null>(null);
+  const [prdTitle, setPrdTitle] = useState("");
+  const [prdProblemStatement, setPrdProblemStatement] = useState("");
+  const [prdSolution, setPrdSolution] = useState("");
+  const [prdUserStories, setPrdUserStories] = useState("");
+  const [prdImplementationDecisions, setPrdImplementationDecisions] = useState("");
+  const [prdTestingDecisions, setPrdTestingDecisions] = useState("");
+  const [prdOutOfScope, setPrdOutOfScope] = useState("");
 
   if (props.attachment !== null) {
     const graph = props.attachment.workflowGraph;
@@ -45,6 +54,56 @@ export function WorkflowAttachmentCard(props: {
       .reverse()
       .find((artifact) => artifact.marker.state !== "acknowledged");
     const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
+    const specificationStage = props.attachment.specificationStage;
+    const currentWorkflowPrdVersion = Math.max(
+      0,
+      ...(graph?.artifacts ?? [])
+        .filter((artifact) => artifact.kind === "workflow-prd")
+        .map((artifact) => artifact.version),
+    );
+    const listLines = (value: string) =>
+      value
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+    const prdDocument = (): WorkflowPrdDocument | null => {
+      const userStories = listLines(prdUserStories);
+      const implementationDecisions = listLines(prdImplementationDecisions);
+      const testingDecisions = listLines(prdTestingDecisions);
+      const title = prdTitle.trim();
+      const problemStatement = prdProblemStatement.trim();
+      const solution = prdSolution.trim();
+      if (
+        title.length === 0 ||
+        problemStatement.length === 0 ||
+        solution.length === 0 ||
+        userStories.length === 0 ||
+        implementationDecisions.length === 0 ||
+        testingDecisions.length === 0
+      ) {
+        return null;
+      }
+      return {
+        version: currentWorkflowPrdVersion + 1,
+        title,
+        problemStatement,
+        solution,
+        userStories,
+        implementationDecisions,
+        testingDecisions,
+        outOfScope: listLines(prdOutOfScope),
+      };
+    };
+    const listFieldDefinitions: ReadonlyArray<readonly [string, string, (next: string) => void]> = [
+      ["User stories (one per line)", prdUserStories, setPrdUserStories],
+      [
+        "Implementation decisions (one per line)",
+        prdImplementationDecisions,
+        setPrdImplementationDecisions,
+      ],
+      ["Testing decisions (one per line)", prdTestingDecisions, setPrdTestingDecisions],
+      ["Out of scope (one per line)", prdOutOfScope, setPrdOutOfScope],
+    ];
 
     return (
       <section
@@ -67,6 +126,92 @@ export function WorkflowAttachmentCard(props: {
             </button>
           ) : null}
         </div>
+        {specificationStage ? (
+          <div
+            aria-label="Specification stage"
+            className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-2.5 py-2 text-xs text-muted-foreground"
+          >
+            <p className="font-medium text-foreground">
+              Specification: {specificationStage.status.replaceAll("-", " ")}
+            </p>
+            {specificationStage.checkpoint?.status === "pending" ? (
+              <p className="mt-1" aria-live="polite">
+                Native test-seam checkpoint waiting for a response in the Specification thread.
+              </p>
+            ) : specificationStage.checkpoint?.status === "resolved" ? (
+              <p className="mt-1">Native test-seam checkpoint response recorded.</p>
+            ) : null}
+            {specificationStage.failure ? (
+              <p className="mt-1 text-destructive">{specificationStage.failure}</p>
+            ) : null}
+            {specificationStage.status === "running" &&
+            specificationStage.checkpoint?.status === "resolved" &&
+            props.onCompleteSpecification ? (
+              <details className="mt-2 rounded-md border border-violet-500/20 bg-background/50 p-2">
+                <summary className="cursor-pointer font-medium text-foreground">
+                  Record structured Workflow PRD
+                </summary>
+                <form
+                  className="mt-2 space-y-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const document = prdDocument();
+                    if (document !== null) props.onCompleteSpecification?.(document);
+                  }}
+                >
+                  <p className="text-[11px]">
+                    Enter the provider-confirmed specification as structured fields. T3 does not
+                    infer workflow state from prose.
+                  </p>
+                  <label className="block text-[11px] font-medium">
+                    Title
+                    <input
+                      value={prdTitle}
+                      onChange={(event) => setPrdTitle(event.currentTarget.value)}
+                      className="mt-1 w-full rounded border border-input bg-background px-2 py-1 text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-[11px] font-medium">
+                    Problem statement
+                    <textarea
+                      value={prdProblemStatement}
+                      onChange={(event) => setPrdProblemStatement(event.currentTarget.value)}
+                      rows={2}
+                      className="mt-1 w-full rounded border border-input bg-background px-2 py-1 text-xs font-normal"
+                    />
+                  </label>
+                  <label className="block text-[11px] font-medium">
+                    Solution
+                    <textarea
+                      value={prdSolution}
+                      onChange={(event) => setPrdSolution(event.currentTarget.value)}
+                      rows={2}
+                      className="mt-1 w-full rounded border border-input bg-background px-2 py-1 text-xs font-normal"
+                    />
+                  </label>
+                  {listFieldDefinitions.map(([label, value, setValue]) => (
+                    <label key={label} className="block text-[11px] font-medium">
+                      {label}
+                      <textarea
+                        value={value}
+                        onChange={(event) => setValue(event.currentTarget.value)}
+                        rows={2}
+                        className="mt-1 w-full rounded border border-input bg-background px-2 py-1 text-xs font-normal"
+                      />
+                    </label>
+                  ))}
+                  <button
+                    type="submit"
+                    disabled={prdDocument() === null}
+                    className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Complete Specification
+                  </button>
+                </form>
+              </details>
+            ) : null}
+          </div>
+        ) : null}
         {unreadArtifactCount > 0 ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-background/60 px-2.5 py-2 text-xs text-muted-foreground">
             <EyeIcon aria-hidden className="size-3.5 text-primary" />

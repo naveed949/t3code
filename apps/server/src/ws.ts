@@ -293,7 +293,12 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
       | "thread.workflow-synchronized"
       | "thread.workflow-artifacts-viewed"
       | "thread.workflow-artifact-acknowledged"
-      | "thread.workflow-stale-resolved";
+      | "thread.workflow-stale-resolved"
+      | "thread.workflow-specification-dispatched"
+      | "thread.workflow-specification-checkpointed"
+      | "thread.workflow-specification-checkpoint-resolved"
+      | "thread.workflow-specification-completed"
+      | "thread.workflow-specification-failed";
   }
 > {
   return (
@@ -311,7 +316,12 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.workflow-synchronized" ||
     event.type === "thread.workflow-artifacts-viewed" ||
     event.type === "thread.workflow-artifact-acknowledged" ||
-    event.type === "thread.workflow-stale-resolved"
+    event.type === "thread.workflow-stale-resolved" ||
+    event.type === "thread.workflow-specification-dispatched" ||
+    event.type === "thread.workflow-specification-checkpointed" ||
+    event.type === "thread.workflow-specification-checkpoint-resolved" ||
+    event.type === "thread.workflow-specification-completed" ||
+    event.type === "thread.workflow-specification-failed"
   );
 }
 

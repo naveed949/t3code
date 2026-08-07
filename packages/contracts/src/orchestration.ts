@@ -24,6 +24,7 @@ import {
   SkillRunId,
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
+import { UserInputQuestion } from "./providerRuntime.ts";
 import {
   OptionalWayfinderDraft,
   OptionalWayfinderMutation,
@@ -461,6 +462,7 @@ export const WorkflowArtifactSourceStage = Schema.Literals([
   "publication",
   "mutation",
   "reconciliation",
+  "specification",
 ]);
 export type WorkflowArtifactSourceStage = typeof WorkflowArtifactSourceStage.Type;
 
@@ -469,6 +471,7 @@ export const WorkflowArtifactLineage = Schema.Struct({
   sourceSkillRunId: SkillRunId,
   sourceStage: WorkflowArtifactSourceStage,
   upstreamVersion: TrimmedNonEmptyString,
+  upstreamArtifactId: Schema.optional(TrimmedNonEmptyString),
 });
 export type WorkflowArtifactLineage = typeof WorkflowArtifactLineage.Type;
 
@@ -491,17 +494,98 @@ export const WorkflowArtifactMarker = Schema.Struct({
 });
 export type WorkflowArtifactMarker = typeof WorkflowArtifactMarker.Type;
 
-export const WorkflowArtifact = Schema.Struct({
+const WorkflowArtifactBaseFields = {
   id: TrimmedNonEmptyString,
   logicalId: TrimmedNonEmptyString,
-  kind: Schema.Literal("wayfinder-map"),
   state: Schema.Literals(["current", "superseded"]),
   lineage: WorkflowArtifactLineage,
   upstreamSynchronizedAt: IsoDateTime,
   importedAt: IsoDateTime,
   marker: WorkflowArtifactMarker,
+} as const;
+
+export const WorkflowPrdDocument = Schema.Struct({
+  version: Schema.Int.check(Schema.isGreaterThan(0)),
+  title: TrimmedNonEmptyString,
+  problemStatement: TrimmedNonEmptyString,
+  solution: TrimmedNonEmptyString,
+  userStories: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  implementationDecisions: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  testingDecisions: Schema.Array(TrimmedNonEmptyString).check(Schema.isMinLength(1)),
+  outOfScope: Schema.Array(TrimmedNonEmptyString),
+  furtherNotes: Schema.optional(TrimmedNonEmptyString),
 });
+export type WorkflowPrdDocument = typeof WorkflowPrdDocument.Type;
+
+export const WorkflowArtifact = Schema.Union([
+  Schema.Struct({
+    ...WorkflowArtifactBaseFields,
+    kind: Schema.Literal("wayfinder-map"),
+  }),
+  Schema.Struct({
+    ...WorkflowArtifactBaseFields,
+    kind: Schema.Literal("workflow-prd"),
+    version: Schema.Int.check(Schema.isGreaterThan(0)),
+  }),
+]);
 export type WorkflowArtifact = typeof WorkflowArtifact.Type;
+
+/**
+ * Full artifact content is loaded separately from the bounded graph metadata.
+ * Completion events retain this detail for a lazy Node Inspector query without
+ * putting the whole PRD into every workflow snapshot or graph delta.
+ */
+export const WorkflowArtifactDetail = Schema.Struct({
+  artifactId: TrimmedNonEmptyString,
+  kind: Schema.Literal("workflow-prd"),
+  document: WorkflowPrdDocument,
+});
+export type WorkflowArtifactDetail = typeof WorkflowArtifactDetail.Type;
+
+export const WorkflowSpecificationStageStatus = Schema.Literals([
+  "running",
+  "checkpoint",
+  "completed",
+  "stopped",
+  "failed",
+  "capability-blocked",
+]);
+export type WorkflowSpecificationStageStatus = typeof WorkflowSpecificationStageStatus.Type;
+
+export const WorkflowCheckpointRequestStatus = Schema.Literals(["pending", "resolved", "stale"]);
+export type WorkflowCheckpointRequestStatus = typeof WorkflowCheckpointRequestStatus.Type;
+
+export const WorkflowCheckpointRequest = Schema.Struct({
+  requestId: ApprovalRequestId,
+  kind: Schema.Literal("specification-test-seam"),
+  workstreamId: WorkstreamId,
+  originThreadId: ThreadId,
+  specificationThreadId: ThreadId,
+  skillRunId: SkillRunId,
+  questions: Schema.Array(UserInputQuestion).check(Schema.isMinLength(1)),
+  status: WorkflowCheckpointRequestStatus,
+  requestedAt: IsoDateTime,
+  resolvedAt: Schema.optional(IsoDateTime),
+  answers: Schema.optional(ProviderUserInputAnswers),
+});
+export type WorkflowCheckpointRequest = typeof WorkflowCheckpointRequest.Type;
+
+export const WorkflowSpecificationStage = Schema.Struct({
+  status: WorkflowSpecificationStageStatus,
+  workstreamId: WorkstreamId,
+  nodeId: TrimmedNonEmptyString,
+  originThreadId: ThreadId,
+  specificationThreadId: ThreadId,
+  skillRunId: SkillRunId,
+  providerInstanceId: ProviderInstanceId,
+  skill: PinnedSkillIdentity,
+  checkpoint: Schema.optional(WorkflowCheckpointRequest),
+  artifactId: Schema.optional(TrimmedNonEmptyString),
+  failure: Schema.optional(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowSpecificationStage = typeof WorkflowSpecificationStage.Type;
 
 export const WorkflowStaleResolution = Schema.Literal("accept-upstream");
 export type WorkflowStaleResolution = typeof WorkflowStaleResolution.Type;
@@ -586,6 +670,10 @@ export const WorkflowAttachment = Schema.Struct({
   workflowGraph: Schema.optional(WorkflowGraph),
   workflowRunPreview: Schema.optional(WorkflowRunPreview),
   workflowRun: Schema.optional(WorkflowRun),
+  specificationStage: Schema.optional(WorkflowSpecificationStage),
+  // The optimistic command version is optional for attachments written before
+  // the Specification stage existed; those attachments start at version 0.
+  workflowVersion: Schema.optional(NonNegativeInt),
   attachedAt: IsoDateTime,
 });
 export type WorkflowAttachment = typeof WorkflowAttachment.Type;
@@ -1283,6 +1371,18 @@ const ThreadWorkflowStaleResolveCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowSpecificationCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.specification.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  specificationThreadId: ThreadId,
+  skillRunId: SkillRunId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  sourceWayfinderArtifactId: TrimmedNonEmptyString,
+  prd: WorkflowPrdDocument,
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1328,6 +1428,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
+  ThreadWorkflowSpecificationCompleteCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1364,6 +1465,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
+  ThreadWorkflowSpecificationCompleteCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1540,6 +1642,11 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-artifacts-viewed",
   "thread.workflow-artifact-acknowledged",
   "thread.workflow-stale-resolved",
+  "thread.workflow-specification-dispatched",
+  "thread.workflow-specification-checkpointed",
+  "thread.workflow-specification-checkpoint-resolved",
+  "thread.workflow-specification-completed",
+  "thread.workflow-specification-failed",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -1823,6 +1930,32 @@ export const ThreadWorkflowStaleResolvedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowSpecificationDispatchedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowSpecificationCheckpointedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowSpecificationCheckpointResolvedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowSpecificationCompletedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+  artifact: WorkflowArtifactDetail,
+});
+
+export const ThreadWorkflowSpecificationFailedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -2066,6 +2199,31 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-stale-resolved"),
     payload: ThreadWorkflowStaleResolvedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-specification-dispatched"),
+    payload: ThreadWorkflowSpecificationDispatchedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-specification-checkpointed"),
+    payload: ThreadWorkflowSpecificationCheckpointedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-specification-checkpoint-resolved"),
+    payload: ThreadWorkflowSpecificationCheckpointResolvedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-specification-completed"),
+    payload: ThreadWorkflowSpecificationCompletedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-specification-failed"),
+    payload: ThreadWorkflowSpecificationFailedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

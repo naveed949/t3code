@@ -95,6 +95,15 @@ acknowledgement. The server reloads historical Skill Run provenance before dispa
 survives restart and remains trustworthy even when a later turn has replaced the source thread's
 latest-turn view.
 
+When the Wayfinder is attached to a confirmed Development Workflow Run, the Specification action is
+also capability-gated by that Run's pinned `to-spec` skill. The Origin Thread shows the durable
+Specification stage across web, desktop, and mobile, including the native test-seam checkpoint. The
+response is accepted once for the linked Specification conversation and the stage can complete only
+with a structured, versioned Workflow PRD linked to the current Wayfinder artifact.
+After the checkpoint is resolved, the Origin Thread exposes an explicit structured PRD form on web,
+desktop, and mobile. Review the provider-confirmed result there and submit it; T3 never parses
+assistant prose to infer the specification.
+
 A native **New** run starts with a visible unpublished draft. The draft is explicitly non-canonical:
 T3 does not create or change GitHub issues, labels, assignments, comments, or relationships while
 the map is being charted. Wayfinder presents one Decision Card at a time, including its recommended

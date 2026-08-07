@@ -27,6 +27,7 @@ import {
   attachWorkflow,
   createProject,
   controlWayfinderResearch,
+  completeWorkflowSpecification,
   dismissWorkflowAttachmentHint,
   mutateWayfinder,
   publishWayfinderDraft,
@@ -279,6 +280,56 @@ describe("environment commands", () => {
           resolution: "accept-upstream",
           confirmed: true,
           createdAt: "2026-08-03T12:04:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches a structured Specification completion command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* completeWorkflowSpecification({
+        commandId: CommandId.make("specification-complete-command"),
+        threadId: ThreadId.make("thread-origin"),
+        specificationThreadId: ThreadId.make("thread-specification"),
+        skillRunId: SkillRunId.make("skill-run:to-spec"),
+        expectedWorkstreamVersion: 0,
+        sourceWayfinderArtifactId: "wayfinder-map:29:revision:2",
+        prd: {
+          version: 1,
+          title: "Workflow specification",
+          problemStatement: "The workflow needs a durable specification.",
+          solution: "Persist a structured PRD artifact.",
+          userStories: ["As a maintainer, I want an inspectable PRD."],
+          implementationDecisions: ["Use the Workflow Projection."],
+          testingDecisions: ["Test the typed command and receipt drain."],
+          outOfScope: ["Provider prompt emulation."],
+        },
+        createdAt: "2026-08-03T12:05:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.workflow.specification.complete",
+          commandId: "specification-complete-command",
+          threadId: "thread-origin",
+          specificationThreadId: "thread-specification",
+          skillRunId: "skill-run:to-spec",
+          expectedWorkstreamVersion: 0,
+          sourceWayfinderArtifactId: "wayfinder-map:29:revision:2",
+          prd: {
+            version: 1,
+            title: "Workflow specification",
+            problemStatement: "The workflow needs a durable specification.",
+            solution: "Persist a structured PRD artifact.",
+            userStories: ["As a maintainer, I want an inspectable PRD."],
+            implementationDecisions: ["Use the Workflow Projection."],
+            testingDecisions: ["Test the typed command and receipt drain."],
+            outOfScope: ["Provider prompt emulation."],
+          },
+          createdAt: "2026-08-03T12:05:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

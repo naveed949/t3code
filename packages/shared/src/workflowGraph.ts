@@ -2,11 +2,14 @@ import { sha256 } from "@noble/hashes/sha2";
 import type {
   WayfinderMapProjection,
   WorkflowArtifact,
+  WorkflowArtifactDetail,
   WorkflowArtifactSourceStage,
   WorkflowAttachment,
   WorkflowAttachmentWayfinderData,
   WorkflowGraph,
   WorkflowGraphNode,
+  WorkflowPrdDocument,
+  WorkflowSpecificationStage,
   WorkflowStaleResolution,
 } from "@t3tools/contracts";
 import * as Encoding from "effect/Encoding";
@@ -120,6 +123,20 @@ function boundedArtifacts(
       left.upstreamSynchronizedAt.localeCompare(right.upstreamSynchronizedAt) ||
       left.importedAt.localeCompare(right.importedAt) ||
       left.id.localeCompare(right.id),
+  );
+}
+
+function latestCurrentArtifact(
+  graph: WorkflowGraph,
+  kind: WorkflowArtifact["kind"],
+): WorkflowArtifact | null {
+  return (
+    graph.artifacts
+      .filter((artifact) => artifact.kind === kind && artifact.state === "current")
+      .sort(
+        (left, right) =>
+          right.importedAt.localeCompare(left.importedAt) || right.id.localeCompare(left.id),
+      )[0] ?? null
   );
 }
 
@@ -363,6 +380,90 @@ export function acknowledgeWorkflowArtifact(
           : graph.unreadArtifactCount,
       updatedAt: acknowledgedAt,
     },
+  };
+}
+
+/**
+ * Store one provider-produced, structured Specification result. The caller
+ * must already have checked the exact current Wayfinder artifact; this helper
+ * only materializes the bounded lineage and versioned PRD artifact.
+ */
+export function completeWorkflowSpecification(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly stage: WorkflowSpecificationStage;
+  readonly document: WorkflowPrdDocument;
+  readonly sourceWayfinderArtifactId: string;
+  readonly completedAt: string;
+}): WorkflowAttachment {
+  const graph = input.attachment.workflowGraph ?? initializeWorkflowGraph(input.attachment);
+  const upstream = graph.artifacts.find(
+    (artifact) =>
+      artifact.id === input.sourceWayfinderArtifactId &&
+      artifact.kind === "wayfinder-map" &&
+      artifact.state === "current",
+  );
+  if (upstream === undefined) return input.attachment;
+
+  const previousPrd = latestCurrentArtifact(graph, "workflow-prd");
+  const logicalId = `workflow-prd:${input.attachment.workstreamId}`;
+  const artifact: WorkflowArtifact = {
+    id: `${logicalId}:v${input.document.version}`,
+    logicalId,
+    kind: "workflow-prd",
+    state: "current",
+    version: input.document.version,
+    lineage: {
+      workstreamId: input.attachment.workstreamId,
+      sourceSkillRunId: input.stage.skillRunId,
+      sourceStage: "specification",
+      upstreamVersion: upstream.lineage.upstreamVersion,
+      upstreamArtifactId: upstream.id,
+    },
+    upstreamSynchronizedAt: upstream.upstreamSynchronizedAt,
+    importedAt: input.completedAt,
+    marker: {
+      kind: previousPrd === null ? "new" : "changed",
+      state: "unread",
+      markedAt: input.completedAt,
+    },
+  };
+
+  const artifacts = boundedArtifacts([
+    ...graph.artifacts.map((candidate) =>
+      candidate.id === previousPrd?.id ? { ...candidate, state: "superseded" as const } : candidate,
+    ),
+    artifact,
+  ]);
+  return {
+    ...input.attachment,
+    workflowVersion: (input.attachment.workflowVersion ?? 0) + 1,
+    specificationStage: {
+      ...input.stage,
+      status: "completed",
+      checkpoint:
+        input.stage.checkpoint === undefined
+          ? undefined
+          : { ...input.stage.checkpoint, status: input.stage.checkpoint.status },
+      artifactId: artifact.id,
+      failure: undefined,
+      updatedAt: input.completedAt,
+    },
+    workflowGraph: {
+      ...graph,
+      artifacts,
+      updatedAt: input.completedAt,
+    },
+  };
+}
+
+export function workflowSpecificationArtifactDetail(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly document: WorkflowPrdDocument;
+}): WorkflowArtifactDetail {
+  return {
+    artifactId: `workflow-prd:${input.attachment.workstreamId}:v${input.document.version}`,
+    kind: "workflow-prd",
+    document: input.document,
   };
 }
 

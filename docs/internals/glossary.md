@@ -100,6 +100,32 @@ durable new/changed markers. A newer compatible artifact supersedes the old one,
 Workstream node stale, and gates downstream dispatch until an allowed explicit resolution is
 recorded. See [the contracts][1] and [ProjectionPipeline.ts][11].
 
+#### Specification stage
+
+The server-owned stage that dispatches a pinned generic `to-spec` Skill Run from a confirmed
+Wayfinder Workstream. It retains the native test-seam checkpoint, binds checkpoint activities to the
+authorized Skill Run, and accepts completion only after the checkpoint is resolved and a structured
+Workflow PRD names the current Wayfinder artifact.
+
+#### Workflow PRD
+
+A versioned, structured specification artifact produced by the Specification stage. The normal graph
+projection retains only bounded metadata and lineage; full document details travel through the
+artifact-detail path so opening a Workstream does not hydrate an unbounded document into every
+snapshot or delta.
+
+#### Capability Block
+
+A projected stage state explaining why a pinned provider capability cannot be dispatched, such as a
+missing, changed, unverified, or provider-mismatched Required Skill. A Capability Block is visible to
+the user and does not substitute a T3-authored prompt or silently start generic work.
+
+#### Workflow Checkpoint
+
+A durable native Skill Run pause owned by a Workflow stage. The Specification checkpoint records its
+request identity, stage Skill Run, questions, status, and first accepted response; unrelated,
+duplicate, or stale responses cannot advance the stage.
+
 #### Skill Run
 
 One execution of a pinned skill within a Workstream. Its durable invocation record includes the skill

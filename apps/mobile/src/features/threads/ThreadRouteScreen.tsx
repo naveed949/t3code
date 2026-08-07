@@ -20,6 +20,7 @@ import {
   ThreadId,
   type ProjectScript,
   type SkillInvocation,
+  type WorkflowPrdDocument,
   type WorkflowRunConfiguration,
 } from "@t3tools/contracts";
 import {
@@ -237,6 +238,10 @@ function ThreadRouteContent(
   const confirmWorkflowRunCommand = useAtomCommand(
     threadEnvironment.confirmWorkflowRun,
     "confirm Development Workflow Run",
+  );
+  const completeWorkflowSpecificationCommand = useAtomCommand(
+    threadEnvironment.completeWorkflowSpecification,
+    "complete Workflow Specification",
   );
   const viewWorkflowArtifactsCommand = useAtomCommand(
     threadEnvironment.viewWorkflowArtifacts,
@@ -741,6 +746,31 @@ function ThreadRouteContent(
     },
     [confirmWorkflowRunCommand, selectedThread],
   );
+  const completeWorkflowSpecification = useCallback(
+    (prd: WorkflowPrdDocument) => {
+      if (!selectedThread) return;
+      const attachment = selectedThread.workflowAttachment;
+      const stage = attachment?.specificationStage;
+      const sourceArtifact = attachment?.workflowGraph?.artifacts.find(
+        (artifact) => artifact.kind === "wayfinder-map" && artifact.state === "current",
+      );
+      if (attachment === undefined || stage === undefined || sourceArtifact === undefined) {
+        return;
+      }
+      void completeWorkflowSpecificationCommand({
+        environmentId: selectedThread.environmentId,
+        input: {
+          threadId: selectedThread.id,
+          specificationThreadId: stage.specificationThreadId,
+          skillRunId: stage.skillRunId,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          sourceWayfinderArtifactId: sourceArtifact.id,
+          prd,
+        },
+      });
+    },
+    [completeWorkflowSpecificationCommand, selectedThread],
+  );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!selectedThread) return;
     void viewWorkflowArtifactsCommand({
@@ -1042,6 +1072,7 @@ function ThreadRouteContent(
           onViewWorkflowArtifacts={viewWorkflowArtifacts}
           onAcknowledgeWorkflowArtifact={acknowledgeWorkflowArtifact}
           onResolveWorkflowStale={resolveWorkflowStale}
+          onCompleteSpecification={completeWorkflowSpecification}
           workflowRunProvider={selectedThread?.modelSelection.instanceId}
           workflowRunProviderOptions={workflowRunProviderOptions}
           workflowRunRequiredSkillsByProvider={workflowRunRequiredSkillsByProvider}

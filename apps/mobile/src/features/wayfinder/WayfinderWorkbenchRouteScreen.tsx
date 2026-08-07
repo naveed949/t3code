@@ -774,7 +774,16 @@ function WayfinderWorkbenchContent(props: {
       .find((provider) => provider.instanceId === thread?.modelSelection.instanceId)
       ?.skills.find((skill) => skill.name === "to-spec" && skill.enabled) ?? null;
   const startToSpec = async (acknowledgedIncomplete: boolean) => {
-    if (!project || !thread || !invocation || !toSpecSkill) return;
+    if (
+      !project ||
+      !thread ||
+      !invocation ||
+      !toSpecSkill ||
+      (workstream?.workflowAttachment != null &&
+        workstream.workflowAttachment.workflowRun === undefined)
+    ) {
+      return;
+    }
     const request = createWayfinderToSpecInvocationRequest({
       skill: toSpecSkill,
       sourceSkillRunId: invocation.skillRunId,
@@ -887,7 +896,9 @@ function WayfinderWorkbenchContent(props: {
             • {blocker}
           </Text>
         ))}
-        {toSpecSkill ? (
+        {toSpecSkill &&
+        (workstream?.workflowAttachment == null ||
+          workstream.workflowAttachment.workflowRun !== undefined) ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={completion.actionLabel}

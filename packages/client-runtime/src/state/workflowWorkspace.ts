@@ -179,6 +179,8 @@ function artifactStageId(
   sourceStage: WorkflowArtifact["lineage"]["sourceStage"],
 ): WorkflowWorkspaceStageId {
   switch (sourceStage) {
+    case "specification":
+      return "specification";
     case "publication":
       return "publication";
     case "reconciliation":

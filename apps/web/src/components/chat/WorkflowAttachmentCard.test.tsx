@@ -1,5 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { ProviderInstanceId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
+import {
+  ApprovalRequestId,
+  ProviderInstanceId,
+  SkillRunId,
+  ThreadId,
+  WorkstreamId,
+} from "@t3tools/contracts";
 import { expect, it } from "vite-plus/test";
 
 import { WorkflowAttachmentCard } from "./WorkflowAttachmentCard";
@@ -152,4 +158,65 @@ it("renders exact Workflow Run provider controls and preflight action", () => {
   expect(markup).toContain("Default Provider");
   expect(markup).toContain("Workstream override");
   expect(markup).toContain("Run read-only preflight");
+});
+
+it("surfaces the durable Specification checkpoint", () => {
+  const markup = renderToStaticMarkup(
+    <WorkflowAttachmentCard
+      originThreadId={ThreadId.make("thread-origin")}
+      hint={null}
+      attachment={{
+        originThreadId: ThreadId.make("thread-origin"),
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-08-03T12:00:00.000Z",
+        },
+        specificationStage: {
+          status: "checkpoint",
+          workstreamId: WorkstreamId.make("workstream:origin"),
+          nodeId: "workflow:workstream:origin",
+          originThreadId: ThreadId.make("thread-origin"),
+          specificationThreadId: ThreadId.make("thread-specification"),
+          skillRunId: SkillRunId.make("skill-run:to-spec"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          skill: {
+            name: "to-spec",
+            path: "/skills/to-spec/SKILL.md",
+            contentDigest: `sha256:${"a".repeat(64)}`,
+          },
+          checkpoint: {
+            requestId: ApprovalRequestId.make("request:seam"),
+            kind: "specification-test-seam",
+            workstreamId: WorkstreamId.make("workstream:origin"),
+            originThreadId: ThreadId.make("thread-origin"),
+            specificationThreadId: ThreadId.make("thread-specification"),
+            skillRunId: SkillRunId.make("skill-run:to-spec"),
+            questions: [
+              {
+                id: "seam",
+                header: "Test seam",
+                question: "Does this seam match?",
+                options: [{ label: "Yes", description: "Use it." }],
+              },
+            ],
+            status: "pending",
+            requestedAt: "2026-08-03T12:01:00.000Z",
+          },
+          startedAt: "2026-08-03T12:00:00.000Z",
+          updatedAt: "2026-08-03T12:01:00.000Z",
+        },
+        attachedAt: "2026-08-03T12:00:00.000Z",
+      }}
+      onDismiss={() => undefined}
+      onAttach={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain('aria-label="Specification stage"');
+  expect(markup).toContain("Specification: checkpoint");
+  expect(markup).toContain("Native test-seam checkpoint waiting for a response");
 });
