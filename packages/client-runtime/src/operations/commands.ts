@@ -58,6 +58,8 @@ export type ConfirmWorkflowRunInput = CommandInput<"thread.workflow.run.confirm"
 export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
 export type AcknowledgeWorkflowArtifactInput = CommandInput<"thread.workflow.artifact.acknowledge">;
 export type ResolveWorkflowStaleInput = CommandInput<"thread.workflow.stale.resolve">;
+export type CompleteWorkflowSpecificationInput =
+  CommandInput<"thread.workflow.specification.complete">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -420,6 +422,20 @@ export const resolveWorkflowStale: (input: ResolveWorkflowStaleInput) => Command
     createdAt: metadata.createdAt,
   });
 });
+
+export const completeWorkflowSpecification: (
+  input: CompleteWorkflowSpecificationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.completeWorkflowSpecification")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.specification.complete",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
 
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.revertThreadCheckpoint")(function* (input) {

@@ -618,6 +618,11 @@ export function applyThreadDetailEvent(
     case "thread.workflow-artifacts-viewed":
     case "thread.workflow-artifact-acknowledged":
     case "thread.workflow-stale-resolved":
+    case "thread.workflow-specification-dispatched":
+    case "thread.workflow-specification-checkpointed":
+    case "thread.workflow-specification-checkpoint-resolved":
+    case "thread.workflow-specification-completed":
+    case "thread.workflow-specification-failed":
       return {
         kind: "updated",
         thread: {

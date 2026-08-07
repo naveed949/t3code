@@ -45,6 +45,7 @@ export function WorkflowAttachmentCard(props: {
       .reverse()
       .find((artifact) => artifact.marker.state !== "acknowledged");
     const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
+    const specificationStage = props.attachment.specificationStage;
 
     return (
       <section
@@ -67,6 +68,26 @@ export function WorkflowAttachmentCard(props: {
             </button>
           ) : null}
         </div>
+        {specificationStage ? (
+          <div
+            aria-label="Specification stage"
+            className="mt-2 rounded-md border border-violet-500/25 bg-violet-500/5 px-2.5 py-2 text-xs text-muted-foreground"
+          >
+            <p className="font-medium text-foreground">
+              Specification: {specificationStage.status.replaceAll("-", " ")}
+            </p>
+            {specificationStage.checkpoint?.status === "pending" ? (
+              <p className="mt-1" aria-live="polite">
+                Native test-seam checkpoint waiting for a response in the Specification thread.
+              </p>
+            ) : specificationStage.checkpoint?.status === "resolved" ? (
+              <p className="mt-1">Native test-seam checkpoint response recorded.</p>
+            ) : null}
+            {specificationStage.failure ? (
+              <p className="mt-1 text-destructive">{specificationStage.failure}</p>
+            ) : null}
+          </div>
+        ) : null}
         {unreadArtifactCount > 0 ? (
           <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-primary/20 bg-background/60 px-2.5 py-2 text-xs text-muted-foreground">
             <EyeIcon aria-hidden className="size-3.5 text-primary" />

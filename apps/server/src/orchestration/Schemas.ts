@@ -37,6 +37,11 @@ import {
   ThreadWorkflowArtifactsViewedPayload as ContractsThreadWorkflowArtifactsViewedPayloadSchema,
   ThreadWorkflowStaleResolvedPayload as ContractsThreadWorkflowStaleResolvedPayloadSchema,
   ThreadWorkflowSynchronizedPayload as ContractsThreadWorkflowSynchronizedPayloadSchema,
+  ThreadWorkflowSpecificationDispatchedPayload as ContractsThreadWorkflowSpecificationDispatchedPayloadSchema,
+  ThreadWorkflowSpecificationCheckpointedPayload as ContractsThreadWorkflowSpecificationCheckpointedPayloadSchema,
+  ThreadWorkflowSpecificationCheckpointResolvedPayload as ContractsThreadWorkflowSpecificationCheckpointResolvedPayloadSchema,
+  ThreadWorkflowSpecificationCompletedPayload as ContractsThreadWorkflowSpecificationCompletedPayloadSchema,
+  ThreadWorkflowSpecificationFailedPayload as ContractsThreadWorkflowSpecificationFailedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -93,3 +98,13 @@ export const ThreadWorkflowArtifactsViewedPayload =
 export const ThreadWorkflowArtifactAcknowledgedPayload =
   ContractsThreadWorkflowArtifactAcknowledgedPayloadSchema;
 export const ThreadWorkflowStaleResolvedPayload = ContractsThreadWorkflowStaleResolvedPayloadSchema;
+export const ThreadWorkflowSpecificationDispatchedPayload =
+  ContractsThreadWorkflowSpecificationDispatchedPayloadSchema;
+export const ThreadWorkflowSpecificationCheckpointedPayload =
+  ContractsThreadWorkflowSpecificationCheckpointedPayloadSchema;
+export const ThreadWorkflowSpecificationCheckpointResolvedPayload =
+  ContractsThreadWorkflowSpecificationCheckpointResolvedPayloadSchema;
+export const ThreadWorkflowSpecificationCompletedPayload =
+  ContractsThreadWorkflowSpecificationCompletedPayloadSchema;
+export const ThreadWorkflowSpecificationFailedPayload =
+  ContractsThreadWorkflowSpecificationFailedPayloadSchema;

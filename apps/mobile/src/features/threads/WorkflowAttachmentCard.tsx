@@ -45,6 +45,7 @@ export function WorkflowAttachmentCard(props: {
       .reverse()
       .find((artifact) => artifact.marker.state !== "acknowledged");
     const staleNode = graph?.nodes.find((node) => node.state === "stale") ?? null;
+    const specificationStage = props.attachment.specificationStage;
 
     return (
       <View className="gap-2 rounded-[20px] border border-sky-300/35 bg-sky-50/90 p-4 dark:border-sky-300/15 dark:bg-sky-400/8">
@@ -54,6 +55,33 @@ export function WorkflowAttachmentCard(props: {
         <Text className="font-sans text-sm text-neutral-700 dark:text-neutral-200">
           {props.attachment.workflowGoal}
         </Text>
+        {specificationStage ? (
+          <View
+            accessibilityLabel="Specification stage"
+            className="gap-1 rounded-xl border border-violet-500/25 bg-violet-50/70 p-3 dark:bg-violet-400/10"
+          >
+            <Text className="font-t3-bold text-xs capitalize text-neutral-900 dark:text-neutral-100">
+              Specification: {specificationStage.status.replaceAll("-", " ")}
+            </Text>
+            {specificationStage.checkpoint?.status === "pending" ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                className="font-sans text-xs text-neutral-700 dark:text-neutral-200"
+              >
+                Native test-seam checkpoint waiting for a response in the Specification thread.
+              </Text>
+            ) : specificationStage.checkpoint?.status === "resolved" ? (
+              <Text className="font-sans text-xs text-neutral-700 dark:text-neutral-200">
+                Native test-seam checkpoint response recorded.
+              </Text>
+            ) : null}
+            {specificationStage.failure ? (
+              <Text className="font-sans text-xs text-red-700 dark:text-red-300">
+                {specificationStage.failure}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
         {props.onPreflightRun &&
         props.defaultProviderInstanceId &&
         !props.attachment.workflowRun ? (

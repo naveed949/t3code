@@ -5349,6 +5349,8 @@ function ChatViewContent(props: ChatViewProps) {
         !activeWayfinderInvocation ||
         !activeWayfinderMap ||
         !toSpecSkill ||
+        (activeWayfinderWorkstream?.workflowAttachment != null &&
+          activeWayfinderWorkstream.workflowAttachment.workflowRun === undefined) ||
         activeEnvironmentUnavailable
       ) {
         return;
@@ -5444,6 +5446,7 @@ function ChatViewContent(props: ChatViewProps) {
       createThread,
       deleteThread,
       environmentId,
+      activeWayfinderWorkstream,
       navigate,
       startThreadTurn,
       toSpecSkill,
@@ -6146,7 +6149,11 @@ function ChatViewContent(props: ChatViewProps) {
         {...(activeLinkedTicketInvocation ? { onCompleteHitl: onCompleteWayfinderHitl } : {})}
         synchronization={activeWayfinderWorkstream?.wayfinderSynchronization ?? null}
         {...(activeWayfinderWorkstream ? { readiness: activeWayfinderWorkstream.readiness } : {})}
-        toSpecAvailable={toSpecSkill !== null}
+        toSpecAvailable={
+          toSpecSkill !== null &&
+          (activeWayfinderWorkstream?.workflowAttachment == null ||
+            activeWayfinderWorkstream.workflowAttachment.workflowRun !== undefined)
+        }
         onStartToSpec={onStartWayfinderToSpec}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
