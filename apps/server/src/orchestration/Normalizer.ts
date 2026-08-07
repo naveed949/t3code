@@ -384,22 +384,34 @@ export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(fu
     resolvedSkillInvocation?.action?.id === "handoff-to-spec"
       ? resolvedSkillInvocation.action
       : null;
+  const ticketingHandoffAction =
+    resolvedSkillInvocation?.action?.id === "handoff-to-tickets"
+      ? resolvedSkillInvocation.action
+      : null;
   const skillInvocation: ResolvedSkillInvocation | undefined =
-    handoffAction === null
+    handoffAction === null && ticketingHandoffAction === null
       ? resolvedSkillInvocation
       : yield* Effect.gen(function* () {
           if (resolvedSkillInvocation === undefined) {
             return yield* new OrchestrationDispatchCommandError({
-              message: "Unable to resolve the to-spec Skill Run.",
+              message:
+                ticketingHandoffAction === null
+                  ? "Unable to resolve the to-spec Skill Run."
+                  : "Unable to resolve the to-tickets Skill Run.",
             });
           }
           const loadSource = options.getWayfinderHandoffSource;
           if (loadSource === undefined) {
             return yield* new OrchestrationDispatchCommandError({
-              message: "Durable Wayfinder handoff provenance is unavailable.",
+              message:
+                ticketingHandoffAction === null
+                  ? "Durable Wayfinder handoff provenance is unavailable."
+                  : "Durable Specification handoff provenance is unavailable.",
             });
           }
-          const source = yield* loadSource(handoffAction.sourceSkillRunId).pipe(
+          const sourceSkillRunId =
+            handoffAction?.sourceSkillRunId ?? ticketingHandoffAction!.sourceSkillRunId;
+          const source = yield* loadSource(sourceSkillRunId).pipe(
             Effect.mapError(
               () =>
                 new OrchestrationDispatchCommandError({
@@ -407,18 +419,35 @@ export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(fu
                 }),
             ),
           );
+          if (ticketingHandoffAction !== null) {
+            if (
+              source === null ||
+              source.threadId !== ticketingHandoffAction.sourceThreadId ||
+              source.invocation.skillRunId !== ticketingHandoffAction.sourceSkillRunId ||
+              source.invocation.skill.name !== "to-spec"
+            ) {
+              return yield* new OrchestrationDispatchCommandError({
+                message:
+                  "to-tickets provenance does not match the durable Specification Skill Run.",
+              });
+            }
+            return {
+              ...resolvedSkillInvocation,
+              reconnectWorkstreamId: source.invocation.workstreamId,
+            } satisfies ResolvedSkillInvocation;
+          }
           const map = source?.invocation.wayfinderMap;
           const synchronizedAt =
             source?.invocation.wayfinderSynchronizedAt ?? map?.lastSynchronizedAt;
           if (
             source === null ||
-            source.threadId !== handoffAction.sourceThreadId ||
+            source.threadId !== handoffAction!.sourceThreadId ||
             source.invocation.skill.name !== "wayfinder" ||
             source.invocation.execution.mode !== "native" ||
             map === undefined ||
-            handoffAction.canonicalReference.number !== map.canonicalReference.number ||
-            handoffAction.canonicalReference.url !== map.canonicalReference.url ||
-            handoffAction.wayfinderSynchronizedAt !== synchronizedAt
+            handoffAction!.canonicalReference.number !== map.canonicalReference.number ||
+            handoffAction!.canonicalReference.url !== map.canonicalReference.url ||
+            handoffAction!.wayfinderSynchronizedAt !== synchronizedAt
           ) {
             return yield* new OrchestrationDispatchCommandError({
               message: "to-spec provenance does not match the durable canonical Wayfinder run.",
@@ -429,7 +458,7 @@ export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(fu
             synchronization: source.invocation.wayfinderSynchronization ?? null,
             activeLinkedTicketNumbers: source.activeLinkedTicketNumbers,
           });
-          if (!readiness.ready && !handoffAction.acknowledgedIncomplete) {
+          if (!readiness.ready && !handoffAction!.acknowledgedIncomplete) {
             return yield* new OrchestrationDispatchCommandError({
               message: `Acknowledge the incomplete Wayfinder map before early to-spec handoff. Blockers: ${readiness.blockers.map((blocker) => blocker.kind).join(", ")}.`,
             });

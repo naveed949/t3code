@@ -11,6 +11,9 @@ import type {
   WorkflowPrdDocument,
   WorkflowSpecificationStage,
   WorkflowStaleResolution,
+  WorkflowTicketBatch,
+  WorkflowTicketBatchPublication,
+  WorkflowTrackerProjection,
 } from "@t3tools/contracts";
 import * as Encoding from "effect/Encoding";
 
@@ -22,6 +25,8 @@ import { stableStringify } from "./relaySigning.ts";
  * to explain staleness and recover a connected client after a missed delta.
  */
 export const WORKFLOW_GRAPH_ARTIFACT_LIMIT = 32;
+export const WORKFLOW_GRAPH_NODE_LIMIT = 100;
+export const WORKFLOW_GRAPH_EDGE_LIMIT = 200;
 
 interface WorkflowWayfinderSynchronizationInput {
   readonly attachment: WorkflowAttachment;
@@ -211,6 +216,7 @@ export function initializeWorkflowGraph(attachment: WorkflowAttachment): Workflo
         sourceArtifactId: artifact?.id ?? null,
       }),
     ],
+    edges: [],
     unreadArtifactCount: artifact === null ? 0 : 1,
     updatedAt: attachment.attachedAt,
   };
@@ -464,6 +470,155 @@ export function workflowSpecificationArtifactDetail(input: {
     artifactId: `workflow-prd:${input.attachment.workstreamId}:v${input.document.version}`,
     kind: "workflow-prd",
     document: input.document,
+  };
+}
+
+function ticketNodeId(key: string): string {
+  return `ticket:${key}`;
+}
+
+function trackerTicketNodeId(ticket: WorkflowTrackerProjection["tickets"][number]): string {
+  return ticket.key === null ? ticketNodeId(`tracker:${ticket.number}`) : ticketNodeId(ticket.key);
+}
+
+/** Materialize tracker-owned ticket identities without granting scope to later tickets. */
+export function completeWorkflowTicketing(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly batch: WorkflowTicketBatch;
+  readonly publication: WorkflowTicketBatchPublication;
+  readonly trackerProjection: WorkflowTrackerProjection;
+  readonly completedAt: string;
+}): WorkflowAttachment {
+  if (input.publication.status !== "succeeded" && input.publication.status !== "reconciled") {
+    return input.attachment;
+  }
+  const graph = input.attachment.workflowGraph ?? initializeWorkflowGraph(input.attachment);
+  const batchByKey = new Map(input.batch.tickets.map((ticket) => [ticket.key, ticket]));
+  const identitiesByKey = new Map(
+    input.publication.identities.map((identity) => [identity.key, identity]),
+  );
+  const trackerTickets = input.trackerProjection.tickets;
+  const trackerNumberToNodeId = new Map(
+    trackerTickets.map((ticket) => [ticket.number, trackerTicketNodeId(ticket)] as const),
+  );
+  const nonTicketNodes = graph.nodes.filter((node) => node.kind !== "ticket");
+  const approvedTicketNumbers = new Set(
+    input.publication.identities.map((identity) => identity.number),
+  );
+  const graphTickets = [...trackerTickets]
+    .sort(
+      (left, right) =>
+        Number(approvedTicketNumbers.has(right.number)) -
+          Number(approvedTicketNumbers.has(left.number)) || left.number - right.number,
+    )
+    .slice(0, Math.max(0, WORKFLOW_GRAPH_NODE_LIMIT - nonTicketNodes.length));
+  const ticketNodes: ReadonlyArray<WorkflowGraphNode> = graphTickets.map((ticket) => {
+    const batchTicket = ticket.key === null ? undefined : batchByKey.get(ticket.key);
+    const identity = ticket.key === null ? undefined : identitiesByKey.get(ticket.key);
+    return {
+      id: trackerTicketNodeId(ticket),
+      kind: "ticket",
+      ticketKey: ticket.key ?? `tracker:${ticket.number}`,
+      ticketNumber: ticket.number,
+      title: ticket.title,
+      state: "current",
+      sourceArtifactId: input.batch.sourceWorkflowPrdArtifactId,
+      includedInRun: batchTicket !== undefined && identity !== undefined,
+      resolution: { status: "not-required" },
+    };
+  });
+  const ticketNodeIds = new Set(ticketNodes.map((node) => node.id));
+  const workstreamNodeId = `workflow:${input.attachment.workstreamId}`;
+  const containsEdges = graphTickets.map((ticket) => {
+    const ticketId = trackerTicketNodeId(ticket);
+    const parentId =
+      ticket.parentNumber === null ||
+      ticket.parentNumber === input.trackerProjection.canonicalReference.number
+        ? workstreamNodeId
+        : (trackerNumberToNodeId.get(ticket.parentNumber) ?? workstreamNodeId);
+    return {
+      fromNodeId: ticketNodeIds.has(parentId) ? parentId : workstreamNodeId,
+      toNodeId: ticketId,
+      kind: "contains" as const,
+    };
+  });
+  const trackerEdges = graphTickets.flatMap((ticket) =>
+    ticket.blockedBy.flatMap((blockerNumber) => {
+      const blockerId = trackerNumberToNodeId.get(blockerNumber);
+      return blockerId === undefined
+        ? []
+        : [
+            {
+              fromNodeId: blockerId,
+              toNodeId: trackerTicketNodeId(ticket),
+              kind: "blocks" as const,
+            },
+          ];
+    }),
+  );
+  const edges = [
+    ...(graph.edges ?? []).filter(
+      (edge) => !edge.fromNodeId.startsWith("ticket:") && !edge.toNodeId.startsWith("ticket:"),
+    ),
+    ...containsEdges,
+    ...trackerEdges,
+  ]
+    .filter(
+      (edge, index, all) =>
+        all.findIndex(
+          (candidate) =>
+            candidate.fromNodeId === edge.fromNodeId &&
+            candidate.toNodeId === edge.toNodeId &&
+            candidate.kind === edge.kind,
+        ) === index,
+    )
+    .sort(
+      (left, right) =>
+        left.fromNodeId.localeCompare(right.fromNodeId) ||
+        left.toNodeId.localeCompare(right.toNodeId) ||
+        left.kind.localeCompare(right.kind),
+    )
+    .slice(0, WORKFLOW_GRAPH_EDGE_LIMIT);
+  const existingScope = input.attachment.workflowRun?.configuration.runScope ?? [];
+  const scopeIds = new Set(existingScope.map((scope) => scope.nodeId));
+  const approvedScope = input.batch.tickets.flatMap((ticket) => {
+    const nodeId = ticketNodeId(ticket.key);
+    const identity = identitiesByKey.get(ticket.key);
+    if (identity === undefined || scopeIds.has(nodeId)) return [];
+    return [{ nodeId, label: ticket.title }];
+  });
+  const workflowRun = input.attachment.workflowRun;
+  const nextWorkflowRun =
+    workflowRun === undefined
+      ? undefined
+      : {
+          ...workflowRun,
+          configuration: {
+            ...workflowRun.configuration,
+            runScope: [...workflowRun.configuration.runScope, ...approvedScope],
+          },
+        };
+  return {
+    ...input.attachment,
+    workflowVersion: (input.attachment.workflowVersion ?? 0) + 1,
+    ...(nextWorkflowRun !== undefined ? { workflowRun: nextWorkflowRun } : {}),
+    trackerProjection: input.trackerProjection,
+    ticketingStage: input.attachment.ticketingStage
+      ? {
+          ...input.attachment.ticketingStage,
+          status: "completed",
+          publication: input.publication,
+          trackerProjection: input.trackerProjection,
+          failure: undefined,
+          updatedAt: input.completedAt,
+        }
+      : undefined,
+    workflowGraph: {
+      ...graph,
+      nodes: [...nonTicketNodes, ...ticketNodes],
+      edges,
+      updatedAt: input.completedAt,
+    },
   };
 }
 

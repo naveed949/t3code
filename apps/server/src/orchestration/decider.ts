@@ -6,6 +6,7 @@ import {
   UserInputQuestion,
   WayfinderMutationAction,
   WorkstreamId,
+  WorkflowTicketBatch as WorkflowTicketBatchSchema,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
@@ -19,6 +20,10 @@ import {
   type WorkflowRunConfiguration,
   type WorkflowRunRequiredSkill,
   type WorkflowSpecificationStage,
+  type WorkflowTicketBatch,
+  type WorkflowTicketBatchPublication,
+  type WorkflowTicketingCheckpointRequest,
+  type WorkflowTicketingStage,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
@@ -26,6 +31,7 @@ import { stableStringify } from "@t3tools/shared/relaySigning";
 import {
   acknowledgeWorkflowArtifact,
   completeWorkflowSpecification,
+  completeWorkflowTicketing,
   hasPendingWorkflowStaleness,
   initializeWorkflowGraph,
   resolveWorkflowStaleness,
@@ -73,6 +79,14 @@ const decodeWorkflowCheckpointActivityPayload = Schema.decodeUnknownOption(
   Schema.Struct({
     requestId: ApprovalRequestId,
     skillRunId: SkillRunId,
+    questions: Schema.Array(UserInputQuestion),
+  }),
+);
+const decodeWorkflowTicketingCheckpointActivityPayload = Schema.decodeUnknownOption(
+  Schema.Struct({
+    requestId: ApprovalRequestId,
+    skillRunId: SkillRunId,
+    batch: WorkflowTicketBatchSchema,
     questions: Schema.Array(UserInputQuestion),
   }),
 );
@@ -593,6 +607,154 @@ function workflowSpecificationContextForHandoff(input: {
   };
 }
 
+interface WorkflowTicketingDispatchContext {
+  readonly originThread: OrchestrationThread;
+  readonly attachment: WorkflowAttachment;
+  readonly requiredSkill: WorkflowRunRequiredSkill;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly sourceWorkflowPrdArtifactId: string;
+  readonly capabilityBlocked?: string;
+}
+
+type WorkflowTicketingDispatchValidation =
+  | { readonly context: WorkflowTicketingDispatchContext }
+  | { readonly detail: string }
+  | null;
+
+function workflowTicketingContextForHandoff(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly action: Extract<SkillInvocation["action"], { readonly id: "handoff-to-tickets" }>;
+  readonly workstreamId: WorkstreamId;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly invocation: Pick<SkillInvocation, "skill">;
+}): WorkflowTicketingDispatchValidation {
+  const sourceThread = input.readModel.threads.find(
+    (thread) => thread.id === input.action.sourceThreadId,
+  );
+  const originThread =
+    sourceThread?.workflowAttachment !== undefined
+      ? sourceThread
+      : input.readModel.threads.find(
+          (thread) => thread.workflowAttachment?.workstreamId === input.workstreamId,
+        );
+  const attachment = originThread?.workflowAttachment;
+  if (sourceThread === undefined || originThread === undefined || attachment === undefined) {
+    return null;
+  }
+  if (attachment.workstreamId !== input.workstreamId) {
+    return { detail: "Ticketing provenance does not match the attached Workflow Run." };
+  }
+  const specificationStage = attachment.specificationStage;
+  if (
+    specificationStage === undefined ||
+    specificationStage.specificationThreadId !== sourceThread.id ||
+    specificationStage.skillRunId !== input.action.sourceSkillRunId ||
+    specificationStage.status !== "completed" ||
+    specificationStage.artifactId !== input.action.sourceWorkflowPrdArtifactId
+  ) {
+    return { detail: "Ticketing provenance must reference the completed Specification Skill Run." };
+  }
+  const workflowRun = attachment.workflowRun;
+  if (workflowRun === undefined || workflowRun.status !== "confirmed") {
+    return { detail: "Ticketing dispatch requires a confirmed Workflow Run." };
+  }
+  const currentPrd = attachment.workflowGraph?.artifacts.find(
+    (artifact) =>
+      artifact.kind === "workflow-prd" &&
+      artifact.state === "current" &&
+      artifact.id === input.action.sourceWorkflowPrdArtifactId &&
+      artifact.version === input.action.sourceWorkflowPrdVersion,
+  );
+  if (currentPrd === undefined) {
+    return {
+      detail:
+        "Ticketing provenance must name the current authorized Workflow PRD artifact and version.",
+    };
+  }
+  const scopeIds = new Set(workflowRun.configuration.runScope.map((node) => node.nodeId));
+  const ticketingSkills = workflowRun.configuration.requiredSkills.filter(
+    (candidate) =>
+      candidate.stage === "ticketing" &&
+      candidate.skill.name === input.invocation.skill.name &&
+      scopeIds.has(candidate.nodeId),
+  );
+  if (ticketingSkills.length === 0) {
+    return {
+      context: {
+        originThread,
+        attachment,
+        providerInstanceId: input.providerInstanceId,
+        sourceWorkflowPrdArtifactId: currentPrd.id,
+        requiredSkill: {
+          nodeId: `workflow:${input.workstreamId}`,
+          providerInstanceId: input.providerInstanceId,
+          stage: "ticketing",
+          skill: {
+            name: input.invocation.skill.name,
+            ...(input.invocation.skill.path !== undefined
+              ? { path: input.invocation.skill.path }
+              : {}),
+            ...(input.invocation.skill.contentDigest !== undefined
+              ? { contentDigest: input.invocation.skill.contentDigest }
+              : {}),
+          },
+          status: "missing",
+        },
+        capabilityBlocked: "The confirmed Run has no pinned to-tickets capability.",
+      },
+    };
+  }
+  const requiredSkill = ticketingSkills.find(
+    (candidate) => candidate.providerInstanceId === input.providerInstanceId,
+  );
+  if (requiredSkill === undefined) {
+    return {
+      context: {
+        originThread,
+        attachment,
+        providerInstanceId: input.providerInstanceId,
+        sourceWorkflowPrdArtifactId: currentPrd.id,
+        requiredSkill: {
+          ...ticketingSkills[0]!,
+          providerInstanceId: input.providerInstanceId,
+          status: "missing",
+        },
+        capabilityBlocked: "The selected Ticketing provider has no pinned to-tickets capability.",
+      },
+    };
+  }
+  const capabilityBlocked =
+    requiredSkill.status !== "available"
+      ? `The pinned Ticketing Required Skill is ${requiredSkill.status}.`
+      : requiredSkill.skill.path === undefined || requiredSkill.skill.contentDigest === undefined
+        ? "The pinned Ticketing Required Skill has no verified capability identity."
+        : requiredSkill.skill.path !== input.invocation.skill.path ||
+            requiredSkill.skill.contentDigest !== input.invocation.skill.contentDigest
+          ? "The requested to-tickets skill does not match the immutable pinned Required Skill."
+          : undefined;
+  const existingStage = attachment.ticketingStage;
+  if (
+    existingStage !== undefined &&
+    existingStage.status !== "failed" &&
+    existingStage.status !== "stopped" &&
+    existingStage.status !== "capability-blocked"
+  ) {
+    return {
+      detail: `Ticketing stage is already ${existingStage.status} and cannot be dispatched again.`,
+    };
+  }
+  return {
+    context: {
+      originThread,
+      attachment,
+      requiredSkill,
+      providerInstanceId: input.providerInstanceId,
+      sourceWorkflowPrdArtifactId: currentPrd.id,
+      ...(capabilityBlocked !== undefined ? { capabilityBlocked } : {}),
+    },
+  };
+}
+
 function workflowSpecificationForThread(
   readModel: OrchestrationReadModel,
   thread: OrchestrationThread,
@@ -618,11 +780,62 @@ function workflowSpecificationForThread(
   return { originThread, attachment, stage };
 }
 
+function workflowTicketingForThread(
+  readModel: OrchestrationReadModel,
+  thread: OrchestrationThread,
+): {
+  readonly originThread: OrchestrationThread;
+  readonly attachment: WorkflowAttachment;
+  readonly stage: WorkflowTicketingStage;
+} | null {
+  const originThread = readModel.threads.find(
+    (candidate) => candidate.workflowAttachment?.ticketingStage?.ticketingThreadId === thread.id,
+  );
+  const attachment = originThread?.workflowAttachment;
+  const stage = attachment?.ticketingStage;
+  if (
+    originThread === undefined ||
+    attachment === undefined ||
+    stage === undefined ||
+    stage.ticketingThreadId !== thread.id
+  ) {
+    return null;
+  }
+  return { originThread, attachment, stage };
+}
+
 function incrementWorkflowVersion(attachment: WorkflowAttachment): WorkflowAttachment {
   return {
     ...attachment,
     workflowVersion: (attachment.workflowVersion ?? 0) + 1,
   };
+}
+
+function workflowTicketBatchValidation(batch: WorkflowTicketBatch): string | null {
+  const keys = new Set<string>();
+  for (const ticket of batch.tickets) {
+    if (!keys.add(ticket.key)) return `Ticket Batch contains duplicate ticket key '${ticket.key}'.`;
+    if (ticket.parentKey === ticket.key) {
+      return `Ticket '${ticket.key}' cannot be its own parent.`;
+    }
+  }
+  for (const ticket of batch.tickets) {
+    if (ticket.parentKey !== null && !keys.has(ticket.parentKey)) {
+      return `Ticket '${ticket.key}' names unknown parent '${ticket.parentKey}'.`;
+    }
+  }
+  const edges = new Set<string>();
+  for (const edge of batch.blockerEdges) {
+    if (edge.blockedKey === edge.blockerKey) {
+      return `Ticket '${edge.blockedKey}' cannot block itself.`;
+    }
+    if (!keys.has(edge.blockedKey) || !keys.has(edge.blockerKey)) {
+      return `Ticket Batch contains a blocker edge outside the exact approved batch.`;
+    }
+    const edgeKey = `${edge.blockedKey}:${edge.blockerKey}`;
+    if (!edges.add(edgeKey)) return `Ticket Batch contains duplicate blocker edge '${edgeKey}'.`;
+  }
+  return null;
 }
 
 function workflowCheckpointFromActivity(input: {
@@ -643,6 +856,32 @@ function workflowCheckpointFromActivity(input: {
     originThreadId: input.stage.originThreadId,
     specificationThreadId: input.stage.specificationThreadId,
     skillRunId: input.stage.skillRunId,
+    questions: payload.questions,
+    status: "pending",
+    requestedAt: input.activity.createdAt,
+  };
+}
+
+function workflowTicketingCheckpointFromActivity(input: {
+  readonly activity: OrchestrationThread["activities"][number];
+  readonly stage: WorkflowTicketingStage;
+}): WorkflowTicketingCheckpointRequest | null {
+  if (input.activity.kind !== "user-input.requested") return null;
+  if (input.activity.turnId === null) return null;
+  const payload = Option.getOrUndefined(
+    decodeWorkflowTicketingCheckpointActivityPayload(input.activity.payload),
+  );
+  if (payload === undefined || payload.skillRunId !== input.stage.skillRunId) return null;
+  if (payload.questions.length === 0) return null;
+  return {
+    requestId: payload.requestId,
+    kind: "ticketing-granularity-blockers",
+    workstreamId: input.stage.workstreamId,
+    originThreadId: input.stage.originThreadId,
+    ticketingThreadId: input.stage.ticketingThreadId,
+    skillRunId: input.stage.skillRunId,
+    sourceWorkflowPrdArtifactId: input.stage.sourceWorkflowPrdArtifactId,
+    approvedBatch: payload.batch,
     questions: payload.questions,
     status: "pending",
     requestedAt: input.activity.createdAt,
@@ -1318,6 +1557,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         requestedSkillInvocation?.action?.id === "handoff-to-spec"
           ? requestedSkillInvocation.action
           : null;
+      const ticketingHandoffAction =
+        requestedSkillInvocation?.action?.id === "handoff-to-tickets"
+          ? requestedSkillInvocation.action
+          : null;
       let handoffWorkstreamId: WorkstreamId | null = null;
       if (handoffAction !== null) {
         if (
@@ -1405,6 +1648,42 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           handoffWorkstreamId = wayfinderInvocation.workstreamId;
         }
       }
+      let ticketingWorkstreamId: WorkstreamId | null = null;
+      if (ticketingHandoffAction !== null) {
+        if (requestedSkillInvocation?.skill.name !== "to-tickets") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Workflow ticketing handoff requires the to-tickets skill.",
+          });
+        }
+        const specificationThread = yield* requireThread({
+          readModel,
+          command,
+          threadId: ticketingHandoffAction.sourceThreadId,
+        });
+        if (specificationThread.projectId !== targetThread.projectId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "Ticketing provenance must reference the Specification stage in the target project.",
+          });
+        }
+        const specificationInvocation = specificationThread.latestTurn?.skillInvocation;
+        if (
+          specificationInvocation?.skillRunId === ticketingHandoffAction.sourceSkillRunId &&
+          specificationInvocation.workstreamId !== undefined &&
+          specificationInvocation.skill.name === "to-spec"
+        ) {
+          ticketingWorkstreamId = specificationInvocation.workstreamId;
+        } else if (requestedSkillInvocation.reconnectWorkstreamId !== undefined) {
+          ticketingWorkstreamId = requestedSkillInvocation.reconnectWorkstreamId;
+        } else {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Ticketing provenance must resolve from the durable Specification Skill Run.",
+          });
+        }
+      }
       let workflowSpecificationContext: WorkflowSpecificationDispatchContext | null = null;
       if (
         handoffAction !== null &&
@@ -1427,6 +1706,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         }
         workflowSpecificationContext = validation?.context ?? null;
       }
+      let workflowTicketingContext: WorkflowTicketingDispatchContext | null = null;
+      if (
+        ticketingHandoffAction !== null &&
+        requestedSkillInvocation !== undefined &&
+        ticketingWorkstreamId !== null
+      ) {
+        const validation = workflowTicketingContextForHandoff({
+          readModel,
+          action: ticketingHandoffAction,
+          workstreamId: ticketingWorkstreamId,
+          providerInstanceId:
+            command.modelSelection?.instanceId ?? targetThread.modelSelection.instanceId,
+          invocation: requestedSkillInvocation,
+        });
+        if (validation === null) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Ticketing provenance could not resolve the authorized Workflow Run.",
+          });
+        }
+        if ("detail" in validation) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: validation.detail,
+          });
+        }
+        workflowTicketingContext = validation.context;
+      }
       const skillInvocation: SkillInvocation | undefined = requestedSkillInvocation
         ? {
             skill: requestedSkillInvocation.skill,
@@ -1448,6 +1755,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               : {}),
             workstreamId:
               handoffWorkstreamId ??
+              ticketingWorkstreamId ??
               requestedSkillInvocation.reconnectWorkstreamId ??
               WorkstreamId.make(
                 `workstream:${yield* Crypto.Crypto.pipe(Effect.flatMap((crypto) => crypto.randomUUIDv4))}`,
@@ -1492,6 +1800,43 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                         providerInstanceId: workflowSpecificationContext.providerInstanceId,
                         skill: skillInvocation.skill,
                         failure: workflowSpecificationContext.capabilityBlocked,
+                        startedAt: command.createdAt,
+                        updatedAt: command.createdAt,
+                      },
+                    }),
+                  },
+                }),
+              ),
+            )
+          : null;
+      const workflowTicketingCapabilityBlockedEvent =
+        workflowTicketingContext?.capabilityBlocked !== undefined && skillInvocation !== undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: workflowTicketingContext.originThread.id,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  type: "thread.workflow-ticketing-failed",
+                  payload: {
+                    threadId: workflowTicketingContext.originThread.id,
+                    attachment: incrementWorkflowVersion({
+                      ...workflowTicketingContext.attachment,
+                      ticketingStage: {
+                        status: "capability-blocked",
+                        workstreamId: workflowTicketingContext.attachment.workstreamId,
+                        nodeId: workflowTicketingContext.requiredSkill.nodeId,
+                        originThreadId: workflowTicketingContext.originThread.id,
+                        ticketingThreadId: command.threadId,
+                        skillRunId: skillInvocation.skillRunId,
+                        providerInstanceId: workflowTicketingContext.providerInstanceId,
+                        skill: skillInvocation.skill,
+                        sourceWorkflowPrdArtifactId:
+                          workflowTicketingContext.sourceWorkflowPrdArtifactId,
+                        failure: workflowTicketingContext.capabilityBlocked,
                         startedAt: command.createdAt,
                         updatedAt: command.createdAt,
                       },
@@ -1669,6 +2014,45 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ),
             )
           : null;
+      const workflowTicketingDispatchedEvent =
+        workflowTicketingContext !== null &&
+        workflowTicketingContext.capabilityBlocked === undefined &&
+        skillInvocation !== undefined
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: workflowTicketingContext.originThread.id,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  causationEventId: turnStartRequestedEvent.eventId,
+                  type: "thread.workflow-ticketing-dispatched",
+                  payload: {
+                    threadId: workflowTicketingContext.originThread.id,
+                    attachment: incrementWorkflowVersion({
+                      ...workflowTicketingContext.attachment,
+                      ticketingStage: {
+                        status: "running",
+                        workstreamId: workflowTicketingContext.attachment.workstreamId,
+                        nodeId: workflowTicketingContext.requiredSkill.nodeId,
+                        originThreadId: workflowTicketingContext.originThread.id,
+                        ticketingThreadId: command.threadId,
+                        skillRunId: skillInvocation.skillRunId,
+                        providerInstanceId: workflowTicketingContext.providerInstanceId,
+                        skill: skillInvocation.skill,
+                        sourceWorkflowPrdArtifactId:
+                          workflowTicketingContext.sourceWorkflowPrdArtifactId,
+                        startedAt: command.createdAt,
+                        updatedAt: command.createdAt,
+                      },
+                    }),
+                  },
+                }),
+              ),
+            )
+          : null;
       // Real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
@@ -1710,6 +2094,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (workflowSpecificationCapabilityBlockedEvent !== null) {
         return [workflowSpecificationCapabilityBlockedEvent];
       }
+      if (workflowTicketingCapabilityBlockedEvent !== null) {
+        return [workflowTicketingCapabilityBlockedEvent];
+      }
       return [
         ...lifecycleResetEvents,
         userMessageEvent,
@@ -1718,6 +2105,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ...(workflowAttachmentHintEvent ? [workflowAttachmentHintEvent] : []),
         ...(workflowSynchronized ? [workflowSynchronized] : []),
         ...(workflowSpecificationDispatchedEvent ? [workflowSpecificationDispatchedEvent] : []),
+        ...(workflowTicketingDispatchedEvent ? [workflowTicketingDispatchedEvent] : []),
       ];
     }
 
@@ -1791,6 +2179,73 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ? [{ originThread, attachment: attachment as WorkflowAttachment, checkpoint }]
           : [];
       })[0];
+      const workflowTicketingCheckpoint = readModel.threads.flatMap((originThread) => {
+        const attachment = originThread.workflowAttachment;
+        const checkpoint = attachment?.ticketingStage?.checkpoint;
+        return checkpoint?.requestId === command.requestId
+          ? [{ originThread, attachment: attachment as WorkflowAttachment, checkpoint }]
+          : [];
+      })[0];
+      if (workflowTicketingCheckpoint !== undefined) {
+        const stage = workflowTicketingCheckpoint.attachment.ticketingStage;
+        if (stage === undefined || stage.ticketingThreadId !== command.threadId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "The Ticketing checkpoint response targeted the wrong thread.",
+          });
+        }
+        if (workflowTicketingCheckpoint.checkpoint.status !== "pending") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "The Ticketing checkpoint response is stale or already resolved.",
+          });
+        }
+        const nextAttachment = incrementWorkflowVersion({
+          ...workflowTicketingCheckpoint.attachment,
+          ticketingStage: {
+            ...stage,
+            status: "running",
+            checkpoint: {
+              ...workflowTicketingCheckpoint.checkpoint,
+              status: "resolved",
+              resolvedAt: command.createdAt,
+              answers: command.answers,
+            },
+            updatedAt: command.createdAt,
+          },
+        });
+        const workflowCheckpointResolvedEvent: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: workflowTicketingCheckpoint.originThread.id,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: { requestId: command.requestId },
+          })),
+          type: "thread.workflow-ticketing-checkpoint-resolved",
+          payload: {
+            threadId: workflowTicketingCheckpoint.originThread.id,
+            attachment: nextAttachment,
+          },
+        };
+        const providerResponseEvent: Omit<OrchestrationEvent, "sequence"> = {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+            metadata: { requestId: command.requestId },
+          })),
+          type: "thread.user-input-response-requested",
+          payload: {
+            threadId: command.threadId,
+            requestId: command.requestId,
+            answers: command.answers,
+            createdAt: command.createdAt,
+          },
+        };
+        return [workflowCheckpointResolvedEvent, providerResponseEvent];
+      }
       if (workflowCheckpoint !== undefined) {
         const stage = workflowCheckpoint.attachment.specificationStage;
         if (stage === undefined || stage.specificationThreadId !== command.threadId) {
@@ -2247,6 +2702,216 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.workflow.ticketing.publish": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const stage = attachment?.ticketingStage;
+      if (attachment === undefined || stage === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Batch publication requires a dispatched Ticketing stage.",
+        });
+      }
+      if (
+        stage.ticketingThreadId !== command.ticketingThreadId ||
+        stage.skillRunId !== command.skillRunId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Batch publication does not match the authorized Ticketing Skill Run.",
+        });
+      }
+      const currentWorkflowVersion = attachment.workflowVersion ?? 0;
+      if (command.expectedWorkstreamVersion !== currentWorkflowVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Stale Workstream version ${command.expectedWorkstreamVersion}; current version is ${currentWorkflowVersion}. Refresh the Workflow Projection before retrying.`,
+        });
+      }
+      if (stage.status === "completed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The Ticketing stage is already completed.",
+        });
+      }
+      if (stage.status === "publishing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The approved Ticket Batch is already being published.",
+        });
+      }
+      if (stage.checkpoint?.status !== "resolved") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Ticket Batch publication requires the resolved native granularity and blocker checkpoint.",
+        });
+      }
+      if (
+        stage.checkpoint.approvedBatch === undefined ||
+        stableStringify(stage.checkpoint.approvedBatch) !== stableStringify(command.batch)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Ticket Batch publication must exactly match the batch approved by the native checkpoint.",
+        });
+      }
+      const currentPrd = attachment.workflowGraph?.artifacts.find(
+        (artifact) =>
+          artifact.kind === "workflow-prd" &&
+          artifact.state === "current" &&
+          artifact.id === command.batch.sourceWorkflowPrdArtifactId &&
+          artifact.version === command.batch.sourceWorkflowPrdVersion,
+      );
+      if (currentPrd === undefined || currentPrd.id !== stage.sourceWorkflowPrdArtifactId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Ticket Batch publication must name the current authorized Workflow PRD artifact.",
+        });
+      }
+      const batchError = workflowTicketBatchValidation(command.batch);
+      if (batchError !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: batchError,
+        });
+      }
+      const publication: WorkflowTicketBatchPublication = {
+        status: "publishing",
+        batchId: command.batch.id,
+        identities: [],
+        requestedAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        ticketingStage: {
+          ...stage,
+          status: "publishing",
+          approvedBatch: command.batch,
+          publication,
+          failure: undefined,
+          updatedAt: command.createdAt,
+        },
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-ticket-batch-publication-requested",
+        payload: {
+          threadId: command.threadId,
+          ticketingThreadId: command.ticketingThreadId,
+          skillRunId: command.skillRunId,
+          batch: command.batch,
+          publication,
+          attachment: nextAttachment,
+          createdAt: command.createdAt,
+        },
+      };
+    }
+
+    case "thread.workflow.ticketing.publication.update": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const stage = attachment?.ticketingStage;
+      if (attachment === undefined || stage === undefined || stage.approvedBatch === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Batch publication update requires an approved Ticket Batch.",
+        });
+      }
+      if (
+        stage.ticketingThreadId !== command.ticketingThreadId ||
+        stage.skillRunId !== command.skillRunId ||
+        stage.approvedBatch.id !== command.publication.batchId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Batch publication update does not match the authorized publication.",
+        });
+      }
+      if (command.publication.status !== "failed") {
+        const expectedKeys = new Set(stage.approvedBatch.tickets.map((ticket) => ticket.key));
+        const identityKeys = new Set(
+          command.publication.identities.map((identity) => identity.key),
+        );
+        if (
+          expectedKeys.size !== identityKeys.size ||
+          [...expectedKeys].some((key) => !identityKeys.has(key))
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "Successful Ticket Batch publication must return exactly one tracker identity per approved ticket.",
+          });
+        }
+        if (command.trackerProjection?.status !== "healthy") {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Successful Ticket Batch publication requires a healthy Tracker Projection.",
+          });
+        }
+      }
+      const alreadyApplied =
+        stage.status === "completed" &&
+        stableStringify(stage.publication) === stableStringify(command.publication) &&
+        (command.trackerProjection === undefined ||
+          stableStringify(stage.trackerProjection) === stableStringify(command.trackerProjection));
+      const nextAttachment = alreadyApplied
+        ? attachment
+        : command.publication.status === "failed"
+          ? incrementWorkflowVersion({
+              ...attachment,
+              trackerProjection: command.trackerProjection,
+              ticketingStage: {
+                ...stage,
+                status: "failed",
+                publication: command.publication,
+                ...(command.trackerProjection !== undefined
+                  ? { trackerProjection: command.trackerProjection }
+                  : {}),
+                ...(command.publication.failure !== undefined
+                  ? { failure: command.publication.failure }
+                  : {}),
+                updatedAt: command.createdAt,
+              },
+            })
+          : completeWorkflowTicketing({
+              attachment,
+              batch: stage.approvedBatch,
+              publication: command.publication,
+              trackerProjection: command.trackerProjection!,
+              completedAt: command.createdAt,
+            });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-ticket-batch-publication-updated",
+        payload: {
+          threadId: command.threadId,
+          attachment: nextAttachment,
+        },
+      };
+    }
+
     case "thread.wayfinder.publish": {
       const thread = yield* requireThread({
         readModel,
@@ -2684,6 +3349,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               ),
             )
           : null;
+      const workflowTicketing = workflowTicketingForThread(readModel, thread);
+      const terminalWorkflowTicketingEvent =
+        workflowTicketing !== null &&
+        workflowTicketing.stage.status !== "completed" &&
+        (command.session.status === "stopped" ||
+          command.session.status === "interrupted" ||
+          command.session.status === "error")
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: workflowTicketing.originThread.id,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map(
+                (eventBase): Omit<OrchestrationEvent, "sequence"> => ({
+                  ...eventBase,
+                  causationEventId: sessionSetEvent.eventId,
+                  type: "thread.workflow-ticketing-failed",
+                  payload: {
+                    threadId: workflowTicketing.originThread.id,
+                    attachment: incrementWorkflowVersion({
+                      ...workflowTicketing.attachment,
+                      ticketingStage: {
+                        ...workflowTicketing.stage,
+                        status:
+                          command.session.status === "error"
+                            ? ("failed" as const)
+                            : ("stopped" as const),
+                        ...(workflowTicketing.stage.checkpoint?.status === "pending"
+                          ? {
+                              checkpoint: {
+                                ...workflowTicketing.stage.checkpoint,
+                                status: "stale" as const,
+                              },
+                            }
+                          : {}),
+                        ...(command.session.lastError !== null
+                          ? { failure: command.session.lastError }
+                          : {}),
+                        updatedAt: command.createdAt,
+                      },
+                    }),
+                  },
+                }),
+              ),
+            )
+          : null;
       // Only a session coming alive is activity worth waking a settled thread
       // for — status writes like ready/stopped/error arrive after the fact and
       // must not fight a user's explicit settle. Snooze is deliberately NOT
@@ -2696,9 +3408,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command.session.status === "starting" || command.session.status === "running";
       // Real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !isSessionActivity) {
-        return terminalWorkflowEvent === null
+        return terminalWorkflowEvent === null && terminalWorkflowTicketingEvent === null
           ? sessionSetEvent
-          : [sessionSetEvent, terminalWorkflowEvent];
+          : [
+              sessionSetEvent,
+              ...(terminalWorkflowEvent !== null ? [terminalWorkflowEvent] : []),
+              ...(terminalWorkflowTicketingEvent !== null ? [terminalWorkflowTicketingEvent] : []),
+            ];
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
@@ -2718,6 +3434,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         unsettledEvent,
         sessionSetEvent,
         ...(terminalWorkflowEvent !== null ? [terminalWorkflowEvent] : []),
+        ...(terminalWorkflowTicketingEvent !== null ? [terminalWorkflowTicketingEvent] : []),
       ];
     }
 
@@ -2936,6 +3653,75 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               }),
             )
           : null;
+      const workflowTicketing = workflowTicketingForThread(readModel, thread);
+      const ticketingCheckpoint =
+        workflowTicketing === null
+          ? null
+          : workflowTicketingCheckpointFromActivity({
+              activity: command.activity,
+              stage: workflowTicketing.stage,
+            });
+      const isDuplicateTicketingCheckpoint =
+        ticketingCheckpoint !== null &&
+        workflowTicketing?.stage.checkpoint?.requestId === ticketingCheckpoint.requestId;
+      const ticketingRuntimeFailure =
+        workflowTicketing !== null && command.activity.kind === "runtime.error"
+          ? (Option.getOrUndefined(decodeRuntimeErrorActivityPayload(command.activity.payload))
+              ?.message ?? command.activity.summary)
+          : null;
+      const workflowTicketingEvent =
+        workflowTicketing !== null &&
+        ((ticketingCheckpoint !== null && !isDuplicateTicketingCheckpoint) ||
+          ticketingRuntimeFailure !== null)
+          ? yield* withEventBase({
+              aggregateKind: "thread",
+              aggregateId: workflowTicketing.originThread.id,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }).pipe(
+              Effect.map((eventBase): Omit<OrchestrationEvent, "sequence"> => {
+                const nextStage: WorkflowTicketingStage =
+                  ticketingRuntimeFailure !== null
+                    ? {
+                        ...workflowTicketing.stage,
+                        status: "failed",
+                        ...(workflowTicketing.stage.checkpoint?.status === "pending"
+                          ? {
+                              checkpoint: {
+                                ...workflowTicketing.stage.checkpoint,
+                                status: "stale" as const,
+                              },
+                            }
+                          : {}),
+                        failure: ticketingRuntimeFailure,
+                        updatedAt: command.createdAt,
+                      }
+                    : ticketingCheckpoint === null
+                      ? workflowTicketing.stage
+                      : {
+                          ...workflowTicketing.stage,
+                          status: "checkpoint",
+                          checkpoint: ticketingCheckpoint,
+                          updatedAt: command.createdAt,
+                        };
+                return {
+                  ...eventBase,
+                  causationEventId: activityAppendedEvent.eventId,
+                  type:
+                    ticketingRuntimeFailure !== null
+                      ? "thread.workflow-ticketing-failed"
+                      : "thread.workflow-ticketing-checkpointed",
+                  payload: {
+                    threadId: workflowTicketing.originThread.id,
+                    attachment: incrementWorkflowVersion({
+                      ...workflowTicketing.attachment,
+                      ticketingStage: nextStage,
+                    }),
+                  },
+                };
+              }),
+            )
+          : null;
       // An approval or user-input request is blocked-on-you work — it must
       // never stay hidden inside a settled slim row.
       const wakesSettledThread =
@@ -2943,9 +3729,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command.activity.kind === "user-input.requested";
       // Real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !wakesSettledThread) {
-        return workflowSpecificationEvent === null
+        const workflowEvents = [workflowSpecificationEvent, workflowTicketingEvent].filter(
+          (event): event is Omit<OrchestrationEvent, "sequence"> => event !== null,
+        );
+        return workflowEvents.length === 0
           ? activityAppendedEvent
-          : [activityAppendedEvent, workflowSpecificationEvent];
+          : [activityAppendedEvent, ...workflowEvents];
       }
       const unsettledEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...(yield* withEventBase({
@@ -2965,6 +3754,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         unsettledEvent,
         activityAppendedEvent,
         ...(workflowSpecificationEvent !== null ? [workflowSpecificationEvent] : []),
+        ...(workflowTicketingEvent !== null ? [workflowTicketingEvent] : []),
       ];
     }
 

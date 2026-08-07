@@ -98,6 +98,19 @@ export const WayfinderResearchProgressReceipt = Schema.Struct({
 });
 export type WayfinderResearchProgressReceipt = typeof WayfinderResearchProgressReceipt.Type;
 
+export const WorkflowTicketBatchPublicationProgressReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.ticket-batch.publication.progress"),
+  threadId: ThreadId,
+  skillRunId: SkillRunId,
+  batchId: Schema.String,
+  status: Schema.Literals(["publishing", "failed", "synchronized"]),
+  ticketCount: NonNegativeInt,
+  createdAt: IsoDateTime,
+  message: Schema.NullOr(Schema.String),
+});
+export type WorkflowTicketBatchPublicationProgressReceipt =
+  typeof WorkflowTicketBatchPublicationProgressReceipt.Type;
+
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
   CheckpointDiffFinalizedReceipt,
@@ -106,6 +119,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WayfinderMutationProgressReceipt,
   WayfinderReconciliationCompletedReceipt,
   WayfinderResearchProgressReceipt,
+  WorkflowTicketBatchPublicationProgressReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 

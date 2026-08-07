@@ -31,6 +31,7 @@ import {
   dismissWorkflowAttachmentHint,
   mutateWayfinder,
   publishWayfinderDraft,
+  publishWorkflowTicketBatch,
   reconcileWayfinderMap,
   resolveWorkflowStale,
   settleThread,
@@ -330,6 +331,64 @@ describe("environment commands", () => {
             outOfScope: ["Provider prompt emulation."],
           },
           createdAt: "2026-08-03T12:05:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches an exact Ticket Batch publication command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* publishWorkflowTicketBatch({
+        commandId: CommandId.make("ticket-batch-publication-command"),
+        threadId: ThreadId.make("thread-origin"),
+        ticketingThreadId: ThreadId.make("thread-ticketing"),
+        skillRunId: SkillRunId.make("skill-run:to-tickets"),
+        expectedWorkstreamVersion: 3,
+        batch: {
+          id: "ticket-batch:workflow:v1",
+          sourceWorkflowPrdArtifactId: "workflow-prd:workstream:v1",
+          sourceWorkflowPrdVersion: 1,
+          tickets: [
+            {
+              key: "ticket-one",
+              title: "Ticket one",
+              body: "Implement ticket one.",
+              parentKey: null,
+            },
+          ],
+          blockerEdges: [],
+        },
+        confirmed: true,
+        createdAt: "2026-08-03T12:06:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.workflow.ticketing.publish",
+          commandId: "ticket-batch-publication-command",
+          threadId: "thread-origin",
+          ticketingThreadId: "thread-ticketing",
+          skillRunId: "skill-run:to-tickets",
+          expectedWorkstreamVersion: 3,
+          batch: {
+            id: "ticket-batch:workflow:v1",
+            sourceWorkflowPrdArtifactId: "workflow-prd:workstream:v1",
+            sourceWorkflowPrdVersion: 1,
+            tickets: [
+              {
+                key: "ticket-one",
+                title: "Ticket one",
+                body: "Implement ticket one.",
+                parentKey: null,
+              },
+            ],
+            blockerEdges: [],
+          },
+          confirmed: true,
+          createdAt: "2026-08-03T12:06:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
