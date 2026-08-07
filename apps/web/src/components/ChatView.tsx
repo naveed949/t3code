@@ -279,6 +279,16 @@ function deriveWorkflowRunRequiredSkills(
     };
   });
 }
+
+function deriveWorkflowRunRequiredSkillsByProvider(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyMap<ProviderInstanceId, ReadonlyArray<WorkflowRunRequiredSkill>> {
+  return new Map(
+    providers.map(
+      (provider) => [provider.instanceId, deriveWorkflowRunRequiredSkills([provider])] as const,
+    ),
+  );
+}
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -6352,7 +6362,9 @@ function ChatViewContent(props: ChatViewProps) {
                         onResolveStale={resolveWorkflowStale}
                         defaultProviderInstanceId={activeThread.modelSelection.instanceId}
                         providerOptions={providerStatuses.map((provider) => provider.instanceId)}
-                        requiredSkills={deriveWorkflowRunRequiredSkills(providerStatuses)}
+                        requiredSkillsByProvider={deriveWorkflowRunRequiredSkillsByProvider(
+                          providerStatuses,
+                        )}
                         onPreflightRun={preflightWorkflowRun}
                         onConfirmRun={confirmWorkflowRun}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}

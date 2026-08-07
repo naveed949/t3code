@@ -19,6 +19,7 @@ import {
   ThreadId,
   type ProjectScript,
   type SkillInvocation,
+  type WorkflowRunConfiguration,
 } from "@t3tools/contracts";
 import {
   deriveWayfinderDraft,
@@ -227,6 +228,14 @@ function ThreadRouteContent(
   const attachWorkflowCommand = useAtomCommand(
     threadEnvironment.attachWorkflow,
     "attach Development Workflow",
+  );
+  const preflightWorkflowRunCommand = useAtomCommand(
+    threadEnvironment.preflightWorkflowRun,
+    "preflight Development Workflow Run",
+  );
+  const confirmWorkflowRunCommand = useAtomCommand(
+    threadEnvironment.confirmWorkflowRun,
+    "confirm Development Workflow Run",
   );
   const viewWorkflowArtifactsCommand = useAtomCommand(
     threadEnvironment.viewWorkflowArtifacts,
@@ -711,6 +720,26 @@ function ThreadRouteContent(
     },
     [attachWorkflowCommand, selectedThread],
   );
+  const preflightWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!selectedThread) return;
+      void preflightWorkflowRunCommand({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id, configuration },
+      });
+    },
+    [preflightWorkflowRunCommand, selectedThread],
+  );
+  const confirmWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!selectedThread) return;
+      void confirmWorkflowRunCommand({
+        environmentId: selectedThread.environmentId,
+        input: { threadId: selectedThread.id, configuration, confirmed: true },
+      });
+    },
+    [confirmWorkflowRunCommand, selectedThread],
+  );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!selectedThread) return;
     void viewWorkflowArtifactsCommand({
@@ -1003,6 +1032,9 @@ function ThreadRouteContent(
           onViewWorkflowArtifacts={viewWorkflowArtifacts}
           onAcknowledgeWorkflowArtifact={acknowledgeWorkflowArtifact}
           onResolveWorkflowStale={resolveWorkflowStale}
+          workflowRunProvider={selectedThread?.modelSelection.instanceId}
+          onPreflightWorkflowRun={preflightWorkflowRun}
+          onConfirmWorkflowRun={confirmWorkflowRun}
           {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}
         />
       </View>

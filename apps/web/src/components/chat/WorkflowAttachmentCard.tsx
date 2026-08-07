@@ -21,7 +21,10 @@ export function WorkflowAttachmentCard(props: {
   readonly onResolveStale?: () => void;
   readonly defaultProviderInstanceId?: ProviderInstanceId;
   readonly providerOptions?: ReadonlyArray<ProviderInstanceId>;
-  readonly requiredSkills?: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly requiredSkillsByProvider?: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
   readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
 }) {
@@ -121,7 +124,7 @@ export function WorkflowAttachmentCard(props: {
             overrideProvider={overrideProvider}
             onSelectedProviderChange={setSelectedProvider}
             onOverrideProviderChange={setOverrideProvider}
-            requiredSkills={props.requiredSkills ?? []}
+            requiredSkillsByProvider={props.requiredSkillsByProvider ?? new Map()}
             fixedPoint={fixedPoint}
             baseline={baseline}
             remoteTarget={remoteTarget}
@@ -203,7 +206,10 @@ function WorkflowRunControls(props: {
   readonly providerOptions: ReadonlyArray<ProviderInstanceId>;
   readonly selectedProvider: ProviderInstanceId;
   readonly overrideProvider: ProviderInstanceId | null;
-  readonly requiredSkills: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly requiredSkillsByProvider: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
   readonly fixedPoint: string;
   readonly baseline: string;
   readonly remoteTarget: string;
@@ -219,18 +225,19 @@ function WorkflowRunControls(props: {
 }) {
   const configuration = (): WorkflowRunConfiguration => ({
     workflowGoal: props.attachment.workflowGoal,
-    runScope: [{ nodeId: `workstream:${props.attachment.workstreamId}`, label: "Workstream" }],
+    runScope: [{ nodeId: `workflow:${props.attachment.workstreamId}`, label: "Workstream" }],
     defaultProviderInstanceId: props.selectedProvider,
     providerOverrides:
       props.overrideProvider === null
         ? []
         : [
             {
-              nodeId: `workstream:${props.attachment.workstreamId}`,
+              nodeId: `workflow:${props.attachment.workstreamId}`,
               providerInstanceId: props.overrideProvider,
             },
           ],
-    requiredSkills: props.requiredSkills,
+    requiredSkills:
+      props.requiredSkillsByProvider.get(props.overrideProvider ?? props.selectedProvider) ?? [],
     fixedPoint: props.fixedPoint.trim(),
     workstreamBaseline: props.baseline.trim(),
     remoteTarget: props.remoteTarget.trim(),
@@ -263,6 +270,10 @@ function WorkflowRunControls(props: {
     >
       <p className="text-xs font-semibold text-foreground">Prepare Workflow Run</p>
       <p className="text-[11px] text-muted-foreground">Exact scope: Workstream. Capacity: 2.</p>
+      <div className="text-[11px] text-muted-foreground">
+        Granted authority: create worktree; run provider. Tracker mutation, push, and pull-request
+        creation remain ungranted.
+      </div>
       <label className="block text-[11px] font-medium text-foreground">
         Default Provider
         <select

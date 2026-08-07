@@ -1,4 +1,10 @@
-import type { WorkflowAttachment, WorkflowAttachmentHint } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  WorkflowAttachment,
+  WorkflowAttachmentHint,
+  WorkflowRunConfiguration,
+  WorkflowRunRequiredSkill,
+} from "@t3tools/contracts";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -13,9 +19,17 @@ export function WorkflowAttachmentCard(props: {
   readonly onViewArtifacts?: () => void;
   readonly onAcknowledgeArtifact?: (artifactId: string) => void;
   readonly onResolveStale?: () => void;
+  readonly defaultProviderInstanceId?: ProviderInstanceId;
+  readonly requiredSkills?: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
+  readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
+  const [fixedPoint, setFixedPoint] = useState("");
+  const [baseline, setBaseline] = useState("");
+  const [remoteTarget, setRemoteTarget] = useState("");
+  const [executionLimit, setExecutionLimit] = useState<1 | 2>(1);
 
   if (props.attachment !== null) {
     const graph = props.attachment.workflowGraph;
@@ -34,6 +48,25 @@ export function WorkflowAttachmentCard(props: {
         <Text className="font-sans text-sm text-neutral-700 dark:text-neutral-200">
           {props.attachment.workflowGoal}
         </Text>
+        {props.onPreflightRun &&
+        props.defaultProviderInstanceId &&
+        !props.attachment.workflowRun ? (
+          <WorkflowRunControls
+            attachment={props.attachment}
+            defaultProviderInstanceId={props.defaultProviderInstanceId}
+            requiredSkills={props.requiredSkills ?? []}
+            fixedPoint={fixedPoint}
+            baseline={baseline}
+            remoteTarget={remoteTarget}
+            executionLimit={executionLimit}
+            onFixedPointChange={setFixedPoint}
+            onBaselineChange={setBaseline}
+            onRemoteTargetChange={setRemoteTarget}
+            onExecutionLimitChange={setExecutionLimit}
+            onPreflightRun={props.onPreflightRun}
+            {...(props.onConfirmRun ? { onConfirmRun: props.onConfirmRun } : {})}
+          />
+        ) : null}
         {props.attachment.workflowRun ? (
           <Text
             accessibilityRole="text"
@@ -181,6 +214,103 @@ export function WorkflowAttachmentCard(props: {
             <Text className="font-t3-bold text-xs text-neutral-500 dark:text-neutral-400">
               Dismiss
             </Text>
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function WorkflowRunControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly defaultProviderInstanceId: ProviderInstanceId;
+  readonly requiredSkills: ReadonlyArray<WorkflowRunRequiredSkill>;
+  readonly fixedPoint: string;
+  readonly baseline: string;
+  readonly remoteTarget: string;
+  readonly executionLimit: 1 | 2;
+  readonly onFixedPointChange: (value: string) => void;
+  readonly onBaselineChange: (value: string) => void;
+  readonly onRemoteTargetChange: (value: string) => void;
+  readonly onExecutionLimitChange: (value: 1 | 2) => void;
+  readonly onPreflightRun: (configuration: WorkflowRunConfiguration) => void;
+  readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
+}) {
+  const configuration = (): WorkflowRunConfiguration => ({
+    workflowGoal: props.attachment.workflowGoal,
+    runScope: [{ nodeId: `workflow:${props.attachment.workstreamId}`, label: "Workstream" }],
+    defaultProviderInstanceId: props.defaultProviderInstanceId,
+    providerOverrides: [],
+    requiredSkills: props.requiredSkills,
+    fixedPoint: props.fixedPoint.trim(),
+    workstreamBaseline: props.baseline.trim(),
+    remoteTarget: props.remoteTarget.trim(),
+    environmentAutomationCapacity: 2,
+    executionLimit: props.executionLimit,
+    authority: {
+      createWorktree: true,
+      runProvider: true,
+      mutateTracker: false,
+      pushBaseline: false,
+      createDraftPullRequest: false,
+    },
+  });
+  const ready = props.fixedPoint.trim() && props.baseline.trim() && props.remoteTarget.trim();
+  const preview = props.attachment.workflowRunPreview;
+  return (
+    <View className="gap-2 rounded-xl border border-sky-500/20 bg-white/60 p-3 dark:bg-neutral-950/30">
+      <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+        Prepare Workflow Run
+      </Text>
+      <Text className="font-sans text-xs text-neutral-600 dark:text-neutral-300">
+        Exact scope: Workstream. Capacity: 2. Authority: create worktree and run provider.
+      </Text>
+      {(
+        [
+          ["Fixed Point", props.fixedPoint, props.onFixedPointChange],
+          ["Workstream Baseline", props.baseline, props.onBaselineChange],
+          ["Remote Target", props.remoteTarget, props.onRemoteTargetChange],
+        ] as const
+      ).map(([label, value, setter]) => (
+        <TextInput
+          key={label}
+          accessibilityLabel={label}
+          value={value}
+          onChangeText={setter}
+          placeholder={label}
+        />
+      ))}
+      <TextInput
+        accessibilityLabel="Execution Limit"
+        value={String(props.executionLimit)}
+        onChangeText={(value) => props.onExecutionLimitChange(value === "2" ? 2 : 1)}
+        keyboardType="number-pad"
+      />
+      {preview ? (
+        <Text className="font-sans text-xs text-amber-700 dark:text-amber-300">
+          {preview.status === "blocked"
+            ? preview.blockers.join(" ")
+            : "Preflight passed. Review the exact authority above."}
+        </Text>
+      ) : null}
+      <View className="flex-row gap-2">
+        <Pressable
+          disabled={!ready}
+          accessibilityRole="button"
+          accessibilityLabel="Run read-only workflow preflight"
+          className="rounded-lg bg-neutral-900 px-3 py-2 disabled:opacity-40 dark:bg-white"
+          onPress={() => props.onPreflightRun(configuration())}
+        >
+          <Text className="font-t3-bold text-xs text-white dark:text-neutral-900">Preflight</Text>
+        </Pressable>
+        {preview?.status === "ready-for-confirmation" && props.onConfirmRun ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Confirm Workflow Run"
+            className="rounded-lg bg-sky-600 px-3 py-2"
+            onPress={() => props.onConfirmRun?.(configuration())}
+          >
+            <Text className="font-t3-bold text-xs text-white">Confirm</Text>
           </Pressable>
         ) : null}
       </View>

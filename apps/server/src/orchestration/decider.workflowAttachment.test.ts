@@ -769,9 +769,12 @@ it.layer(NodeServices.layer)("Workflow Run confirmation boundary", (it) => {
         },
       });
       const afterAttachment = yield* applyEvents(afterHint, normalizeEvents(attached));
+      const workflowNodeId =
+        afterAttachment.threads[0]?.workflowAttachment?.workflowGraph?.nodes[0]?.id;
+      if (workflowNodeId === undefined) return;
       const configuration = {
         workflowGoal: map.destination,
-        runScope: [{ nodeId: "ticket:35", label: "Prepare Workflow Run" }],
+        runScope: [{ nodeId: workflowNodeId, label: "Prepare Workflow Run" }],
         defaultProviderInstanceId: ProviderInstanceId.make("codex"),
         providerOverrides: [],
         requiredSkills: [
@@ -789,7 +792,7 @@ it.layer(NodeServices.layer)("Workflow Run confirmation boundary", (it) => {
         fixedPoint: "b6c5a7527a9a9fe21672ababec55fd773bbffa0b",
         workstreamBaseline: "feature/development-workflow",
         remoteTarget: "origin/feature/development-workflow",
-        environmentAutomationCapacity: 2,
+        environmentAutomationCapacity: 2 as const,
         executionLimit: 1,
         authority: {
           createWorktree: true,

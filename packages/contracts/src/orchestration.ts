@@ -413,7 +413,9 @@ export const WorkflowRunConfiguration = Schema.Struct({
   fixedPoint: TrimmedNonEmptyString,
   workstreamBaseline: TrimmedNonEmptyString,
   remoteTarget: TrimmedNonEmptyString,
-  environmentAutomationCapacity: Schema.Int.check(Schema.isGreaterThanOrEqualTo(2)),
+  // The environment owns this ceiling. A client can choose a lower execution
+  // limit but cannot claim a larger capacity during preflight.
+  environmentAutomationCapacity: Schema.Literal(2),
   executionLimit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(2)),
   authority: WorkflowRunAuthority,
 });

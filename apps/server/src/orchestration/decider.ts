@@ -378,11 +378,33 @@ type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
 
-function workflowRunBlockers(configuration: WorkflowRunConfiguration): ReadonlyArray<string> {
+function workflowRunBlockers(
+  configuration: WorkflowRunConfiguration,
+  attachment: OrchestrationThread["workflowAttachment"],
+): ReadonlyArray<string> {
   const scopeIds = new Set(configuration.runScope.map((node) => node.nodeId));
   const blockers: Array<string> = [];
+  const projectedNodeIds = new Set(attachment?.workflowGraph?.nodes.map((node) => node.id) ?? []);
+  if (configuration.runScope.some((node) => !projectedNodeIds.has(node.nodeId))) {
+    blockers.push("Run Scope contains a node that is not in the projected Workflow Graph.");
+  }
+  if (
+    new Set(configuration.runScope.map((node) => node.nodeId)).size !==
+    configuration.runScope.length
+  ) {
+    blockers.push("Run Scope contains duplicate node identities.");
+  }
   if (configuration.executionLimit > configuration.environmentAutomationCapacity) {
     blockers.push("Execution Limit exceeds Environment Automation Capacity.");
+  }
+  if (!/^[0-9a-f]{40}$/i.test(configuration.fixedPoint)) {
+    blockers.push("Fixed Point must be a full commit SHA.");
+  }
+  if (!/^[^\s/]+(?:\/[^\s/]+)*$/.test(configuration.workstreamBaseline)) {
+    blockers.push("Workstream Baseline must be a branch name.");
+  }
+  if (!/^[^\s/]+\/\S+$/.test(configuration.remoteTarget)) {
+    blockers.push("Remote Target must be remote/branch.");
   }
   for (const override of configuration.providerOverrides) {
     if (!scopeIds.has(override.nodeId)) {
@@ -1576,7 +1598,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Workflow Goal must match the attached Workstream Goal.",
         });
       }
-      const blockers = workflowRunBlockers(command.configuration);
+      const blockers = workflowRunBlockers(command.configuration, attachment);
       const preview = {
         configuration: command.configuration,
         status: blockers.length === 0 ? ("ready-for-confirmation" as const) : ("blocked" as const),
@@ -1636,6 +1658,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           status: "confirmed" as const,
           authorityGranted: true as const,
           confirmedAt: command.createdAt,
+          immutableAtDispatch: command.createdAt,
         },
       };
       return {

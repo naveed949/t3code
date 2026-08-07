@@ -13,6 +13,7 @@ import type {
   RuntimeMode,
   ServerConfig as T3ServerConfig,
   ThreadId,
+  ProviderInstanceId,
   WayfinderDraft,
   WorkflowAttachment,
   WorkflowAttachmentHint,
@@ -112,6 +113,13 @@ export interface ThreadDetailScreenProps {
   readonly onViewWorkflowArtifacts?: () => void;
   readonly onAcknowledgeWorkflowArtifact?: (artifactId: string) => void;
   readonly onResolveWorkflowStale?: () => void;
+  readonly workflowRunProvider?: ProviderInstanceId;
+  readonly onPreflightWorkflowRun?: (
+    configuration: import("@t3tools/contracts").WorkflowRunConfiguration,
+  ) => void;
+  readonly onConfirmWorkflowRun?: (
+    configuration: import("@t3tools/contracts").WorkflowRunConfiguration,
+  ) => void;
   readonly showContent?: boolean;
 }
 
@@ -419,6 +427,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onViewArtifacts={props.onViewWorkflowArtifacts}
                     onAcknowledgeArtifact={props.onAcknowledgeWorkflowArtifact}
                     onResolveStale={props.onResolveWorkflowStale}
+                    defaultProviderInstanceId={props.workflowRunProvider}
+                    onPreflightRun={props.onPreflightWorkflowRun}
+                    onConfirmRun={props.onConfirmWorkflowRun}
                   />
                 </Animated.View>
               ) : null}
