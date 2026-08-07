@@ -94,6 +94,12 @@ export class IssueTracker extends Context.Service<
       readonly repository: IssueTrackerRepository;
       readonly name: string;
     }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
+    readonly addIssueLabel?: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly issueNumber: number;
+      readonly name: string;
+    }) => Effect.Effect<void, GitHubCli.GitHubCliError>;
     readonly createIssue: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
@@ -103,6 +109,17 @@ export class IssueTracker extends Context.Service<
       readonly body: string;
       readonly labels: ReadonlyArray<string>;
     }) => Effect.Effect<IssueTrackerIssue, GitHubCli.GitHubCliError>;
+    readonly findIssueByIdempotencyKey?: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly idempotencyKey: string;
+    }) => Effect.Effect<IssueTrackerIssue | null, GitHubCli.GitHubCliError>;
+    readonly hasChild?: (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly parentNumber: number;
+      readonly childNumber: number;
+    }) => Effect.Effect<boolean, GitHubCli.GitHubCliError>;
     readonly addChild: (input: {
       readonly cwd: string;
       readonly repository: IssueTrackerRepository;
@@ -748,6 +765,65 @@ export const GitHubIssueTrackerLive = Layer.effect(
         ],
       });
     });
+    const findIssueByIdempotencyKey = Effect.fn("IssueTracker.findIssueByIdempotencyKey")(
+      function* (input: {
+        readonly cwd: string;
+        readonly repository: IssueTrackerRepository;
+        readonly idempotencyKey: string;
+      }) {
+        const encodedIdempotencyKey = encodeURIComponent(input.idempotencyKey);
+        const marker = `<!-- t3-wayfinder-publication:${encodedIdempotencyKey} -->`;
+        const output = yield* github.execute({
+          cwd: input.cwd,
+          args: [
+            "issue",
+            "list",
+            "--repo",
+            repositoryReference(input.repository),
+            "--state",
+            "all",
+            "--search",
+            `"t3-wayfinder-publication:${encodedIdempotencyKey}" in:body`,
+            "--json",
+            "number,url,body",
+            "--limit",
+            "10",
+          ],
+        });
+        const decoded = decodeIssueListProbe(output.stdout);
+        if (Option.isNone(decoded)) return null;
+        const issue = decoded.value.find((candidate) => candidate.body.includes(marker));
+        return issue === undefined ? null : { number: issue.number, url: issue.url };
+      },
+    );
+    const hasChild = Effect.fn("IssueTracker.hasChild")(function* (input: {
+      readonly cwd: string;
+      readonly repository: IssueTrackerRepository;
+      readonly parentNumber: number;
+      readonly childNumber: number;
+    }) {
+      const parentId = yield* loadIssueNodeId({
+        cwd: input.cwd,
+        repository: input.repository,
+        issueNumber: input.parentNumber,
+      });
+      const output = yield* github.execute({
+        cwd: input.cwd,
+        args: [
+          "api",
+          "graphql",
+          "-f",
+          "query=query($issueId:ID!){node(id:$issueId){... on Issue{subIssues(first:100){nodes{number}}}}}",
+          "-f",
+          `issueId=${parentId}`,
+        ],
+      });
+      const existing = decodeChildNumbersProbe(output.stdout);
+      return (
+        Option.isSome(existing) &&
+        existing.value.data.node.subIssues.nodes.some((issue) => issue.number === input.childNumber)
+      );
+    });
 
     return IssueTracker.of({
       resolveProjectRepository: Effect.fn("IssueTracker.resolveProjectRepository")(function* (cwd) {
@@ -977,31 +1053,27 @@ export const GitHubIssueTrackerLive = Layer.effect(
           ],
         });
       }),
-      createIssue: Effect.fn("IssueTracker.createIssue")(function* (input) {
-        const encodedIdempotencyKey = encodeURIComponent(input.idempotencyKey);
-        const marker = `<!-- t3-wayfinder-publication:${encodedIdempotencyKey} -->`;
-        const existingOutput = yield* github.execute({
+      addIssueLabel: Effect.fn("IssueTracker.addIssueLabel")(function* (input) {
+        yield* github.execute({
           cwd: input.cwd,
           args: [
             "issue",
-            "list",
+            "edit",
+            String(input.issueNumber),
             "--repo",
             repositoryReference(input.repository),
-            "--state",
-            "all",
-            "--search",
-            `"t3-wayfinder-publication:${encodedIdempotencyKey}" in:body`,
-            "--json",
-            "number,url,body",
-            "--limit",
-            "10",
+            "--add-label",
+            input.name,
           ],
         });
-        const existing = decodeIssueListProbe(existingOutput.stdout).pipe(
-          Option.map((issues) => issues.find((issue) => issue.body.includes(marker))),
-          Option.getOrUndefined,
-        );
-        if (existing) return { number: existing.number, url: existing.url };
+      }),
+      findIssueByIdempotencyKey,
+      hasChild,
+      createIssue: Effect.fn("IssueTracker.createIssue")(function* (input) {
+        const existing = yield* findIssueByIdempotencyKey(input);
+        if (existing !== null) return existing;
+        const encodedIdempotencyKey = encodeURIComponent(input.idempotencyKey);
+        const marker = `<!-- t3-wayfinder-publication:${encodedIdempotencyKey} -->`;
         const output = yield* github.execute({
           cwd: input.cwd,
           args: [

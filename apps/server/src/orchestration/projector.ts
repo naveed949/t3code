@@ -55,6 +55,12 @@ import {
   ThreadWorkflowSpecificationCheckpointResolvedPayload,
   ThreadWorkflowSpecificationCompletedPayload,
   ThreadWorkflowSpecificationFailedPayload,
+  ThreadWorkflowTicketingDispatchedPayload,
+  ThreadWorkflowTicketingCheckpointedPayload,
+  ThreadWorkflowTicketingCheckpointResolvedPayload,
+  ThreadWorkflowTicketBatchPublicationRequestedPayload,
+  ThreadWorkflowTicketBatchPublicationUpdatedPayload,
+  ThreadWorkflowTicketingFailedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -1170,6 +1176,102 @@ export function projectEvent(
     case "thread.workflow-specification-failed":
       return decodeForEvent(
         ThreadWorkflowSpecificationFailedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticketing-dispatched":
+      return decodeForEvent(
+        ThreadWorkflowTicketingDispatchedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticketing-checkpointed":
+      return decodeForEvent(
+        ThreadWorkflowTicketingCheckpointedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticketing-checkpoint-resolved":
+      return decodeForEvent(
+        ThreadWorkflowTicketingCheckpointResolvedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticket-batch-publication-requested":
+      return decodeForEvent(
+        ThreadWorkflowTicketBatchPublicationRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticket-batch-publication-updated":
+      return decodeForEvent(
+        ThreadWorkflowTicketBatchPublicationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticketing-failed":
+      return decodeForEvent(
+        ThreadWorkflowTicketingFailedPayload,
         event.payload,
         event.type,
         "payload",

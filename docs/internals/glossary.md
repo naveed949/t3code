@@ -107,6 +107,25 @@ Wayfinder Workstream. It retains the native test-seam checkpoint, binds checkpoi
 authorized Skill Run, and accepts completion only after the checkpoint is resolved and a structured
 Workflow PRD names the current Wayfinder artifact.
 
+#### Ticketing stage
+
+The server-owned stage that dispatches a pinned native `to-tickets` Skill Run from the completed
+Workflow PRD. It preserves one native granularity-and-blocker Checkpoint, binds the exact approved
+Ticket Batch to that response, and does not publish or expand Run Scope without the explicit
+publication command.
+
+#### Ticket Batch
+
+The immutable, approval-scoped set of ticket titles, bodies, parent relationships, and blocker edges
+derived from one current Workflow PRD version. Publication effects use the batch identifier and each
+ticket key as their idempotency identity.
+
+#### Tracker Projection
+
+The read model of tracker-owned ticket identity, parentage, blocker edges, and open or closed state
+after Ticket Batch publication. T3 owns the workflow history and Run Scope inclusion; the tracker
+remains authoritative for the synchronized external relationships and state.
+
 #### Workflow PRD
 
 A versioned, structured specification artifact produced by the Specification stage. The normal graph

@@ -874,7 +874,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.workflow-specification-checkpointed":
         case "thread.workflow-specification-checkpoint-resolved":
         case "thread.workflow-specification-completed":
-        case "thread.workflow-specification-failed": {
+        case "thread.workflow-specification-failed":
+        case "thread.workflow-ticketing-dispatched":
+        case "thread.workflow-ticketing-checkpointed":
+        case "thread.workflow-ticketing-checkpoint-resolved":
+        case "thread.workflow-ticket-batch-publication-requested":
+        case "thread.workflow-ticket-batch-publication-updated":
+        case "thread.workflow-ticketing-failed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });

@@ -841,6 +841,19 @@ describe("applyThreadDetailEvent", () => {
         expect(resolved.thread.workflowAttachment?.workflowGraph?.nodes[0]?.resolution.status).toBe(
           "resolved",
         );
+        const ticketingFailed = applyThreadDetailEvent(resolved.thread, {
+          ...baseEventFields,
+          sequence: 17,
+          occurredAt: "2026-04-01T14:02:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.workflow-ticketing-failed",
+          payload: { threadId: ThreadId.make("thread-1"), attachment },
+        });
+        expect(ticketingFailed.kind).toBe("updated");
+        if (ticketingFailed.kind === "updated") {
+          expect(ticketingFailed.thread.workflowAttachment).toBe(attachment);
+        }
       }
     });
   });
