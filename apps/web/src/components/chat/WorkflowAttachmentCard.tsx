@@ -1,4 +1,11 @@
-import type { ThreadId, WorkflowAttachment, WorkflowAttachmentHint } from "@t3tools/contracts";
+import type {
+  ProviderInstanceId,
+  ThreadId,
+  WorkflowAttachment,
+  WorkflowAttachmentHint,
+  WorkflowRunConfiguration,
+  WorkflowRunRequiredSkill,
+} from "@t3tools/contracts";
 import { AlertTriangleIcon, CheckIcon, EyeIcon, Link2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -12,9 +19,23 @@ export function WorkflowAttachmentCard(props: {
   readonly onViewArtifacts?: () => void;
   readonly onAcknowledgeArtifact?: (artifactId: string) => void;
   readonly onResolveStale?: () => void;
+  readonly defaultProviderInstanceId?: ProviderInstanceId;
+  readonly providerOptions?: ReadonlyArray<ProviderInstanceId>;
+  readonly requiredSkillsByProvider?: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
+  readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
+  readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
+  const [fixedPoint, setFixedPoint] = useState("");
+  const [baseline, setBaseline] = useState("");
+  const [remoteTarget, setRemoteTarget] = useState("");
+  const [executionLimit, setExecutionLimit] = useState<1 | 2>(1);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderInstanceId | null>(null);
+  const [overrideProvider, setOverrideProvider] = useState<ProviderInstanceId | null>(null);
 
   if (props.attachment !== null) {
     const graph = props.attachment.workflowGraph;
@@ -94,6 +115,28 @@ export function WorkflowAttachmentCard(props: {
             ) : null}
           </div>
         ) : null}
+        {props.onPreflightRun && props.defaultProviderInstanceId ? (
+          <WorkflowRunControls
+            attachment={props.attachment}
+            defaultProviderInstanceId={props.defaultProviderInstanceId}
+            providerOptions={props.providerOptions ?? [props.defaultProviderInstanceId]}
+            selectedProvider={selectedProvider ?? props.defaultProviderInstanceId}
+            overrideProvider={overrideProvider}
+            onSelectedProviderChange={setSelectedProvider}
+            onOverrideProviderChange={setOverrideProvider}
+            requiredSkillsByProvider={props.requiredSkillsByProvider ?? new Map()}
+            fixedPoint={fixedPoint}
+            baseline={baseline}
+            remoteTarget={remoteTarget}
+            executionLimit={executionLimit}
+            onFixedPointChange={setFixedPoint}
+            onBaselineChange={setBaseline}
+            onRemoteTargetChange={setRemoteTarget}
+            onExecutionLimitChange={setExecutionLimit}
+            onPreflightRun={props.onPreflightRun}
+            {...(props.onConfirmRun ? { onConfirmRun: props.onConfirmRun } : {})}
+          />
+        ) : null}
       </section>
     );
   }
@@ -154,5 +197,265 @@ export function WorkflowAttachmentCard(props: {
         <span className="text-[11px] text-muted-foreground">Origin: {props.originThreadId}</span>
       </div>
     </section>
+  );
+}
+
+function WorkflowRunControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly defaultProviderInstanceId: ProviderInstanceId;
+  readonly providerOptions: ReadonlyArray<ProviderInstanceId>;
+  readonly selectedProvider: ProviderInstanceId;
+  readonly overrideProvider: ProviderInstanceId | null;
+  readonly requiredSkillsByProvider: ReadonlyMap<
+    ProviderInstanceId,
+    ReadonlyArray<WorkflowRunRequiredSkill>
+  >;
+  readonly fixedPoint: string;
+  readonly baseline: string;
+  readonly remoteTarget: string;
+  readonly executionLimit: 1 | 2;
+  readonly onFixedPointChange: (value: string) => void;
+  readonly onBaselineChange: (value: string) => void;
+  readonly onRemoteTargetChange: (value: string) => void;
+  readonly onExecutionLimitChange: (value: 1 | 2) => void;
+  readonly onSelectedProviderChange: (value: ProviderInstanceId) => void;
+  readonly onOverrideProviderChange: (value: ProviderInstanceId | null) => void;
+  readonly onPreflightRun: (configuration: WorkflowRunConfiguration) => void;
+  readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
+}) {
+  const configuration = (): WorkflowRunConfiguration => ({
+    workflowGoal: props.attachment.workflowGoal,
+    runScope: [{ nodeId: `workflow:${props.attachment.workstreamId}`, label: "Workstream" }],
+    defaultProviderInstanceId: props.selectedProvider,
+    providerOverrides:
+      props.overrideProvider === null
+        ? []
+        : [
+            {
+              nodeId: `workflow:${props.attachment.workstreamId}`,
+              providerInstanceId: props.overrideProvider,
+            },
+          ],
+    requiredSkills:
+      props.requiredSkillsByProvider.get(props.overrideProvider ?? props.selectedProvider) ?? [],
+    fixedPoint: props.fixedPoint.trim(),
+    workstreamBaseline: props.baseline.trim(),
+    remoteTarget: props.remoteTarget.trim(),
+    environmentAutomationCapacity: 2,
+    executionLimit: props.executionLimit,
+    authority: {
+      createWorktree: true,
+      runProvider: true,
+      mutateTracker: false,
+      pushBaseline: false,
+      createDraftPullRequest: false,
+    },
+  });
+  const ready =
+    props.fixedPoint.trim().length > 0 &&
+    props.baseline.trim().length > 0 &&
+    props.remoteTarget.trim().length > 0;
+  const preview = props.attachment.workflowRunPreview;
+  if (props.attachment.workflowRun) {
+    return (
+      <div className="mt-3 rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2 text-xs">
+        <p className="font-medium">Workflow Run confirmed.</p>
+        <WorkflowRunSummary
+          configuration={props.attachment.workflowRun.configuration}
+          authorityGranted={props.attachment.workflowRun.authorityGranted}
+        />
+      </div>
+    );
+  }
+  return (
+    <div
+      className="mt-3 space-y-2 rounded-md border border-border/70 bg-background/60 p-2.5"
+      aria-label="Workflow Run confirmation"
+    >
+      <p className="text-xs font-semibold text-foreground">Prepare Workflow Run</p>
+      <p className="text-[11px] text-muted-foreground">Exact scope: Workstream. Capacity: 2.</p>
+      <div className="text-[11px] text-muted-foreground">
+        Granted authority: create worktree; run provider. Tracker mutation, push, and pull-request
+        creation remain ungranted.
+      </div>
+      <label className="block text-[11px] font-medium text-foreground">
+        Default Provider
+        <select
+          className="ml-2 rounded border border-input bg-background px-1 py-1 text-xs"
+          value={props.selectedProvider}
+          onChange={(event) =>
+            props.onSelectedProviderChange(event.currentTarget.value as ProviderInstanceId)
+          }
+        >
+          {props.providerOptions.map((provider) => (
+            <option key={provider} value={provider}>
+              {provider}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="block text-[11px] font-medium text-foreground">
+        Workstream override
+        <select
+          className="ml-2 rounded border border-input bg-background px-1 py-1 text-xs"
+          value={props.overrideProvider ?? "inherit"}
+          onChange={(event) =>
+            props.onOverrideProviderChange(
+              event.currentTarget.value === "inherit"
+                ? null
+                : (event.currentTarget.value as ProviderInstanceId),
+            )
+          }
+        >
+          <option value="inherit">Inherit default</option>
+          {props.providerOptions.map((provider) => (
+            <option key={provider} value={provider}>
+              {provider}
+            </option>
+          ))}
+        </select>
+      </label>
+      {(["fixedPoint", "baseline", "remoteTarget"] as const).map((field) => {
+        const labels = {
+          fixedPoint: "Fixed Point",
+          baseline: "Workstream Baseline",
+          remoteTarget: "Remote Target",
+        };
+        const values = {
+          fixedPoint: props.fixedPoint,
+          baseline: props.baseline,
+          remoteTarget: props.remoteTarget,
+        };
+        const setters = {
+          fixedPoint: props.onFixedPointChange,
+          baseline: props.onBaselineChange,
+          remoteTarget: props.onRemoteTargetChange,
+        };
+        return (
+          <label key={field} className="block text-[11px] font-medium text-foreground">
+            {labels[field]}
+            <input
+              className="mt-1 w-full rounded border border-input bg-background px-2 py-1 text-xs"
+              value={values[field]}
+              onChange={(event) => setters[field](event.currentTarget.value)}
+            />
+          </label>
+        );
+      })}
+      <label className="block text-[11px] font-medium text-foreground">
+        Execution Limit
+        <select
+          className="ml-2 rounded border border-input bg-background px-1 py-1 text-xs"
+          value={props.executionLimit}
+          onChange={(event) =>
+            props.onExecutionLimitChange(Number(event.currentTarget.value) as 1 | 2)
+          }
+        >
+          <option value="1">1 node</option>
+          <option value="2">2 nodes</option>
+        </select>
+      </label>
+      {preview ? (
+        <div
+          className={
+            preview.status === "blocked"
+              ? "text-[11px] text-amber-700"
+              : "text-[11px] text-emerald-700"
+          }
+        >
+          <p>
+            {preview.status === "blocked"
+              ? preview.blockers.join(" ")
+              : "Read-only preflight passed. Confirm this exact persisted configuration."}
+          </p>
+          <WorkflowRunSummary
+            configuration={preview.configuration}
+            authorityGranted={preview.authorityGranted}
+          />
+        </div>
+      ) : null}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={!ready}
+          className="rounded bg-secondary px-2 py-1 text-xs font-medium disabled:opacity-50"
+          onClick={() => props.onPreflightRun(configuration())}
+        >
+          Run read-only preflight
+        </button>
+        {preview?.status === "ready-for-confirmation" && props.onConfirmRun ? (
+          <button
+            type="button"
+            className="rounded bg-primary px-2 py-1 text-xs font-medium text-primary-foreground"
+            onClick={() => props.onConfirmRun?.(configuration())}
+          >
+            Confirm Workflow Run
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function WorkflowRunSummary(props: {
+  readonly configuration: WorkflowRunConfiguration;
+  readonly authorityGranted: boolean;
+}) {
+  const scope = props.configuration.runScope
+    .map((node) => `${node.label} (${node.nodeId})`)
+    .join(", ");
+  const overrides = props.configuration.providerOverrides
+    .map((override) => `${override.nodeId} → ${override.providerInstanceId}`)
+    .join(", ");
+  const verification = props.configuration.targetVerification;
+  return (
+    <dl className="mt-2 grid gap-0.5 text-[11px] text-muted-foreground">
+      <div>
+        <dt className="inline font-medium">Run Scope:</dt> <dd className="inline">{scope}</dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Provider:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.defaultProviderInstanceId}
+          {overrides.length > 0 ? `; overrides ${overrides}` : "; no overrides"}
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Fixed Point:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.fixedPoint} ({verification?.fixedPoint ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Baseline:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.workstreamBaseline} (
+          {verification?.workstreamBaseline ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Remote Target:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.remoteTarget} ({verification?.remoteTarget ?? "unverified"})
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Execution:</dt>{" "}
+        <dd className="inline">
+          {props.configuration.executionLimit}/{props.configuration.environmentAutomationCapacity}
+        </dd>
+      </div>
+      <div>
+        <dt className="inline font-medium">Authority:</dt>{" "}
+        <dd className="inline">
+          {props.authorityGranted ? "granted" : "not granted"}; create worktree{" "}
+          {props.configuration.authority.createWorktree ? "yes" : "no"}, run provider{" "}
+          {props.configuration.authority.runProvider ? "yes" : "no"}, tracker mutation{" "}
+          {props.configuration.authority.mutateTracker ? "yes" : "no"}, push{" "}
+          {props.configuration.authority.pushBaseline ? "yes" : "no"}, draft PR{" "}
+          {props.configuration.authority.createDraftPullRequest ? "yes" : "no"}
+        </dd>
+      </div>
+    </dl>
   );
 }

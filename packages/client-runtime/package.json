@@ -139,6 +139,10 @@
       "types": "./src/state/skillRuns.ts",
       "default": "./src/state/skillRuns.ts"
     },
+    "./state/workflow-run": {
+      "types": "./src/state/workflowRun.ts",
+      "default": "./src/state/workflowRun.ts"
+    },
     "./state/wayfinder-workbench": {
       "types": "./src/state/wayfinderWorkbench.ts",
       "default": "./src/state/wayfinderWorkbench.ts"

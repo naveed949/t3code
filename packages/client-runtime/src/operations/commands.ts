@@ -53,6 +53,8 @@ export type ControlWayfinderResearchInput = CommandInput<"thread.wayfinder.resea
 export type DismissWorkflowAttachmentHintInput =
   CommandInput<"thread.workflow-attachment.hint.dismiss">;
 export type AttachWorkflowInput = CommandInput<"thread.workflow.attach">;
+export type PreflightWorkflowRunInput = CommandInput<"thread.workflow.run.preflight">;
+export type ConfirmWorkflowRunInput = CommandInput<"thread.workflow.run.confirm">;
 export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
 export type AcknowledgeWorkflowArtifactInput = CommandInput<"thread.workflow.artifact.acknowledge">;
 export type ResolveWorkflowStaleInput = CommandInput<"thread.workflow.stale.resolve">;
@@ -382,6 +384,30 @@ export const acknowledgeWorkflowArtifact: (
     });
   },
 );
+
+export const preflightWorkflowRun: (input: PreflightWorkflowRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.preflightWorkflowRun",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.run.preflight",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const confirmWorkflowRun: (input: ConfirmWorkflowRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.confirmWorkflowRun",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.run.confirm",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
 
 export const resolveWorkflowStale: (input: ResolveWorkflowStaleInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.resolveWorkflowStale",

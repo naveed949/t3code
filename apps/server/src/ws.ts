@@ -288,6 +288,8 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
       | "thread.workflow-attachment-hinted"
       | "thread.workflow-attachment-hint-dismissed"
       | "thread.workflow-attached"
+      | "thread.workflow-run-preflighted"
+      | "thread.workflow-run-confirmed"
       | "thread.workflow-synchronized"
       | "thread.workflow-artifacts-viewed"
       | "thread.workflow-artifact-acknowledged"
@@ -304,6 +306,8 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.workflow-attachment-hinted" ||
     event.type === "thread.workflow-attachment-hint-dismissed" ||
     event.type === "thread.workflow-attached" ||
+    event.type === "thread.workflow-run-preflighted" ||
+    event.type === "thread.workflow-run-confirmed" ||
     event.type === "thread.workflow-synchronized" ||
     event.type === "thread.workflow-artifacts-viewed" ||
     event.type === "thread.workflow-artifact-acknowledged" ||
@@ -1073,11 +1077,38 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
               const providers =
-                command.type === "thread.turn.start" && command.skillInvocationRequest !== undefined
+                (command.type === "thread.turn.start" &&
+                  command.skillInvocationRequest !== undefined) ||
+                command.type === "thread.workflow.run.preflight" ||
+                command.type === "thread.workflow.run.confirm"
                   ? yield* providerRegistry.getProviders
                   : undefined;
+              const workflowRunCommand =
+                command.type === "thread.workflow.run.preflight" ||
+                command.type === "thread.workflow.run.confirm";
               const normalizedCommand = yield* normalizeDispatchCommand(command, {
                 ...(providers ? { providers } : {}),
+                ...(workflowRunCommand
+                  ? {
+                      getWorkflowRunWorkspaceRoot: (threadId) =>
+                        projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+                          Effect.flatMap((thread) =>
+                            Option.match(thread, {
+                              onNone: () => Effect.succeed(null),
+                              onSome: (shell) =>
+                                projectionSnapshotQuery.getProjectShellById(shell.projectId).pipe(
+                                  Effect.map((project) =>
+                                    Option.match(project, {
+                                      onNone: () => null,
+                                      onSome: (value) => value.workspaceRoot,
+                                    }),
+                                  ),
+                                ),
+                            }),
+                          ),
+                        ),
+                    }
+                  : {}),
                 getWayfinderHandoffSource: (skillRunId) =>
                   loadWayfinderHandoffSource(projectionSnapshotQuery, skillRunId),
               });

@@ -1,5 +1,7 @@
 import * as DateTime from "effect/DateTime";
+import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
+import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -10,6 +12,8 @@ import {
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
+  type WorkflowRunConfiguration,
+  type WorkflowRunRequiredSkill,
   type ResolvedSkillInvocation,
   type SkillInvocation,
   type SkillRunId,
@@ -19,6 +23,7 @@ import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
 
 import { createAttachmentId, resolveAttachmentPath } from "../attachmentStore.ts";
 import { ServerConfig } from "../config.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { parseBase64DataUrl } from "../imageMime.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { resolveSkillInvocationRequest } from "../nativeSkills/NativeSkillAdapterRegistry.ts";
@@ -84,10 +89,176 @@ export const canonicalizeClientCommandTimestamps = (
   };
 };
 
+const WORKFLOW_RUN_REQUIRED_STAGES = [
+  ["specification", "to-spec"],
+  ["ticketing", "to-tickets"],
+  ["implementation", "implement"],
+  ["review", "code-review"],
+] as const;
+
+const WORKFLOW_RUN_AUTHORITY = {
+  createWorktree: true,
+  runProvider: true,
+  mutateTracker: false,
+  pushBaseline: false,
+  createDraftPullRequest: false,
+} as const;
+
+function workflowRunTargetVerificationUnverified() {
+  return {
+    fixedPoint: "unverified" as const,
+    workstreamBaseline: "unverified" as const,
+    remoteTarget: "unverified" as const,
+  };
+}
+
+function validWorkflowBranch(value: string): boolean {
+  return /^[A-Za-z0-9._/-]+$/.test(value) && !value.includes("..") && !value.includes("@{");
+}
+
+const verifyWorkflowRunTargets = Effect.fn("verifyWorkflowRunTargets")(function* (input: {
+  readonly configuration: WorkflowRunConfiguration;
+  readonly workspaceRoot: string | null;
+  readonly git: GitVcsDriver.GitVcsDriver["Service"] | null;
+}) {
+  if (input.workspaceRoot === null || input.git === null) {
+    return workflowRunTargetVerificationUnverified();
+  }
+  const git = input.git;
+
+  const execute = (args: ReadonlyArray<string>) =>
+    git
+      .execute({
+        operation: "WorkflowRun.targetVerification",
+        cwd: input.workspaceRoot as string,
+        args,
+        allowNonZeroExit: true,
+      })
+      .pipe(
+        Effect.map((result) => result.exitCode === 0),
+        Effect.orElseSucceed(() => false),
+      );
+
+  const fixedPoint = /^[0-9a-f]{40}$/i.test(input.configuration.fixedPoint)
+    ? yield* execute(["rev-parse", "--verify", `${input.configuration.fixedPoint}^{commit}`])
+    : false;
+  const baseline = validWorkflowBranch(input.configuration.workstreamBaseline)
+    ? yield* Effect.all([
+        execute(["show-ref", "--verify", `refs/heads/${input.configuration.workstreamBaseline}`]),
+        execute([
+          "merge-base",
+          "--is-ancestor",
+          `${input.configuration.fixedPoint}^{commit}`,
+          `refs/heads/${input.configuration.workstreamBaseline}`,
+        ]),
+      ]).pipe(
+        Effect.map(([branchExists, fixedPointIsAncestor]) => branchExists && fixedPointIsAncestor),
+      )
+    : false;
+
+  const remoteTarget = (() => {
+    const separator = input.configuration.remoteTarget.indexOf("/");
+    if (separator <= 0) return null;
+    const remote = input.configuration.remoteTarget.slice(0, separator);
+    const branch = input.configuration.remoteTarget.slice(separator + 1);
+    if (!/^[A-Za-z0-9._-]+$/.test(remote) || !validWorkflowBranch(branch)) return null;
+    return { remote, branch };
+  })();
+  const remote =
+    remoteTarget === null
+      ? false
+      : yield* Effect.all([
+          execute(["remote", "get-url", remoteTarget.remote]),
+          execute([
+            "ls-remote",
+            "--exit-code",
+            remoteTarget.remote,
+            `refs/heads/${remoteTarget.branch}`,
+          ]),
+        ]).pipe(Effect.map(([remoteExists, branchExists]) => remoteExists && branchExists));
+
+  return {
+    fixedPoint: fixedPoint ? ("verified" as const) : ("missing" as const),
+    workstreamBaseline: baseline ? ("verified" as const) : ("missing" as const),
+    remoteTarget: remote ? ("verified" as const) : ("missing" as const),
+  };
+});
+
+const discoverWorkflowRunSkills = Effect.fn("discoverWorkflowRunSkills")(function* (input: {
+  readonly configuration: WorkflowRunConfiguration;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly crypto: Crypto.Crypto;
+}) {
+  const overrides = new Map(
+    input.configuration.providerOverrides.map((assignment) => [
+      assignment.nodeId,
+      assignment.providerInstanceId,
+    ]),
+  );
+  const discovered: WorkflowRunRequiredSkill[] = [];
+  for (const node of input.configuration.runScope) {
+    const providerInstanceId =
+      overrides.get(node.nodeId) ?? input.configuration.defaultProviderInstanceId;
+    const provider = input.providers.find(
+      (candidate) => candidate.instanceId === providerInstanceId,
+    );
+    for (const [stage, name] of WORKFLOW_RUN_REQUIRED_STAGES) {
+      const skill = provider?.skills.find((candidate) => candidate.name === name);
+      const enabled =
+        provider?.enabled === true && provider.installed === true && skill?.enabled === true;
+      let contentDigest: string | undefined;
+      if (enabled && skill !== undefined) {
+        contentDigest = yield* input.fileSystem.readFileString(skill.path).pipe(
+          Effect.flatMap((contents) =>
+            input.crypto.digest("SHA-256", new TextEncoder().encode(contents)),
+          ),
+          Effect.map((digest) => `sha256:${Encoding.encodeHex(digest)}`),
+          Effect.orElseSucceed(() => undefined),
+        );
+      }
+      discovered.push({
+        nodeId: node.nodeId,
+        providerInstanceId,
+        stage,
+        skill: {
+          name,
+          ...(skill?.path !== undefined ? { path: skill.path } : {}),
+          ...(contentDigest !== undefined ? { contentDigest } : {}),
+        },
+        status: contentDigest !== undefined ? "available" : "missing",
+      });
+    }
+  }
+  return discovered;
+});
+
+const normalizeWorkflowRunConfiguration = Effect.fn("normalizeWorkflowRunConfiguration")(
+  function* (input: {
+    readonly configuration: WorkflowRunConfiguration;
+    readonly providers: ReadonlyArray<ServerProvider>;
+    readonly workspaceRoot: string | null;
+    readonly fileSystem: FileSystem.FileSystem;
+    readonly crypto: Crypto.Crypto;
+    readonly git: GitVcsDriver.GitVcsDriver["Service"] | null;
+  }) {
+    return {
+      ...input.configuration,
+      requiredSkills: yield* discoverWorkflowRunSkills(input),
+      targetVerification: yield* verifyWorkflowRunTargets(input),
+      environmentAutomationCapacity: 2 as const,
+      authority: WORKFLOW_RUN_AUTHORITY,
+    } satisfies WorkflowRunConfiguration;
+  },
+);
+
 export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(function* (
   command: ClientOrchestrationCommand,
   options: {
     readonly providers?: ReadonlyArray<ServerProvider>;
+    readonly getWorkflowRunWorkspaceRoot?: (
+      threadId: ThreadId,
+    ) => Effect.Effect<string | null, ProjectionRepositoryError>;
     readonly getWayfinderHandoffSource?: (skillRunId: SkillRunId) => Effect.Effect<
       {
         readonly threadId: ThreadId;
@@ -104,6 +275,9 @@ export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(fu
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
+  const gitOption = yield* Effect.serviceOption(GitVcsDriver.GitVcsDriver);
+  const git = Option.getOrNull(gitOption);
+  const crypto = yield* Crypto.Crypto;
 
   const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
     workspacePaths.normalizeWorkspaceRoot(workspaceRoot).pipe(
@@ -150,6 +324,26 @@ export const normalizeDispatchCommand = Effect.fn("normalizeDispatchCommand")(fu
     return {
       ...canonicalCommand,
       workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
+    } satisfies OrchestrationCommand;
+  }
+
+  if (
+    canonicalCommand.type === "thread.workflow.run.preflight" ||
+    canonicalCommand.type === "thread.workflow.run.confirm"
+  ) {
+    const workspaceRoot = options.getWorkflowRunWorkspaceRoot
+      ? yield* options.getWorkflowRunWorkspaceRoot(canonicalCommand.threadId)
+      : null;
+    return {
+      ...canonicalCommand,
+      configuration: yield* normalizeWorkflowRunConfiguration({
+        configuration: canonicalCommand.configuration,
+        providers: options.providers ?? [],
+        workspaceRoot,
+        fileSystem,
+        crypto,
+        git,
+      }),
     } satisfies OrchestrationCommand;
   }
 

@@ -744,3 +744,104 @@ it.layer(NodeServices.layer)("Workflow attachment commands", (it) => {
       }),
   );
 });
+
+it.layer(NodeServices.layer)("Workflow Run confirmation boundary", (it) => {
+  it.effect("preflights read-only and confirms only the exact projected configuration", () =>
+    Effect.gen(function* () {
+      const hinted = yield* decideOrchestrationCommand({
+        readModel: readModel(),
+        command: startCommand({
+          commandId: "command-run-preflight",
+          skillInvocation: nativeWayfinderInvocation,
+        }),
+      });
+      const afterHint = yield* applyEvents(readModel(), normalizeEvents(hinted));
+      const attached = yield* decideOrchestrationCommand({
+        readModel: afterHint,
+        command: {
+          type: "thread.workflow.attach" as const,
+          commandId: CommandId.make("command-run-attach"),
+          threadId: originThreadId,
+          originThreadId,
+          workflowGoal: map.destination,
+          confirmed: true,
+          createdAt: now,
+        },
+      });
+      const afterAttachment = yield* applyEvents(afterHint, normalizeEvents(attached));
+      const workflowNodeId =
+        afterAttachment.threads[0]?.workflowAttachment?.workflowGraph?.nodes[0]?.id;
+      if (workflowNodeId === undefined) return;
+      const configuration = {
+        workflowGoal: map.destination,
+        runScope: [{ nodeId: workflowNodeId, label: "Prepare Workflow Run" }],
+        defaultProviderInstanceId: ProviderInstanceId.make("codex"),
+        providerOverrides: [],
+        requiredSkills: [
+          {
+            nodeId: workflowNodeId,
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            stage: "implementation",
+            skill: {
+              name: "implement",
+              path: "/skills/implement/SKILL.md",
+              contentDigest:
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            },
+            status: "available" as const,
+          },
+        ],
+        fixedPoint: "b6c5a7527a9a9fe21672ababec55fd773bbffa0b",
+        workstreamBaseline: "feature/development-workflow",
+        remoteTarget: "origin/feature/development-workflow",
+        targetVerification: {
+          fixedPoint: "verified" as const,
+          workstreamBaseline: "verified" as const,
+          remoteTarget: "verified" as const,
+        },
+        environmentAutomationCapacity: 2 as const,
+        executionLimit: 1,
+        authority: {
+          createWorktree: true,
+          runProvider: true,
+          mutateTracker: false,
+          pushBaseline: false,
+          createDraftPullRequest: false,
+        },
+      };
+      const preview = yield* decideOrchestrationCommand({
+        readModel: afterAttachment,
+        command: {
+          type: "thread.workflow.run.preflight" as const,
+          commandId: CommandId.make("command-run-preflight-config"),
+          threadId: originThreadId,
+          configuration,
+          createdAt: now,
+        },
+      });
+      expect(normalizeEvents(preview)[0]?.type).toBe("thread.workflow-run-preflighted");
+      const afterPreview = yield* applyEvents(afterAttachment, normalizeEvents(preview));
+      expect(afterPreview.threads[0]?.workflowAttachment?.workflowRunPreview).toMatchObject({
+        status: "ready-for-confirmation",
+        authorityGranted: false,
+      });
+      const confirmed = yield* decideOrchestrationCommand({
+        readModel: afterPreview,
+        command: {
+          type: "thread.workflow.run.confirm" as const,
+          commandId: CommandId.make("command-run-confirm"),
+          threadId: originThreadId,
+          configuration,
+          confirmed: true,
+          createdAt: now,
+        },
+      });
+      const afterConfirmation = yield* applyEvents(afterPreview, normalizeEvents(confirmed));
+      expect(afterConfirmation.threads[0]?.workflowAttachment?.workflowRun).toMatchObject({
+        status: "confirmed",
+        authorityGranted: true,
+        configuration,
+      });
+    }),
+  );
+});

@@ -369,6 +369,88 @@ export const WorkflowAttachmentWayfinderData = Schema.Struct({
 });
 export type WorkflowAttachmentWayfinderData = typeof WorkflowAttachmentWayfinderData.Type;
 
+export const WorkflowRunNodeScope = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+});
+export type WorkflowRunNodeScope = typeof WorkflowRunNodeScope.Type;
+
+export const WorkflowRunProviderAssignment = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  providerInstanceId: ProviderInstanceId,
+});
+export type WorkflowRunProviderAssignment = typeof WorkflowRunProviderAssignment.Type;
+
+export const WorkflowRunTargetVerification = Schema.Struct({
+  fixedPoint: Schema.Literals(["verified", "missing", "unverified"]),
+  workstreamBaseline: Schema.Literals(["verified", "missing", "unverified"]),
+  remoteTarget: Schema.Literals(["verified", "missing", "unverified"]),
+});
+export type WorkflowRunTargetVerification = typeof WorkflowRunTargetVerification.Type;
+
+export const WorkflowRunRequiredSkill = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  providerInstanceId: ProviderInstanceId,
+  stage: TrimmedNonEmptyString,
+  skill: Schema.Struct({
+    name: TrimmedNonEmptyString,
+    // A missing provider capability has no path. Never invent a path merely
+    // to make a client-supplied capability look discovered.
+    path: Schema.optional(TrimmedNonEmptyString),
+    contentDigest: Schema.optional(TrimmedNonEmptyString),
+  }),
+  status: Schema.Literals(["available", "missing", "changed"]),
+});
+export type WorkflowRunRequiredSkill = typeof WorkflowRunRequiredSkill.Type;
+
+export const WorkflowRunAuthority = Schema.Struct({
+  createWorktree: Schema.Boolean,
+  runProvider: Schema.Boolean,
+  mutateTracker: Schema.Boolean,
+  pushBaseline: Schema.Boolean,
+  createDraftPullRequest: Schema.Boolean,
+});
+export type WorkflowRunAuthority = typeof WorkflowRunAuthority.Type;
+
+export const WorkflowRunConfiguration = Schema.Struct({
+  workflowGoal: TrimmedNonEmptyString,
+  runScope: Schema.Array(WorkflowRunNodeScope).check(Schema.isMinLength(1)),
+  defaultProviderInstanceId: ProviderInstanceId,
+  providerOverrides: Schema.Array(WorkflowRunProviderAssignment),
+  requiredSkills: Schema.Array(WorkflowRunRequiredSkill),
+  fixedPoint: TrimmedNonEmptyString,
+  workstreamBaseline: TrimmedNonEmptyString,
+  remoteTarget: TrimmedNonEmptyString,
+  targetVerification: Schema.optional(WorkflowRunTargetVerification),
+  // The environment owns this ceiling. A client can choose a lower execution
+  // limit but cannot claim a larger capacity during preflight.
+  environmentAutomationCapacity: Schema.Literal(2),
+  executionLimit: Schema.Int.check(Schema.isGreaterThan(0), Schema.isLessThanOrEqualTo(2)),
+  authority: WorkflowRunAuthority,
+});
+export type WorkflowRunConfiguration = typeof WorkflowRunConfiguration.Type;
+
+export const WorkflowRunPreview = Schema.Struct({
+  configuration: WorkflowRunConfiguration,
+  status: Schema.Literals(["ready-for-confirmation", "blocked"]),
+  blockers: Schema.Array(TrimmedNonEmptyString),
+  authorityGranted: Schema.Literal(false),
+  generatedAt: IsoDateTime,
+});
+export type WorkflowRunPreview = typeof WorkflowRunPreview.Type;
+
+export const WorkflowRun = Schema.Struct({
+  configuration: WorkflowRunConfiguration,
+  status: Schema.Literal("confirmed"),
+  authorityGranted: Schema.Literal(true),
+  confirmedAt: IsoDateTime,
+  // The command identity is retained with the immutable configuration so a
+  // replay cannot silently create a second dispatch for the same run.
+  dispatchIdentity: CommandId,
+  immutableAtDispatch: IsoDateTime,
+});
+export type WorkflowRun = typeof WorkflowRun.Type;
+
 /**
  * The structured stage that supplied a durable Wayfinder artifact. Keeping
  * this explicit prevents generic assistant prose from acquiring workflow
@@ -502,6 +584,8 @@ export const WorkflowAttachment = Schema.Struct({
   // remain readable. The server materializes a graph on their next compatible
   // structured Wayfinder observation.
   workflowGraph: Schema.optional(WorkflowGraph),
+  workflowRunPreview: Schema.optional(WorkflowRunPreview),
+  workflowRun: Schema.optional(WorkflowRun),
   attachedAt: IsoDateTime,
 });
 export type WorkflowAttachment = typeof WorkflowAttachment.Type;
@@ -1156,6 +1240,23 @@ const ThreadWorkflowAttachCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowRunPreflightCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.preflight"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  configuration: WorkflowRunConfiguration,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowRunConfirmCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.confirm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  configuration: WorkflowRunConfiguration,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowArtifactsViewCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.artifacts.view"),
   commandId: CommandId,
@@ -1222,6 +1323,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowRunPreflightCommand,
+  ThreadWorkflowRunConfirmCommand,
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
@@ -1256,6 +1359,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowRunPreflightCommand,
+  ThreadWorkflowRunConfirmCommand,
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
@@ -1429,6 +1534,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-attachment-hinted",
   "thread.workflow-attachment-hint-dismissed",
   "thread.workflow-attached",
+  "thread.workflow-run-preflighted",
+  "thread.workflow-run-confirmed",
   "thread.workflow-synchronized",
   "thread.workflow-artifacts-viewed",
   "thread.workflow-artifact-acknowledged",
@@ -1686,6 +1793,16 @@ export const ThreadWorkflowAttachedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowRunPreflightedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowRunConfirmedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadWorkflowSynchronizedPayload = Schema.Struct({
   threadId: ThreadId,
   attachment: WorkflowAttachment,
@@ -1919,6 +2036,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-attached"),
     payload: ThreadWorkflowAttachedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-preflighted"),
+    payload: ThreadWorkflowRunPreflightedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-confirmed"),
+    payload: ThreadWorkflowRunConfirmedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

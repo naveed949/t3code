@@ -10,6 +10,7 @@ import {
   type SkillInvocation,
   type WorkflowArtifactSourceStage,
   type WorkflowAttachmentWayfinderData,
+  type WorkflowRunConfiguration,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
@@ -376,6 +377,85 @@ type PlannedOrchestrationEvent = Omit<OrchestrationEvent, "sequence">;
 type DecideOrchestrationCommandResult =
   | PlannedOrchestrationEvent
   | ReadonlyArray<PlannedOrchestrationEvent>;
+
+const WORKFLOW_RUN_AUTHORITY = {
+  createWorktree: true,
+  runProvider: true,
+  mutateTracker: false,
+  pushBaseline: false,
+  createDraftPullRequest: false,
+} as const;
+
+function workflowRunBlockers(
+  configuration: WorkflowRunConfiguration,
+  attachment: OrchestrationThread["workflowAttachment"],
+): ReadonlyArray<string> {
+  const scopeIds = new Set(configuration.runScope.map((node) => node.nodeId));
+  const blockers: Array<string> = [];
+  const projectedNodeIds = new Set(attachment?.workflowGraph?.nodes.map((node) => node.id) ?? []);
+  if (configuration.runScope.some((node) => !projectedNodeIds.has(node.nodeId))) {
+    blockers.push("Run Scope contains a node that is not in the projected Workflow Graph.");
+  }
+  if (
+    new Set(configuration.runScope.map((node) => node.nodeId)).size !==
+    configuration.runScope.length
+  ) {
+    blockers.push("Run Scope contains duplicate node identities.");
+  }
+  if (configuration.executionLimit > configuration.environmentAutomationCapacity) {
+    blockers.push("Execution Limit exceeds Environment Automation Capacity.");
+  }
+  if (stableStringify(configuration.authority) !== stableStringify(WORKFLOW_RUN_AUTHORITY)) {
+    blockers.push("Run authority does not match the server-granted Workflow Run authority.");
+  }
+  if (!/^[0-9a-f]{40}$/i.test(configuration.fixedPoint)) {
+    blockers.push("Fixed Point must be a full commit SHA.");
+  }
+  if (!/^[^\s/]+(?:\/[^\s/]+)*$/.test(configuration.workstreamBaseline)) {
+    blockers.push("Workstream Baseline must be a branch name.");
+  }
+  if (!/^[^\s/]+\/\S+$/.test(configuration.remoteTarget)) {
+    blockers.push("Remote Target must be remote/branch.");
+  }
+  const targetVerification = configuration.targetVerification;
+  if (targetVerification === undefined || targetVerification.fixedPoint !== "verified") {
+    blockers.push("Fixed Point was not verified by the server against the repository.");
+  }
+  if (targetVerification === undefined || targetVerification.workstreamBaseline !== "verified") {
+    blockers.push("Workstream Baseline was not verified from the Fixed Point.");
+  }
+  if (targetVerification === undefined || targetVerification.remoteTarget !== "verified") {
+    blockers.push("Remote Target was not verified by the server.");
+  }
+  for (const override of configuration.providerOverrides) {
+    if (!scopeIds.has(override.nodeId)) {
+      blockers.push(`Provider override ${override.nodeId} is outside the exact Run Scope.`);
+    }
+  }
+  const requiredSkillIdentities = new Set<string>();
+  for (const skill of configuration.requiredSkills) {
+    const expectedProvider =
+      configuration.providerOverrides.find((override) => override.nodeId === skill.nodeId)
+        ?.providerInstanceId ?? configuration.defaultProviderInstanceId;
+    if (!scopeIds.has(skill.nodeId)) {
+      blockers.push(`Required Skill ${skill.skill.name} is outside the exact Run Scope.`);
+    }
+    if (skill.providerInstanceId !== expectedProvider) {
+      blockers.push(`Required Skill ${skill.skill.name} is not pinned to its selected provider.`);
+    }
+    const identity = `${skill.nodeId}:${skill.providerInstanceId}:${skill.stage}:${skill.skill.name}`;
+    if (!requiredSkillIdentities.add(identity)) {
+      blockers.push(`Required Skill ${skill.skill.name} has a duplicate dispatch identity.`);
+    }
+    if (skill.status !== "available") {
+      blockers.push(`Required Skill ${skill.skill.name} is ${skill.status}.`);
+    }
+    if (skill.status === "available" && skill.skill.contentDigest === undefined) {
+      blockers.push(`Required Skill ${skill.skill.name} has no server-pinned content digest.`);
+    }
+  }
+  return blockers;
+}
 
 function synchronizeWorkflowAttachment(input: {
   readonly command: Pick<OrchestrationCommand, "commandId"> & {
@@ -1528,6 +1608,107 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
           attachment,
         },
+      };
+    }
+
+    case "thread.workflow.run.preflight": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow Run preflight requires an attached Workstream.",
+        });
+      }
+      if (attachment.workflowRun !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This Workstream already has a confirmed Workflow Run.",
+        });
+      }
+      if (command.configuration.workflowGoal !== attachment.workflowGoal) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow Goal must match the attached Workstream Goal.",
+        });
+      }
+      const blockers = workflowRunBlockers(command.configuration, attachment);
+      const preview = {
+        configuration: command.configuration,
+        status: blockers.length === 0 ? ("ready-for-confirmation" as const) : ("blocked" as const),
+        blockers,
+        authorityGranted: false as const,
+        generatedAt: command.createdAt,
+      };
+      const nextAttachment = { ...attachment, workflowRunPreview: preview };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-run-preflighted",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.run.confirm": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const preview = attachment?.workflowRunPreview;
+      if (attachment === undefined || preview === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Workflow Run confirmation requires a prior read-only preflight.",
+        });
+      }
+      if (attachment.workflowRun !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "This Workstream already has a confirmed Workflow Run.",
+        });
+      }
+      if (stableStringify(preview.configuration) !== stableStringify(command.configuration)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Confirmation must match the exact preflighted Workflow Run.",
+        });
+      }
+      if (preview.status !== "ready-for-confirmation") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: preview.blockers.join(" "),
+        });
+      }
+      const nextAttachment = {
+        ...attachment,
+        workflowRun: {
+          configuration: command.configuration,
+          status: "confirmed" as const,
+          authorityGranted: true as const,
+          confirmedAt: command.createdAt,
+          dispatchIdentity: command.commandId,
+          immutableAtDispatch: command.createdAt,
+        },
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-run-confirmed",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
       };
     }
 

@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
+import { ProviderInstanceId, SkillRunId, ThreadId, WorkstreamId } from "@t3tools/contracts";
 import { expect, it } from "vite-plus/test";
 
 import { WorkflowAttachmentCard } from "./WorkflowAttachmentCard";
@@ -119,4 +119,37 @@ it("surfaces durable upstream markers and the allowed stale resolution", () => {
   expect(markup).toContain("Mark viewed");
   expect(markup).toContain("Acknowledge latest update");
   expect(markup).toContain("Accept upstream update");
+});
+
+it("renders exact Workflow Run provider controls and preflight action", () => {
+  const provider = ProviderInstanceId.make("codex");
+  const markup = renderToStaticMarkup(
+    <WorkflowAttachmentCard
+      originThreadId={ThreadId.make("thread-origin")}
+      hint={null}
+      attachment={{
+        originThreadId: ThreadId.make("thread-origin"),
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-08-03T12:00:00.000Z",
+        },
+        attachedAt: "2026-08-03T12:00:00.000Z",
+      }}
+      onDismiss={() => undefined}
+      onAttach={() => undefined}
+      defaultProviderInstanceId={provider}
+      providerOptions={[provider]}
+      requiredSkillsByProvider={new Map([[provider, []]])}
+      onPreflightRun={() => undefined}
+      onConfirmRun={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain("Default Provider");
+  expect(markup).toContain("Workstream override");
+  expect(markup).toContain("Run read-only preflight");
 });

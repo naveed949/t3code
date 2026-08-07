@@ -42,6 +42,8 @@ import {
   ThreadWayfinderReconciliationUpdatedPayload,
   ThreadWayfinderResearchUpdatedPayload,
   ThreadWorkflowAttachedPayload,
+  ThreadWorkflowRunPreflightedPayload,
+  ThreadWorkflowRunConfirmedPayload,
   ThreadWorkflowArtifactAcknowledgedPayload,
   ThreadWorkflowAttachmentHintDismissedPayload,
   ThreadWorkflowAttachmentHintedPayload,
@@ -994,6 +996,38 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachmentHint: payload.hint,
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-run-preflighted":
+      return decodeForEvent(
+        ThreadWorkflowRunPreflightedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-run-confirmed":
+      return decodeForEvent(
+        ThreadWorkflowRunConfirmedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachment: payload.attachment,
             updatedAt: event.occurredAt,
           }),

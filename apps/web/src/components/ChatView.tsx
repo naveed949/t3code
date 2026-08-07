@@ -19,6 +19,7 @@ import {
   type KeybindingCommand,
   type WayfinderMutationAction,
   type WayfinderResearchAction,
+  type WorkflowRunConfiguration,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -39,6 +40,7 @@ import {
   findWayfinderReconciliationInvocation,
   type ProjectSkillWorkstream,
 } from "@t3tools/client-runtime/state/skill-runs";
+import { deriveWorkflowRunRequiredSkillsByProvider } from "@t3tools/client-runtime/state/workflow-run";
 import { createWayfinderToSpecInvocationRequest } from "@t3tools/client-runtime/operations/native-skill-runs";
 import {
   parseScopedThreadKey,
@@ -254,6 +256,7 @@ import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { WorkflowAttachmentCard } from "./chat/WorkflowAttachmentCard";
+
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -1230,6 +1233,12 @@ function ChatViewContent(props: ChatViewProps) {
   const attachWorkflowCommand = useAtomCommand(threadEnvironment.attachWorkflow, {
     reportFailure: false,
   });
+  const preflightWorkflowRunCommand = useAtomCommand(threadEnvironment.preflightWorkflowRun, {
+    reportFailure: false,
+  });
+  const confirmWorkflowRunCommand = useAtomCommand(threadEnvironment.confirmWorkflowRun, {
+    reportFailure: false,
+  });
   const viewWorkflowArtifactsCommand = useAtomCommand(threadEnvironment.viewWorkflowArtifacts, {
     reportFailure: false,
   });
@@ -1721,6 +1730,26 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, attachWorkflowCommand],
+  );
+  const preflightWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!activeThread) return;
+      void preflightWorkflowRunCommand({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, configuration },
+      });
+    },
+    [activeThread, preflightWorkflowRunCommand],
+  );
+  const confirmWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!activeThread) return;
+      void confirmWorkflowRunCommand({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, configuration, confirmed: true },
+      });
+    },
+    [activeThread, confirmWorkflowRunCommand],
   );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!activeThread) return;
@@ -6299,6 +6328,14 @@ function ChatViewContent(props: ChatViewProps) {
                         onViewArtifacts={viewWorkflowArtifacts}
                         onAcknowledgeArtifact={acknowledgeWorkflowArtifact}
                         onResolveStale={resolveWorkflowStale}
+                        defaultProviderInstanceId={activeThread.modelSelection.instanceId}
+                        providerOptions={providerStatuses.map((provider) => provider.instanceId)}
+                        requiredSkillsByProvider={deriveWorkflowRunRequiredSkillsByProvider(
+                          providerStatuses,
+                          `workflow:${activeThread.workflowAttachment?.workstreamId ?? "unknown"}`,
+                        )}
+                        onPreflightRun={preflightWorkflowRun}
+                        onConfirmRun={confirmWorkflowRun}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
                       />
                     </div>

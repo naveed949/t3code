@@ -603,6 +603,17 @@ export function applyThreadDetailEvent(
         },
       };
 
+    case "thread.workflow-run-preflighted":
+    case "thread.workflow-run-confirmed":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          workflowAttachment: event.payload.attachment,
+          updatedAt: event.occurredAt,
+        },
+      };
+
     case "thread.workflow-synchronized":
     case "thread.workflow-artifacts-viewed":
     case "thread.workflow-artifact-acknowledged":
