@@ -299,7 +299,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
 
       expect(Array.isArray(result)).toBe(true);
       const events = Array.isArray(result) ? result : [result];
-      expect(events).toHaveLength(3);
+      expect(events).toHaveLength(4);
       expect(events[0]?.type).toBe("thread.message-sent");
       const turnStartEvent = events[1];
       expect(turnStartEvent?.type).toBe("thread.turn-start-requested");
@@ -361,6 +361,16 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
             payload: {
               canonical: false,
             },
+          },
+        },
+      });
+      expect(events[3]).toMatchObject({
+        type: "thread.workflow-attachment-hinted",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          hint: {
+            status: "available",
+            workstreamId: WorkstreamId.make("workstream:existing-map"),
           },
         },
       });
