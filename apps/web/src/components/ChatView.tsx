@@ -19,6 +19,8 @@ import {
   type KeybindingCommand,
   type WayfinderMutationAction,
   type WayfinderResearchAction,
+  type WorkflowRunConfiguration,
+  type WorkflowRunRequiredSkill,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -254,6 +256,29 @@ import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import { resolveThreadPr } from "./ThreadStatusIndicators";
 import { ComposerBannerStack, type ComposerBannerStackItem } from "./chat/ComposerBannerStack";
 import { WorkflowAttachmentCard } from "./chat/WorkflowAttachmentCard";
+
+function deriveWorkflowRunRequiredSkills(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<WorkflowRunRequiredSkill> {
+  const provider = providers[0];
+  const stages = [
+    ["specification", "to-spec"],
+    ["ticketing", "to-tickets"],
+    ["implementation", "implement"],
+    ["review", "code-review"],
+  ] as const;
+  return stages.map(([stage, name]) => {
+    const skill = provider?.skills.find((candidate) => candidate.name === name);
+    return {
+      stage,
+      skill: {
+        name,
+        path: skill?.path ?? `/skills/${name}/SKILL.md`,
+      },
+      status: skill?.enabled === true ? "available" : "missing",
+    };
+  });
+}
 import { ThreadSyncStatusPill } from "./chat/ThreadSyncStatusPill";
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -1230,6 +1255,12 @@ function ChatViewContent(props: ChatViewProps) {
   const attachWorkflowCommand = useAtomCommand(threadEnvironment.attachWorkflow, {
     reportFailure: false,
   });
+  const preflightWorkflowRunCommand = useAtomCommand(threadEnvironment.preflightWorkflowRun, {
+    reportFailure: false,
+  });
+  const confirmWorkflowRunCommand = useAtomCommand(threadEnvironment.confirmWorkflowRun, {
+    reportFailure: false,
+  });
   const viewWorkflowArtifactsCommand = useAtomCommand(threadEnvironment.viewWorkflowArtifacts, {
     reportFailure: false,
   });
@@ -1721,6 +1752,26 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, attachWorkflowCommand],
+  );
+  const preflightWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!activeThread) return;
+      void preflightWorkflowRunCommand({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, configuration },
+      });
+    },
+    [activeThread, preflightWorkflowRunCommand],
+  );
+  const confirmWorkflowRun = useCallback(
+    (configuration: WorkflowRunConfiguration) => {
+      if (!activeThread) return;
+      void confirmWorkflowRunCommand({
+        environmentId: activeThread.environmentId,
+        input: { threadId: activeThread.id, configuration, confirmed: true },
+      });
+    },
+    [activeThread, confirmWorkflowRunCommand],
   );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!activeThread) return;
@@ -6299,6 +6350,11 @@ function ChatViewContent(props: ChatViewProps) {
                         onViewArtifacts={viewWorkflowArtifacts}
                         onAcknowledgeArtifact={acknowledgeWorkflowArtifact}
                         onResolveStale={resolveWorkflowStale}
+                        defaultProviderInstanceId={activeThread.modelSelection.instanceId}
+                        providerOptions={providerStatuses.map((provider) => provider.instanceId)}
+                        requiredSkills={deriveWorkflowRunRequiredSkills(providerStatuses)}
+                        onPreflightRun={preflightWorkflowRun}
+                        onConfirmRun={confirmWorkflowRun}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
                       />
                     </div>

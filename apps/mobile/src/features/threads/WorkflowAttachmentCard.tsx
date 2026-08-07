@@ -34,6 +34,25 @@ export function WorkflowAttachmentCard(props: {
         <Text className="font-sans text-sm text-neutral-700 dark:text-neutral-200">
           {props.attachment.workflowGoal}
         </Text>
+        {props.attachment.workflowRun ? (
+          <Text
+            accessibilityRole="text"
+            className="font-sans text-xs text-emerald-700 dark:text-emerald-300"
+          >
+            Workflow Run confirmed. Exact scope, provider, baseline, and granted authority are
+            recorded.
+          </Text>
+        ) : props.attachment.workflowRunPreview ? (
+          <Text
+            accessibilityRole="text"
+            className="font-sans text-xs text-amber-700 dark:text-amber-300"
+          >
+            Workflow Run preflight: {props.attachment.workflowRunPreview.status}.
+            {props.attachment.workflowRunPreview.blockers.length > 0
+              ? ` ${props.attachment.workflowRunPreview.blockers.join(" ")}`
+              : " Review the exact scope and authority on web or desktop to confirm."}
+          </Text>
+        ) : null}
         {props.onOpenWorkstream ? (
           <Pressable
             accessibilityRole="button"
