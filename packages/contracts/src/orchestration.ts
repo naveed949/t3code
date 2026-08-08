@@ -748,9 +748,11 @@ export const WorkflowTicketImplementationStatus = Schema.Literals([
   "checkpointed",
   "reviewed",
   "needs-correction",
+  "needs-decision",
   "failed",
 ]);
 export type WorkflowTicketImplementationStatus = typeof WorkflowTicketImplementationStatus.Type;
+export const WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES = 4;
 
 export const WorkflowTicketImplementationDispatchMode = Schema.Literals(["user", "automatic"]);
 export type WorkflowTicketImplementationDispatchMode =
@@ -764,6 +766,7 @@ export const WorkflowTicketImplementationAvailability = Schema.Struct({
     "checkpointed",
     "reviewed",
     "needs-correction",
+    "needs-decision",
     "failed",
   ]),
   canStart: Schema.Boolean,
@@ -805,11 +808,18 @@ export type WorkflowDiffEvidence = typeof WorkflowDiffEvidence.Type;
 
 export const WorkflowCodeReviewFinding = Schema.Struct({
   severity: Schema.Literals(["must-fix", "suggestion"]),
+  // Older review receipts may omit grounding. Such findings remain visible,
+  // but only explicitly grounded findings can block integration.
+  source: Schema.optional(Schema.Literals(["repository-standards", "ticket-specification"])),
   summary: TrimmedNonEmptyString,
   file: Schema.optional(TrimmedNonEmptyString),
   line: Schema.optional(PositiveInt),
 });
 export type WorkflowCodeReviewFinding = typeof WorkflowCodeReviewFinding.Type;
+
+export function isBlockingWorkflowCodeReviewFinding(finding: WorkflowCodeReviewFinding): boolean {
+  return finding.severity === "must-fix" && finding.source !== undefined;
+}
 
 const WorkflowTicketImplementationAcceptanceCriteria = Schema.String.check(
   Schema.isMaxLength(32_000),
@@ -827,6 +837,17 @@ export const WorkflowCodeReviewEvidence = Schema.Struct({
   completedAt: IsoDateTime,
 });
 export type WorkflowCodeReviewEvidence = typeof WorkflowCodeReviewEvidence.Type;
+
+export const WorkflowCorrectionCycle = Schema.Struct({
+  cycle: PositiveInt,
+  findings: WorkflowTicketImplementationReviewFindings,
+  review: WorkflowCodeReviewEvidence,
+  startedAt: IsoDateTime,
+});
+export type WorkflowCorrectionCycle = typeof WorkflowCorrectionCycle.Type;
+const WorkflowTicketImplementationCorrectionCycles = Schema.Array(WorkflowCorrectionCycle).check(
+  Schema.isMaxLength(WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES),
+);
 
 /**
  * Projection-owned evidence for one ticket implementation. A `reviewed`
@@ -857,6 +878,7 @@ export const WorkflowTicketImplementation = Schema.Struct({
   validation: WorkflowTicketImplementationValidationList,
   diff: Schema.NullOr(WorkflowDiffEvidence),
   review: Schema.NullOr(WorkflowCodeReviewEvidence),
+  correctionCycles: Schema.optional(WorkflowTicketImplementationCorrectionCycles),
   failure: Schema.NullOr(TrimmedNonEmptyString),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1983,6 +2005,17 @@ const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketImplementationCorrectionStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.correction.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  correctionCycle: PositiveInt,
+  findings: WorkflowTicketImplementationReviewFindings,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWayfinderMutationUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.wayfinder.mutation.update"),
   commandId: CommandId,
@@ -2034,6 +2067,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadWorkflowTicketImplementationUpdateCommand,
   ThreadWorkflowTicketImplementationCheckpointCommand,
   ThreadWorkflowTicketImplementationReviewRecordCommand,
+  ThreadWorkflowTicketImplementationCorrectionStartCommand,
   ThreadWayfinderMutationUpdateCommand,
   ThreadWayfinderReconciliationUpdateCommand,
   ThreadWayfinderResearchUpdateCommand,

@@ -2,6 +2,8 @@ import {
   CommandId,
   MessageId,
   ThreadId,
+  isBlockingWorkflowCodeReviewFinding,
+  WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES,
   type OrchestrationEvent,
   type OrchestrationThread,
   type WorkflowDiffEvidence,
@@ -80,11 +82,16 @@ function implementationPhase(
   if (
     implementation.status === "reviewing" ||
     implementation.status === "reviewed" ||
-    implementation.status === "needs-correction"
+    implementation.status === "needs-correction" ||
+    implementation.status === "needs-decision"
   ) {
     return "review";
   }
   return fallback;
+}
+
+function correctionCycleNumber(implementation: WorkflowTicketImplementation): number {
+  return implementation.correctionCycles?.at(-1)?.cycle ?? 0;
 }
 
 function implementationMessage(
@@ -97,13 +104,26 @@ function implementationMessage(
       `Review the current worktree changes against the original Fixed Point ${implementation.fixedPoint}.`,
       "Only structured review evidence may complete this gate; prose alone is not workflow authority.",
       "Finish with exactly one result wrapped in <t3-ticket-implementation-review-result> tags.",
-      `The JSON shape is {"status":"passed"|"must-fix","summary":"...","findings":[{"severity":"must-fix"|"suggestion","summary":"...","file":"optional","line":1}],"validation":[{"name":"...","status":"passed"|"failed"|"not-run","command":"optional","detail":"optional"}]}.`,
+      `The JSON shape is {"status":"passed"|"must-fix","summary":"...","findings":[{"severity":"must-fix"|"suggestion","source":"repository-standards"|"ticket-specification","summary":"...","file":"optional","line":1}],"validation":[{"name":"...","status":"passed"|"failed"|"not-run","command":"optional","detail":"optional"}]}.`,
     ].join("\n\n");
   }
+  const correction = implementation.correctionCycles?.at(-1);
   return [
-    `Implement ticket #${implementation.ticketNumber} against Fixed Point ${implementation.fixedPoint}.`,
+    correction === undefined
+      ? `Implement ticket #${implementation.ticketNumber} against Fixed Point ${implementation.fixedPoint}.`
+      : `Run Correction Cycle ${correction.cycle} for ticket #${implementation.ticketNumber} in the existing ticket worktree against Fixed Point ${implementation.fixedPoint}.`,
     "",
     implementation.acceptanceCriteria,
+    ...(correction === undefined
+      ? []
+      : [
+          "",
+          "Correct only these verified Must-Fix Findings:",
+          ...correction.findings.map(
+            (finding) =>
+              `- [${finding.source ?? "unclassified"}] ${finding.summary}${finding.file ? ` (${finding.file}${finding.line ? `:${finding.line}` : ""})` : ""}`,
+          ),
+        ]),
     "",
     "The pinned /code-review child is required before this Ticket Implementation can be marked reviewed.",
   ].join("\n");
@@ -432,6 +452,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       if (threadId === null) return null;
       const snapshot = yield* snapshots.getSnapshot();
       const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
+      const cycle = correctionCycleNumber(input.implementation);
       const recordedSkillRunId =
         input.phase === "implementation"
           ? input.implementation.implementationSkillRunId
@@ -443,6 +464,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
           : input.implementation.reviewSkill;
       const latestTurn = thread?.latestTurn;
       if (
+        cycle === 0 &&
         latestTurn !== null &&
         latestTurn !== undefined &&
         latestTurn.skillInvocation?.skill.name === expectedSkill.name &&
@@ -452,12 +474,15 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       ) {
         return latestTurn.skillInvocation.skillRunId;
       }
-      const messageId = MessageId.make(`${input.implementation.id}:message:${input.phase}`);
+      const messageId = MessageId.make(
+        `${input.implementation.id}:message:${input.phase}:cycle-${cycle}`,
+      );
+      const commandId = CommandId.make(
+        `server:ticket-implementation:${input.implementation.id}:${input.phase}:cycle-${correctionCycleNumber(input.implementation)}:turn-start`,
+      );
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.make(
-          `server:ticket-implementation:${input.implementation.id}:${input.phase}:turn-start`,
-        ),
+        commandId,
         threadId,
         message: {
           messageId,
@@ -479,12 +504,47 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         createdAt: input.implementation.updatedAt,
       });
       const afterStart = yield* snapshots.getSnapshot();
+      if (cycle > 0) return null;
       return (
         afterStart.threads.find((candidate) => candidate.id === threadId)?.latestTurn
           ?.skillInvocation?.skillRunId ?? null
       );
     },
   );
+
+  const startCorrectionImplementation = Effect.fn(
+    "WorkflowTicketImplementationReactor.startCorrectionImplementation",
+  )(function* (input: {
+    readonly originThread: OrchestrationThread;
+    readonly implementation: WorkflowTicketImplementation;
+  }) {
+    if (
+      input.implementation.status !== "implementing" ||
+      (input.implementation.correctionCycles?.length ?? 0) === 0 ||
+      input.implementation.implementationSkillRunId !== null
+    ) {
+      return;
+    }
+    const skillRunId = yield* startSkillTurn({
+      originThread: input.originThread,
+      implementation: input.implementation,
+      phase: "implementation",
+    });
+    const updated = yield* updateImplementation({
+      implementationId: input.implementation.id,
+      patch: {
+        ...(skillRunId !== null ? { implementationSkillRunId: skillRunId } : {}),
+        updatedAt: input.implementation.updatedAt,
+      },
+    });
+    if (updated !== null) {
+      yield* publishProgress({
+        implementation: updated,
+        message: `Correction Cycle ${input.implementation.correctionCycles?.at(-1)?.cycle ?? 0} dispatched in the existing ticket worktree.`,
+        phase: "implementation",
+      });
+    }
+  });
 
   const processRequested = Effect.fn("WorkflowTicketImplementationReactor.processRequested")(
     function* (event: TicketImplementationRequestedEvent) {
@@ -725,14 +785,67 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   const processUpdated = Effect.fn("WorkflowTicketImplementationReactor.processUpdated")(function* (
     event: TicketImplementationUpdatedEvent | TicketImplementationCheckpointedEvent,
   ) {
+    const snapshot = yield* snapshots.getSnapshot();
+    const located = snapshot.threads
+      .map((thread) => ({
+        thread,
+        implementation: thread.workflowAttachment?.ticketImplementations?.find(
+          (candidate) => candidate.id === event.payload.implementation.id,
+        ),
+      }))
+      .find((candidate) => candidate.implementation !== undefined);
+    const implementation = event.payload.implementation;
+    const originThread =
+      located?.thread ??
+      snapshot.threads.find((thread) => thread.id === implementation.originThreadId);
+
+    if (
+      implementation.status === "needs-correction" &&
+      originThread?.workflowAttachment !== undefined
+    ) {
+      const findings =
+        implementation.review?.findings.filter(isBlockingWorkflowCodeReviewFinding) ?? [];
+      const nextCycle = (implementation.correctionCycles?.length ?? 0) + 1;
+      if (findings.length > 0 && nextCycle <= WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES) {
+        yield* orchestrationEngine.dispatch({
+          type: "thread.workflow.ticket-implementation.correction.start",
+          commandId: CommandId.make(
+            `server:ticket-implementation:${implementation.id}:correction-cycle-${nextCycle}:start`,
+          ),
+          threadId: originThread.id,
+          implementationId: implementation.id,
+          correctionCycle: nextCycle,
+          findings,
+          expectedWorkstreamVersion: originThread.workflowAttachment.workflowVersion ?? 0,
+          createdAt: implementation.updatedAt,
+        });
+        return;
+      }
+    }
+
+    if (
+      implementation.status === "implementing" &&
+      (implementation.correctionCycles?.length ?? 0) > 0 &&
+      implementation.implementationSkillRunId === null &&
+      originThread !== undefined
+    ) {
+      yield* startCorrectionImplementation({
+        originThread,
+        implementation,
+      });
+      return;
+    }
+
     yield* publishProgress({
-      implementation: event.payload.implementation,
+      implementation,
       message:
-        event.payload.implementation.status === "checkpointed"
+        implementation.status === "checkpointed"
           ? "Ticket Implementation reached a Workflow Checkpoint; automatic dispatch remains paused."
-          : event.payload.implementation.status === "reviewed"
+          : implementation.status === "reviewed"
             ? "Structured Code Review evidence recorded; integration remains a downstream milestone."
-            : null,
+            : implementation.status === "needs-decision"
+              ? "Automatic Correction Cycles are exhausted; Needs Decision preserves the final Must-Fix evidence."
+              : null,
     });
   });
 
