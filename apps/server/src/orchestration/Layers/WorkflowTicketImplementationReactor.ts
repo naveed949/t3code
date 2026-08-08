@@ -18,6 +18,10 @@ type WorkflowTicketImplementationEvent = Extract<
     type:
       | "thread.workflow-ticket-implementation-requested"
       | "thread.workflow-ticket-implementation-updated"
+      | "thread.workflow-ticket-implementation-checkpointed"
+      | "thread.workflow-run-started"
+      | "thread.workflow-run-resumed"
+      | "thread.workflow-run-draining"
       | "thread.session-set"
       | "thread.turn-start-requested";
   }
@@ -48,6 +52,10 @@ export const makeWorkflowTicketImplementationReactor = Effect.gen(function* () {
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
         event.type === "thread.workflow-ticket-implementation-requested" ||
         event.type === "thread.workflow-ticket-implementation-updated" ||
+        event.type === "thread.workflow-ticket-implementation-checkpointed" ||
+        event.type === "thread.workflow-run-started" ||
+        event.type === "thread.workflow-run-resumed" ||
+        event.type === "thread.workflow-run-draining" ||
         event.type === "thread.session-set" ||
         event.type === "thread.turn-start-requested"
           ? worker.enqueue(event)
