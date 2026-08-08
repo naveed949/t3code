@@ -25,3 +25,12 @@ that authority.
 The environment capacity is two concurrent nodes. A Workstream may choose a
 lower execution limit. Confirmed provider and Required Skill identities are
 retained for dispatch and cannot be changed by a later client update.
+
+Use **Run workflow** to advance only executable tickets in the confirmed Run
+Scope. Independent tickets may run concurrently in isolated worktrees, while
+explicit user-started work keeps priority and remaining capacity is shared
+fairly between Workstreams. **Pause workflow** drains active work: it stops new
+dispatch until each active implementation finishes or reaches a Workflow
+Checkpoint. A per-node **Hold** blocks future dispatch; releasing the Hold makes
+the node eligible again but does not start it. **Resume workflow** rechecks
+scope, blockers, capabilities, holds, and capacity before dispatching anything.

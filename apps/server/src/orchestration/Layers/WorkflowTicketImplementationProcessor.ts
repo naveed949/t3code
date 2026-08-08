@@ -11,6 +11,7 @@ import {
   type WorkflowTrackerProjection,
   type WorkflowTicketImplementation,
   type WayfinderMapProjection,
+  type WorkstreamId,
 } from "@t3tools/contracts";
 import {
   workflowTicketImplementationBranch,
@@ -23,6 +24,11 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import { parseWorkflowTicketImplementationReviewResult } from "../WorkflowTicketImplementationReview.ts";
+import {
+  selectWorkflowTicketFrontier,
+  type WorkflowSchedulerWorkstream,
+  type WorkflowTicketFrontierDispatch,
+} from "../WorkflowTicketFrontierScheduler.ts";
 import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -36,13 +42,28 @@ type TicketImplementationUpdatedEvent = Extract<
   OrchestrationEvent,
   { type: "thread.workflow-ticket-implementation-updated" }
 >;
+type TicketImplementationCheckpointedEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.workflow-ticket-implementation-checkpointed" }
+>;
 type SessionSetEvent = Extract<OrchestrationEvent, { type: "thread.session-set" }>;
 type TurnStartRequestedEvent = Extract<OrchestrationEvent, { type: "thread.turn-start-requested" }>;
+type WorkflowRunAutomationEvent = Extract<
+  OrchestrationEvent,
+  {
+    type:
+      | "thread.workflow-run-started"
+      | "thread.workflow-run-resumed"
+      | "thread.workflow-run-draining";
+  }
+>;
 type WorkflowTicketImplementationEvent =
   | TicketImplementationRequestedEvent
   | TicketImplementationUpdatedEvent
+  | TicketImplementationCheckpointedEvent
   | SessionSetEvent
-  | TurnStartRequestedEvent;
+  | TurnStartRequestedEvent
+  | WorkflowRunAutomationEvent;
 
 function implementationById(
   thread: OrchestrationThread,
@@ -165,6 +186,23 @@ function implementationMessage(
   ].join("\n");
 }
 
+const workflowStageSkills = new Set(["wayfinder", "to-spec", "to-tickets"]);
+
+function isCountableProviderTurn(thread: OrchestrationThread): boolean {
+  if (thread.latestTurn === null || thread.latestTurn === undefined) return false;
+  if (
+    thread.latestTurn?.skillInvocation?.skill.name !== undefined &&
+    workflowStageSkills.has(thread.latestTurn.skillInvocation.skill.name)
+  ) {
+    return false;
+  }
+  return (
+    thread.latestTurn?.state === "running" ||
+    thread.session?.status === "starting" ||
+    thread.session?.status === "running"
+  );
+}
+
 export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -172,6 +210,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   const git = yield* GitWorkflowService;
   const tracker = yield* IssueTracker;
   const receipts = yield* RuntimeReceiptBus;
+  let lastServedWorkstreamId: WorkstreamId | null = null;
 
   const resolveIntegrationWorkspace = Effect.fn(
     "WorkflowTicketImplementationReactor.resolveIntegrationWorkspace",
@@ -218,6 +257,143 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         createdAt: input.implementation.updatedAt,
         message: input.message,
       });
+    },
+  );
+
+  const scheduleFrontier = Effect.fn("WorkflowTicketImplementationReactor.scheduleFrontier")(
+    function* (input: { readonly createdAt: string }) {
+      const snapshot = yield* snapshots.getSnapshot();
+      const implementationThreadIds = new Set(
+        snapshot.threads.flatMap(
+          (thread) =>
+            thread.workflowAttachment?.ticketImplementations
+              ?.map((implementation) => implementation.implementationThreadId)
+              .filter((threadId): threadId is ThreadId => threadId !== null) ?? [],
+        ),
+      );
+      const workstreams: Array<WorkflowSchedulerWorkstream> = snapshot.threads.flatMap((thread) => {
+        const attachment = thread.workflowAttachment;
+        if (
+          attachment?.originThreadId !== thread.id ||
+          attachment.workflowRun === undefined ||
+          attachment.workflowGraph === undefined
+        ) {
+          return [];
+        }
+        const trackerProjection =
+          attachment.trackerProjection ?? attachment.ticketingStage?.trackerProjection;
+        const activeProviderRuns = snapshot.threads.filter((candidate) => {
+          if (implementationThreadIds.has(candidate.id)) return false;
+          if (!isCountableProviderTurn(candidate)) return false;
+          return (
+            candidate.id === thread.id ||
+            candidate.latestTurn?.skillInvocation?.reconnectWorkstreamId === attachment.workstreamId
+          );
+        }).length;
+        return [
+          {
+            workstreamId: attachment.workstreamId,
+            originThreadId: thread.id,
+            workflowRun: attachment.workflowRun,
+            workflowGraph: attachment.workflowGraph,
+            ...(trackerProjection === undefined ? {} : { trackerProjection }),
+            isolationAvailable:
+              resolveThreadWorkspaceCwd({ thread, projects: snapshot.projects }) !== undefined,
+            implementations: (attachment.ticketImplementations ?? []).map((implementation) => ({
+              nodeId: implementation.nodeId,
+              status: implementation.status,
+              ...(implementation.dispatchMode === undefined
+                ? {}
+                : { dispatchMode: implementation.dispatchMode }),
+            })),
+            activeProviderRuns,
+            ...(attachment.workflowVersion === undefined
+              ? {}
+              : { workflowVersion: attachment.workflowVersion }),
+          },
+        ];
+      });
+
+      for (const workstream of workstreams) {
+        if (
+          workstream.workflowRun.automationStatus === "draining" &&
+          !workstream.implementations.some((implementation) =>
+            ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+          )
+        ) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.workflow.run.drain.complete",
+            commandId: CommandId.make(
+              [
+                "server",
+                "workflow-run",
+                workstream.workflowRun.dispatchIdentity,
+                "drain",
+                String(workstream.workflowVersion ?? 0),
+              ].join(":"),
+            ),
+            threadId: workstream.originThreadId,
+            expectedWorkstreamVersion: workstream.workflowVersion ?? 0,
+            createdAt: input.createdAt,
+          });
+        }
+      }
+
+      const selection = selectWorkflowTicketFrontier({
+        workstreams,
+        lastServedWorkstreamId,
+      });
+      lastServedWorkstreamId = selection.nextLastServedWorkstreamId;
+      const scheduled: Array<WorkflowTicketFrontierDispatch> = [];
+      for (const dispatch of selection.dispatches) {
+        const currentSnapshot = yield* snapshots.getSnapshot();
+        const currentAttachment = currentSnapshot.threads.find(
+          (thread) => thread.id === dispatch.originThreadId,
+        )?.workflowAttachment;
+        if (currentAttachment?.workflowRun?.automationStatus !== "running") continue;
+        const dispatchResult = yield* orchestrationEngine
+          .dispatch({
+            type: "thread.workflow.ticket-implementation.start",
+            commandId: CommandId.make(
+              ["server", "workflow-frontier", dispatch.actionIdentity].join(":"),
+            ),
+            threadId: dispatch.originThreadId,
+            ticketNodeId: dispatch.ticketNodeId,
+            actionIdentity: dispatch.actionIdentity,
+            expectedWorkstreamVersion: currentAttachment.workflowVersion ?? 0,
+            dispatchMode: "automatic",
+            confirmed: true,
+            createdAt: input.createdAt,
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(dispatchResult)) {
+          yield* receipts.publish({
+            type: "workflow.ticket-frontier.dispatch-failed",
+            workstreamId: dispatch.workstreamId,
+            ticketNodeId: dispatch.ticketNodeId,
+            actionIdentity: dispatch.actionIdentity,
+            createdAt: input.createdAt,
+            message: String(dispatchResult.failure),
+          });
+          continue;
+        }
+        scheduled.push(dispatch);
+      }
+
+      const ticketNodeIdsByWorkstream = new Map<WorkstreamId, Array<string>>();
+      for (const dispatch of scheduled) {
+        const nodeIds = ticketNodeIdsByWorkstream.get(dispatch.workstreamId) ?? [];
+        nodeIds.push(dispatch.ticketNodeId);
+        ticketNodeIdsByWorkstream.set(dispatch.workstreamId, nodeIds);
+      }
+      for (const [workstreamId, ticketNodeIds] of ticketNodeIdsByWorkstream) {
+        yield* receipts.publish({
+          type: "workflow.ticket-frontier.scheduled",
+          workstreamId,
+          ticketNodeIds,
+          createdAt: input.createdAt,
+        });
+      }
     },
   );
 
@@ -1010,7 +1186,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   );
 
   const processUpdated = Effect.fn("WorkflowTicketImplementationReactor.processUpdated")(function* (
-    event: TicketImplementationUpdatedEvent,
+    event: TicketImplementationUpdatedEvent | TicketImplementationCheckpointedEvent,
   ) {
     const snapshot = yield* snapshots.getSnapshot();
     const located = snapshot.threads
@@ -1105,15 +1281,17 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     yield* publishProgress({
       implementation: currentImplementation,
       message:
-        currentImplementation.status === "reviewed"
-          ? "Structured Code Review evidence recorded; integration remains a downstream milestone."
-          : currentImplementation.status === "integration-failed"
-            ? `Integration failed during ${currentImplementation.integration?.failurePhase ?? "an unknown phase"}; retry is available without replaying a successful integration.`
-            : currentImplementation.status === "integrated"
-              ? "Baseline integration and tracker synchronization completed; the Ticket is now Integrated."
-              : currentImplementation.status === "needs-decision"
-                ? "Automatic Correction Cycles are exhausted; Needs Decision preserves the final Must-Fix evidence."
-                : null,
+        currentImplementation.status === "checkpointed"
+          ? "Ticket Implementation reached a Workflow Checkpoint; automatic dispatch remains paused."
+          : currentImplementation.status === "reviewed"
+            ? "Structured Code Review evidence recorded; integration remains a downstream milestone."
+            : currentImplementation.status === "integration-failed"
+              ? `Integration failed during ${currentImplementation.integration?.failurePhase ?? "an unknown phase"}; retry is available without replaying a successful integration.`
+              : currentImplementation.status === "integrated"
+                ? "Baseline integration and tracker synchronization completed; the Ticket is now Integrated."
+                : currentImplementation.status === "needs-decision"
+                  ? "Automatic Correction Cycles are exhausted; Needs Decision preserves the final Must-Fix evidence."
+                  : null,
       phase: implementationPhase(currentImplementation),
     });
   });
@@ -1155,15 +1333,28 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     switch (event.type) {
       case "thread.workflow-ticket-implementation-requested":
         yield* processRequested(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
         return;
       case "thread.workflow-ticket-implementation-updated":
         yield* processUpdated(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
+        return;
+      case "thread.workflow-ticket-implementation-checkpointed":
+        yield* processUpdated(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
         return;
       case "thread.session-set":
         yield* processSessionSet(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
         return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
+        return;
+      case "thread.workflow-run-started":
+      case "thread.workflow-run-resumed":
+      case "thread.workflow-run-draining":
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
         return;
     }
   });
