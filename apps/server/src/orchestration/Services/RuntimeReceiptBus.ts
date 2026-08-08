@@ -23,6 +23,7 @@ import {
   TurnId,
   WayfinderReconcileReason,
   WayfinderResearchTicketStatus,
+  WorkstreamId,
   WorkflowTicketImplementationStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -126,6 +127,26 @@ export const WorkflowTicketImplementationProgressReceipt = Schema.Struct({
 export type WorkflowTicketImplementationProgressReceipt =
   typeof WorkflowTicketImplementationProgressReceipt.Type;
 
+export const WorkflowTicketFrontierScheduledReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.ticket-frontier.scheduled"),
+  workstreamId: WorkstreamId,
+  ticketNodeIds: Schema.Array(Schema.String),
+  createdAt: IsoDateTime,
+});
+export type WorkflowTicketFrontierScheduledReceipt =
+  typeof WorkflowTicketFrontierScheduledReceipt.Type;
+
+export const WorkflowTicketFrontierDispatchFailedReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.ticket-frontier.dispatch-failed"),
+  workstreamId: WorkstreamId,
+  ticketNodeId: Schema.String,
+  actionIdentity: Schema.String,
+  createdAt: IsoDateTime,
+  message: Schema.String,
+});
+export type WorkflowTicketFrontierDispatchFailedReceipt =
+  typeof WorkflowTicketFrontierDispatchFailedReceipt.Type;
+
 export const OrchestrationRuntimeReceipt = Schema.Union([
   CheckpointBaselineCapturedReceipt,
   CheckpointDiffFinalizedReceipt,
@@ -136,6 +157,8 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WayfinderResearchProgressReceipt,
   WorkflowTicketBatchPublicationProgressReceipt,
   WorkflowTicketImplementationProgressReceipt,
+  WorkflowTicketFrontierScheduledReceipt,
+  WorkflowTicketFrontierDispatchFailedReceipt,
 ]);
 export type OrchestrationRuntimeReceipt = typeof OrchestrationRuntimeReceipt.Type;
 

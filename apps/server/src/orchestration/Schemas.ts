@@ -31,6 +31,7 @@ import {
   ThreadWorkflowAttachedPayload as ContractsThreadWorkflowAttachedPayloadSchema,
   ThreadWorkflowRunPreflightedPayload as ContractsThreadWorkflowRunPreflightedPayloadSchema,
   ThreadWorkflowRunConfirmedPayload as ContractsThreadWorkflowRunConfirmedPayloadSchema,
+  ThreadWorkflowRunAutomationUpdatedPayload as ContractsThreadWorkflowRunAutomationUpdatedPayloadSchema,
   ThreadWorkflowArtifactAcknowledgedPayload as ContractsThreadWorkflowArtifactAcknowledgedPayloadSchema,
   ThreadWorkflowAttachmentHintDismissedPayload as ContractsThreadWorkflowAttachmentHintDismissedPayloadSchema,
   ThreadWorkflowAttachmentHintedPayload as ContractsThreadWorkflowAttachmentHintedPayloadSchema,
@@ -50,6 +51,7 @@ import {
   ThreadWorkflowTicketingFailedPayload as ContractsThreadWorkflowTicketingFailedPayloadSchema,
   ThreadWorkflowTicketImplementationRequestedPayload as ContractsThreadWorkflowTicketImplementationRequestedPayloadSchema,
   ThreadWorkflowTicketImplementationUpdatedPayload as ContractsThreadWorkflowTicketImplementationUpdatedPayloadSchema,
+  ThreadWorkflowTicketImplementationCheckpointedPayload as ContractsThreadWorkflowTicketImplementationCheckpointedPayloadSchema,
 } from "@t3tools/contracts";
 
 // Server-internal alias surface, backed by contract schemas as the source of truth.
@@ -100,6 +102,8 @@ export const ThreadWorkflowAttachedPayload = ContractsThreadWorkflowAttachedPayl
 export const ThreadWorkflowRunPreflightedPayload =
   ContractsThreadWorkflowRunPreflightedPayloadSchema;
 export const ThreadWorkflowRunConfirmedPayload = ContractsThreadWorkflowRunConfirmedPayloadSchema;
+export const ThreadWorkflowRunAutomationUpdatedPayload =
+  ContractsThreadWorkflowRunAutomationUpdatedPayloadSchema;
 export const ThreadWorkflowSynchronizedPayload = ContractsThreadWorkflowSynchronizedPayloadSchema;
 export const ThreadWorkflowArtifactsViewedPayload =
   ContractsThreadWorkflowArtifactsViewedPayloadSchema;
@@ -132,3 +136,5 @@ export const ThreadWorkflowTicketImplementationRequestedPayload =
   ContractsThreadWorkflowTicketImplementationRequestedPayloadSchema;
 export const ThreadWorkflowTicketImplementationUpdatedPayload =
   ContractsThreadWorkflowTicketImplementationUpdatedPayloadSchema;
+export const ThreadWorkflowTicketImplementationCheckpointedPayload =
+  ContractsThreadWorkflowTicketImplementationCheckpointedPayloadSchema;

@@ -866,6 +866,13 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
+        case "thread.workflow-run-started":
+        case "thread.workflow-run-draining":
+        case "thread.workflow-run-paused":
+        case "thread.workflow-run-resumed":
+        case "thread.workflow-node-held":
+        case "thread.workflow-node-released":
+
         case "thread.workflow-synchronized":
         case "thread.workflow-artifacts-viewed":
         case "thread.workflow-artifact-acknowledged":
@@ -882,7 +889,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.workflow-ticket-batch-publication-updated":
         case "thread.workflow-ticketing-failed":
         case "thread.workflow-ticket-implementation-requested":
-        case "thread.workflow-ticket-implementation-updated": {
+        case "thread.workflow-ticket-implementation-updated":
+        case "thread.workflow-ticket-implementation-checkpointed": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });

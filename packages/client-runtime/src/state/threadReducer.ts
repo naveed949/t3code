@@ -605,6 +605,12 @@ export function applyThreadDetailEvent(
 
     case "thread.workflow-run-preflighted":
     case "thread.workflow-run-confirmed":
+    case "thread.workflow-run-started":
+    case "thread.workflow-run-draining":
+    case "thread.workflow-run-paused":
+    case "thread.workflow-run-resumed":
+    case "thread.workflow-node-held":
+    case "thread.workflow-node-released":
       return {
         kind: "updated",
         thread: {
@@ -629,6 +635,9 @@ export function applyThreadDetailEvent(
     case "thread.workflow-ticket-batch-publication-requested":
     case "thread.workflow-ticket-batch-publication-updated":
     case "thread.workflow-ticketing-failed":
+    case "thread.workflow-ticket-implementation-requested":
+    case "thread.workflow-ticket-implementation-updated":
+    case "thread.workflow-ticket-implementation-checkpointed":
       return {
         kind: "updated",
         thread: {

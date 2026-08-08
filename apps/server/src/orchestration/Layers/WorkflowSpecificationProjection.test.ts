@@ -1097,20 +1097,50 @@ ticketingEngineLayer(
             "ticket:tracker:38",
           );
 
-          const implementationStartCommandId = CommandId.make(
-            "ticketing-projection-implementation-start",
-          );
-          const implementationStartResult = yield* engine.dispatch({
-            type: "thread.workflow.ticket-implementation.start",
-            commandId: implementationStartCommandId,
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-origin-ready"),
             threadId: originThreadId,
-            ticketNodeId: "ticket:ticket-batch-publication",
-            actionIdentity: "ticket-implementation:37:integration",
+            session: {
+              threadId: originThreadId,
+              status: "ready",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: null,
+              updatedAt: "2026-08-08T12:03:30.000Z",
+            },
+            createdAt: "2026-08-08T12:03:30.000Z",
+          });
+
+          const automaticActionIdentity = `workflow-frontier:${projectedAttachment.workflowRun!.dispatchIdentity}:ticket:ticket-batch-publication`;
+          const implementationStartCommandId = CommandId.make(
+            ["server", "workflow-frontier", automaticActionIdentity].join(":"),
+          );
+          const workflowRunStartCommandId = CommandId.make(
+            "ticketing-projection-workflow-run-start",
+          );
+          const workflowRunStartResult = yield* engine.dispatch({
+            type: "thread.workflow.run.start",
+            commandId: workflowRunStartCommandId,
+            threadId: originThreadId,
             expectedWorkstreamVersion: projectedAttachment.workflowVersion ?? 0,
             confirmed: true,
             createdAt: "2026-08-08T12:04:00.000Z",
           });
           yield* implementationReactor.drain;
+          const workflowRunStartReceipt = yield* receipts.getByCommandId({
+            commandId: workflowRunStartCommandId,
+          });
+          if (Option.isNone(workflowRunStartReceipt)) {
+            throw new Error("workflow run start command receipt was not persisted");
+          }
+          assert.equal(workflowRunStartReceipt.value.status, "accepted");
+          assert.equal(
+            workflowRunStartReceipt.value.resultSequence,
+            workflowRunStartResult.sequence,
+          );
           const implementationReceipt = yield* receipts.getByCommandId({
             commandId: implementationStartCommandId,
           });
@@ -1118,9 +1148,17 @@ ticketingEngineLayer(
             throw new Error("implementation start command receipt was not persisted");
           }
           assert.equal(implementationReceipt.value.status, "accepted");
-          assert.equal(
+          assert.isAbove(
             implementationReceipt.value.resultSequence,
-            implementationStartResult.sequence,
+            workflowRunStartResult.sequence,
+          );
+          assert.isTrue(
+            ticketPublicationReceipts.some(
+              (receipt) =>
+                receipt.type === "workflow.ticket-frontier.scheduled" &&
+                receipt.workstreamId === workstreamId &&
+                receipt.ticketNodeIds.includes("ticket:ticket-batch-publication"),
+            ),
           );
 
           const afterImplementation = yield* snapshots.getSnapshot();
@@ -1137,7 +1175,7 @@ ticketingEngineLayer(
               (receipt) =>
                 receipt.type === "workflow.ticket-implementation.progress" &&
                 receipt.status === "implementing" &&
-                receipt.actionIdentity === "ticket-implementation:37:integration",
+                receipt.actionIdentity === automaticActionIdentity,
             ),
           );
 

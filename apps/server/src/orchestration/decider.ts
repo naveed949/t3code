@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  CommandId,
   EventId,
   SkillRunId,
   ThreadId,
@@ -47,6 +48,7 @@ import {
   completeWorkflowTicketing,
   hasPendingWorkflowStaleness,
   initializeWorkflowGraph,
+  isIntegratedWorkflowTrackerTicket,
   resolveWorkflowStaleness,
   synchronizeWorkflowAttachmentWayfinderData,
   viewWorkflowArtifacts,
@@ -821,6 +823,138 @@ function workflowTicketImplementations(attachment: WorkflowAttachment) {
   return attachment.ticketImplementations ?? [];
 }
 
+function workflowAutomationStatus(attachment: WorkflowAttachment) {
+  return attachment.workflowRun?.automationStatus ?? "idle";
+}
+
+function canonicalWorkflowBlockersIntegrated(
+  attachment: WorkflowAttachment,
+  blockedBy: ReadonlyArray<number>,
+): boolean {
+  const trackerProjection =
+    attachment.trackerProjection ?? attachment.ticketingStage?.trackerProjection;
+  if (trackerProjection?.status !== "healthy") return false;
+  const ticketsByNumber = new Map(
+    trackerProjection.tickets.map((ticket) => [ticket.number, ticket]),
+  );
+  return blockedBy.every((blockerNumber) => {
+    const ticket = ticketsByNumber.get(blockerNumber);
+    return ticket !== undefined && isIntegratedWorkflowTrackerTicket(ticket);
+  });
+}
+
+const activeTicketImplementationStatuses = new Set<WorkflowTicketImplementationStatus>([
+  "dispatching",
+  "implementing",
+  "reviewing",
+]);
+const workflowStageSkills = new Set(["wayfinder", "to-spec", "to-tickets"]);
+
+function isActiveProviderTurn(thread: OrchestrationThread): boolean {
+  if (thread.latestTurn === null || thread.latestTurn === undefined) return false;
+  if (
+    thread.latestTurn?.skillInvocation?.skill.name !== undefined &&
+    workflowStageSkills.has(thread.latestTurn.skillInvocation.skill.name)
+  ) {
+    return false;
+  }
+  return (
+    thread.latestTurn?.state === "running" ||
+    thread.session?.status === "starting" ||
+    thread.session?.status === "running"
+  );
+}
+
+function automaticDispatchCapacity(
+  readModel: OrchestrationReadModel,
+  attachment: WorkflowAttachment,
+): {
+  readonly available: boolean;
+  readonly reason: string | null;
+} {
+  const workflowThreads = readModel.threads.filter(
+    (thread) =>
+      thread.workflowAttachment?.originThreadId === thread.id &&
+      thread.workflowAttachment.workflowRun !== undefined,
+  );
+  if (workflowThreads.length === 0) {
+    return { available: false, reason: "No confirmed Workflow Run capacity is available." };
+  }
+
+  const environmentCapacity = Math.min(
+    ...workflowThreads.map(
+      (thread) =>
+        thread.workflowAttachment!.workflowRun!.configuration.environmentAutomationCapacity,
+    ),
+  );
+  const implementationThreadIds = new Set(
+    workflowThreads.flatMap(
+      (thread) =>
+        thread
+          .workflowAttachment!.ticketImplementations?.map(
+            (implementation) => implementation.implementationThreadId,
+          )
+          .filter((threadId): threadId is ThreadId => threadId !== null) ?? [],
+    ),
+  );
+  const activeImplementations = workflowThreads.reduce(
+    (count, thread) =>
+      count +
+      (thread.workflowAttachment!.ticketImplementations ?? []).filter((implementation) =>
+        activeTicketImplementationStatuses.has(implementation.status),
+      ).length,
+    0,
+  );
+  const activeUnmodeledTurns = readModel.threads.filter((thread) => {
+    if (implementationThreadIds.has(thread.id) || !isActiveProviderTurn(thread)) return false;
+    return workflowThreads.some((origin) => {
+      const workstreamId = origin.workflowAttachment!.workstreamId;
+      return (
+        thread.id === origin.id ||
+        thread.latestTurn?.skillInvocation?.reconnectWorkstreamId === workstreamId
+      );
+    });
+  }).length;
+  if (activeImplementations + activeUnmodeledTurns >= environmentCapacity) {
+    return {
+      available: false,
+      reason: `Environment Automation Capacity ${environmentCapacity} is already reserved by active provider runs.`,
+    };
+  }
+
+  const workstreamThreads = workflowThreads.filter(
+    (thread) => thread.workflowAttachment!.workstreamId === attachment.workstreamId,
+  );
+  const workstreamActiveImplementations = workstreamThreads.reduce(
+    (count, thread) =>
+      count +
+      (thread.workflowAttachment!.ticketImplementations ?? []).filter((implementation) =>
+        activeTicketImplementationStatuses.has(implementation.status),
+      ).length,
+    0,
+  );
+  const workstreamActiveUnmodeledTurns = readModel.threads.filter((thread) => {
+    if (implementationThreadIds.has(thread.id) || !isActiveProviderTurn(thread)) return false;
+    return workstreamThreads.some(
+      (origin) =>
+        thread.id === origin.id ||
+        thread.latestTurn?.skillInvocation?.reconnectWorkstreamId === attachment.workstreamId,
+    );
+  }).length;
+  const executionLimit = Math.min(
+    ...workstreamThreads.map(
+      (thread) => thread.workflowAttachment!.workflowRun!.configuration.executionLimit,
+    ),
+  );
+  if (workstreamActiveImplementations + workstreamActiveUnmodeledTurns >= executionLimit) {
+    return {
+      available: false,
+      reason: `Workstream execution limit ${executionLimit} is already reserved by active provider runs.`,
+    };
+  }
+  return { available: true, reason: null };
+}
+
 function workflowTicketImplementationCorrectionCycles(
   implementation: WorkflowTicketImplementation,
 ) {
@@ -877,6 +1011,12 @@ function ticketImplementationAvailability(input: {
           status: "active",
           canStart: false,
           reason: `Ticket Implementation is ${implementation.status}.`,
+        };
+      case "checkpointed":
+        return {
+          status: "checkpointed",
+          canStart: false,
+          reason: "Ticket Implementation reached a native Workflow Checkpoint and awaits recovery.",
         };
       case "reviewed":
         return {
@@ -945,14 +1085,15 @@ function ticketImplementationAvailability(input: {
   }
   if (
     trackerTicket.state !== "open" ||
-    trackerTicket.blockedBy.length > 0 ||
+    !canonicalWorkflowBlockersIntegrated(input.attachment, trackerTicket.blockedBy) ||
     trackerTicket.includedInRun !== true ||
     trackerTicket.body === undefined
   ) {
     return {
       status: "blocked",
       canStart: false,
-      reason: "The ticket must be open, unblocked, in scope, and carry acceptance criteria.",
+      reason:
+        "The ticket must be open, have only Integrated Ticket blockers, be in scope, and carry acceptance criteria.",
     };
   }
   const providerInstanceId =
@@ -1018,9 +1159,11 @@ function workflowTicketImplementationStatusTransitionAllowed(
     case "dispatching":
       return next === "implementing" || next === "failed";
     case "implementing":
-      return next === "reviewing" || next === "failed";
+      return next === "reviewing" || next === "checkpointed" || next === "failed";
     case "reviewing":
-      return next === "failed";
+      return next === "checkpointed" || next === "failed";
+    case "checkpointed":
+      return false;
     case "reviewed":
     case "needs-correction":
     case "needs-decision":
@@ -1034,6 +1177,7 @@ function workflowTicketImplementationEventBase(input: {
     OrchestrationCommand,
     | { readonly type: "thread.workflow.ticket-implementation.start" }
     | { readonly type: "thread.workflow.ticket-implementation.update" }
+    | { readonly type: "thread.workflow.ticket-implementation.checkpoint" }
     | { readonly type: "thread.workflow.ticket-implementation.review.record" }
     | { readonly type: "thread.workflow.ticket-implementation.correction.start" }
   >;
@@ -1041,7 +1185,8 @@ function workflowTicketImplementationEventBase(input: {
   readonly implementation: WorkflowTicketImplementation;
   readonly eventType:
     | "thread.workflow-ticket-implementation-requested"
-    | "thread.workflow-ticket-implementation-updated";
+    | "thread.workflow-ticket-implementation-updated"
+    | "thread.workflow-ticket-implementation-checkpointed";
 }): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> {
   return withEventBase({
     aggregateKind: "thread",
@@ -1077,6 +1222,41 @@ function incrementWorkflowVersion(attachment: WorkflowAttachment): WorkflowAttac
     ...attachment,
     workflowVersion: (attachment.workflowVersion ?? 0) + 1,
   };
+}
+
+function workflowAutomationEvent(input: {
+  readonly command: {
+    readonly commandId: CommandId;
+    readonly threadId: ThreadId;
+    readonly createdAt: string;
+  };
+  readonly attachment: WorkflowAttachment;
+  readonly eventType:
+    | "thread.workflow-run-started"
+    | "thread.workflow-run-draining"
+    | "thread.workflow-run-paused"
+    | "thread.workflow-run-resumed"
+    | "thread.workflow-node-held"
+    | "thread.workflow-node-released";
+}): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> {
+  return withEventBase({
+    aggregateKind: "thread",
+    aggregateId: input.command.threadId,
+    occurredAt: input.command.createdAt,
+    commandId: input.command.commandId,
+  }).pipe(
+    Effect.map(
+      (eventBase) =>
+        ({
+          ...eventBase,
+          type: input.eventType,
+          payload: {
+            threadId: input.command.threadId,
+            attachment: input.attachment,
+          },
+        }) as PlannedOrchestrationEvent,
+    ),
+  );
 }
 
 function workflowTicketBatchValidation(batch: WorkflowTicketBatch): string | null {
@@ -2793,6 +2973,252 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.workflow.run.start": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Starting a Workflow Run requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Starting a Workflow Run requires the current Workflow Projection version.",
+        });
+      }
+      if (hasPendingWorkflowStaleness(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The Workflow Run cannot start while upstream workflow staleness is unresolved.",
+        });
+      }
+      const status = workflowAutomationStatus(attachment);
+      if (status === "running") {
+        return yield* workflowAutomationEvent({
+          command,
+          attachment,
+          eventType: "thread.workflow-run-started",
+        });
+      }
+      if (status !== "idle") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A draining or paused Workflow Run must use Resume Workflow Run.",
+        });
+      }
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: refreshTicketImplementationAvailability(
+          incrementWorkflowVersion({
+            ...attachment,
+            workflowRun: {
+              ...workflowRun,
+              automationStatus: "running",
+            },
+          }),
+        ),
+        eventType: "thread.workflow-run-started",
+      });
+    }
+
+    case "thread.workflow.run.pause": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Pausing a Workflow Run requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Pausing a Workflow Run requires the current Workflow Projection version.",
+        });
+      }
+      const status = workflowAutomationStatus(attachment);
+      if (status === "idle") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An idle Workflow Run cannot be paused before it starts.",
+        });
+      }
+      if (status === "paused") {
+        return yield* workflowAutomationEvent({
+          command,
+          attachment,
+          eventType: "thread.workflow-run-paused",
+        });
+      }
+      if (status === "draining") {
+        return yield* workflowAutomationEvent({
+          command,
+          attachment,
+          eventType: "thread.workflow-run-draining",
+        });
+      }
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: refreshTicketImplementationAvailability(
+          incrementWorkflowVersion({
+            ...attachment,
+            workflowRun: {
+              ...workflowRun,
+              automationStatus: "draining",
+            },
+          }),
+        ),
+        eventType: "thread.workflow-run-draining",
+      });
+    }
+
+    case "thread.workflow.run.resume": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Resuming a Workflow Run requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Resuming a Workflow Run requires the current Workflow Projection version.",
+        });
+      }
+      if (hasPendingWorkflowStaleness(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The Workflow Run cannot resume while upstream workflow staleness is unresolved.",
+        });
+      }
+      if (workflowAutomationStatus(attachment) === "running") {
+        return yield* workflowAutomationEvent({
+          command,
+          attachment,
+          eventType: "thread.workflow-run-resumed",
+        });
+      }
+      if (workflowAutomationStatus(attachment) === "idle") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An idle Workflow Run must use Start Workflow Run before it can be resumed.",
+        });
+      }
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: refreshTicketImplementationAvailability(
+          incrementWorkflowVersion({
+            ...attachment,
+            workflowRun: {
+              ...workflowRun,
+              automationStatus: "running",
+            },
+          }),
+        ),
+        eventType: "thread.workflow-run-resumed",
+      });
+    }
+
+    case "thread.workflow.run.drain.complete": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Completing a Workflow Run drain requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Completing a Workflow Run drain requires the current Workflow Projection version.",
+        });
+      }
+      if (workflowAutomationStatus(attachment) !== "draining") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a draining Workflow Run can complete its drain.",
+        });
+      }
+      if (
+        workflowTicketImplementations(attachment).some((implementation) =>
+          ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Workflow Run cannot finish draining while Ticket Implementations are active.",
+        });
+      }
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: refreshTicketImplementationAvailability(
+          incrementWorkflowVersion({
+            ...attachment,
+            workflowRun: {
+              ...workflowRun,
+              automationStatus: "paused",
+            },
+          }),
+        ),
+        eventType: "thread.workflow-run-paused",
+      });
+    }
+
+    case "thread.workflow.node.hold":
+    case "thread.workflow.node.release": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment?.workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Scheduling Holds require a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Changing a Scheduling Hold requires the current Workflow Projection version.",
+        });
+      }
+      const graph = attachment.workflowGraph;
+      if (
+        graph === undefined ||
+        !graph.nodes.some((node) => node.kind === "ticket" && node.id === command.ticketNodeId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Scheduling Hold must target a current ticket in the Workflow Graph.",
+        });
+      }
+      const held = command.type === "thread.workflow.node.hold";
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          workflowGraph: {
+            ...graph,
+            nodes: graph.nodes.map((node) =>
+              node.kind === "ticket" && node.id === command.ticketNodeId ? { ...node, held } : node,
+            ),
+          },
+        }),
+      );
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: nextAttachment,
+        eventType: held ? "thread.workflow-node-held" : "thread.workflow-node-released",
+      });
+    }
+
     case "thread.workflow.artifacts.view": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const attachment = thread.workflowAttachment;
@@ -3202,6 +3628,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             "Ticket Implementation cannot start while the attached Workstream has unresolved upstream staleness.",
         });
       }
+      if (
+        command.dispatchMode === "automatic" &&
+        workflowAutomationStatus(attachment) !== "running"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Automatic Ticket Implementation dispatch requires a running Workflow Run.",
+        });
+      }
 
       const existing = workflowTicketImplementations(attachment).find(
         (implementation) => implementation.actionIdentity === command.actionIdentity,
@@ -3219,6 +3654,16 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           implementation: existing,
           eventType: "thread.workflow-ticket-implementation-requested",
         });
+      }
+
+      if (command.dispatchMode === "automatic") {
+        const capacity = automaticDispatchCapacity(readModel, attachment);
+        if (!capacity.available) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: capacity.reason ?? "Automatic Ticket Implementation capacity is unavailable.",
+          });
+        }
       }
 
       const currentWorkflowVersion = attachment.workflowVersion ?? 0;
@@ -3268,14 +3713,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (
         trackerTicket.state !== "open" ||
-        trackerTicket.blockedBy.length > 0 ||
+        !canonicalWorkflowBlockersIntegrated(attachment, trackerTicket.blockedBy) ||
         trackerTicket.includedInRun !== true ||
         trackerTicket.body === undefined
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail:
-            "Only an open, unblocked, in-scope Executable Node with exact acceptance criteria may start.",
+            "Only an open, Integrated-blocker-free, in-scope Executable Node with exact acceptance criteria may start.",
         });
       }
       const active = workflowTicketImplementations(attachment).find(
@@ -3329,6 +3774,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         title: graphTicket.title,
         actionIdentity: command.actionIdentity,
         status: "dispatching",
+        dispatchMode: command.dispatchMode ?? "user",
         originThreadId: command.threadId,
         implementationThreadId: null,
         worktreePath: null,
@@ -3370,6 +3816,64 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         attachment: nextAttachment,
         implementation,
         eventType: "thread.workflow-ticket-implementation-requested",
+      });
+    }
+
+    case "thread.workflow.ticket-implementation.checkpoint": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation checkpoint requires an existing implementation.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation checkpoint has a stale Workstream version.",
+        });
+      }
+      if (current.status === "checkpointed") {
+        return yield* workflowTicketImplementationEventBase({
+          command,
+          attachment,
+          implementation: current,
+          eventType: "thread.workflow-ticket-implementation-checkpointed",
+        });
+      }
+      if (current.status !== "implementing" && current.status !== "reviewing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A Ticket Implementation can reach a Workflow Checkpoint only while implementing or reviewing.",
+        });
+      }
+      const implementation: WorkflowTicketImplementation = {
+        ...current,
+        status: "checkpointed",
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === command.implementationId ? implementation : candidate,
+          ),
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-checkpointed",
       });
     }
 

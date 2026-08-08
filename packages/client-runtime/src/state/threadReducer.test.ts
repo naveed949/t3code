@@ -854,6 +854,33 @@ describe("applyThreadDetailEvent", () => {
         if (ticketingFailed.kind === "updated") {
           expect(ticketingFailed.thread.workflowAttachment).toBe(attachment);
         }
+
+        const runStarted = applyThreadDetailEvent(baseThread, {
+          ...baseEventFields,
+          sequence: 18,
+          occurredAt: "2026-04-01T14:03:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.workflow-run-started",
+          payload: { threadId: ThreadId.make("thread-1"), attachment },
+        });
+        expect(runStarted.kind).toBe("updated");
+        if (runStarted.kind === "updated") {
+          expect(runStarted.thread.workflowAttachment).toBe(attachment);
+          const checkpointed = applyThreadDetailEvent(runStarted.thread, {
+            ...baseEventFields,
+            sequence: 19,
+            occurredAt: "2026-04-01T14:04:00.000Z",
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make("thread-1"),
+            type: "thread.workflow-ticket-implementation-checkpointed",
+            payload: { threadId: ThreadId.make("thread-1"), attachment },
+          });
+          expect(checkpointed.kind).toBe("updated");
+          if (checkpointed.kind === "updated") {
+            expect(checkpointed.thread.workflowAttachment).toBe(attachment);
+          }
+        }
       }
     });
   });
