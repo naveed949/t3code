@@ -4,6 +4,7 @@ import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as TxRef from "effect/TxRef";
 
 import {
   WorkflowTicketImplementationReactor,
@@ -19,6 +20,10 @@ type WorkflowTicketImplementationEvent = Extract<
       | "thread.workflow-ticket-implementation-requested"
       | "thread.workflow-ticket-implementation-updated"
       | "thread.workflow-ticket-implementation-recovery-requested"
+      | "thread.workflow-ticket-implementation-checkpointed"
+      | "thread.workflow-run-started"
+      | "thread.workflow-run-resumed"
+      | "thread.workflow-run-draining"
       | "thread.session-set"
       | "thread.reverted"
       | "thread.turn-start-requested";
@@ -28,6 +33,7 @@ type WorkflowTicketImplementationEvent = Extract<
 export const makeWorkflowTicketImplementationReactor = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const processEvent = yield* makeWorkflowTicketImplementationProcessor;
+  const seenSequence = yield* TxRef.make(yield* orchestrationEngine.latestSequence);
   const processEventSafely = Effect.fn("WorkflowTicketImplementationReactor.processEventSafely")(
     function* (event: WorkflowTicketImplementationEvent) {
       yield* processEvent(event);
@@ -48,21 +54,45 @@ export const makeWorkflowTicketImplementationReactor = Effect.gen(function* () {
   const start: WorkflowTicketImplementationReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
-        event.type === "thread.workflow-ticket-implementation-requested" ||
-        event.type === "thread.workflow-ticket-implementation-updated" ||
-        event.type === "thread.workflow-ticket-implementation-recovery-requested" ||
-        event.type === "thread.session-set" ||
-        event.type === "thread.reverted" ||
-        event.type === "thread.turn-start-requested"
-          ? worker.enqueue(event)
-          : Effect.void,
+        Effect.gen(function* () {
+          if (
+            event.type === "thread.workflow-ticket-implementation-requested" ||
+            event.type === "thread.workflow-ticket-implementation-updated" ||
+            event.type === "thread.workflow-ticket-implementation-recovery-requested" ||
+            event.type === "thread.workflow-ticket-implementation-checkpointed" ||
+            event.type === "thread.workflow-run-started" ||
+            event.type === "thread.workflow-run-resumed" ||
+            event.type === "thread.workflow-run-draining" ||
+            event.type === "thread.session-set" ||
+            event.type === "thread.reverted" ||
+            event.type === "thread.turn-start-requested"
+          ) {
+            yield* worker.enqueue(event);
+          }
+          yield* TxRef.update(seenSequence, (sequence) => Math.max(sequence, event.sequence)).pipe(
+            Effect.tx,
+          );
+        }),
       ),
     );
+    yield* Effect.yieldNow;
+  });
+
+  const drain: WorkflowTicketImplementationReactorShape["drain"] = Effect.gen(function* () {
+    while (true) {
+      const targetSequence = yield* orchestrationEngine.latestSequence;
+      yield* TxRef.get(seenSequence).pipe(
+        Effect.tap((sequence) => (sequence < targetSequence ? Effect.txRetry : Effect.void)),
+        Effect.tx,
+      );
+      yield* worker.drain;
+      if ((yield* orchestrationEngine.latestSequence) <= targetSequence) return;
+    }
   });
 
   return {
     start,
-    drain: worker.drain,
+    drain,
   } satisfies WorkflowTicketImplementationReactorShape;
 });
 

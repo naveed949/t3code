@@ -21,4 +21,20 @@ describe("parseWorkflowTicketImplementationReviewResult", () => {
       null,
     );
   });
+
+  it("retains the repository or ticket specification grounding of a must-fix finding", () => {
+    expect(
+      parseWorkflowTicketImplementationReviewResult(
+        '<t3-ticket-implementation-review-result>{"status":"must-fix","summary":"The review found one blocking issue.","findings":[{"severity":"must-fix","source":"ticket-specification","summary":"The implementation misses the required receipt boundary."}],"validation":[{"name":"focused tests","status":"passed"}]}</t3-ticket-implementation-review-result>',
+      ),
+    ).toMatchObject({
+      findings: [
+        {
+          severity: "must-fix",
+          source: "ticket-specification",
+          summary: "The implementation misses the required receipt boundary.",
+        },
+      ],
+    });
+  });
 });

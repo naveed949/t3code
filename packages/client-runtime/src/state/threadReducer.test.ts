@@ -794,6 +794,45 @@ describe("applyThreadDetailEvent", () => {
           unreadArtifactCount: 1,
           updatedAt: "2026-04-01T14:00:00.000Z",
         },
+        ticketImplementations: [
+          {
+            id: "implementation:checkpointed",
+            workstreamId: WorkstreamId.make("workstream:origin"),
+            nodeId: "ticket:37",
+            ticketKey: "T3-37",
+            ticketNumber: 37,
+            title: "Implement the workflow",
+            actionIdentity: "ticket-implementation:37",
+            status: "checkpointed",
+            originThreadId: ThreadId.make("thread-1"),
+            implementationThreadId: ThreadId.make("implementation-thread"),
+            worktreePath: "/tmp/t3-workflow",
+            branch: "codex/workflow/ticket-37",
+            fixedPoint: "fixed-point-37",
+            acceptanceCriteria: "The workflow implementation meets its acceptance criteria.",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            implementSkill: {
+              name: "implement",
+              path: "/skills/implement",
+              contentDigest:
+                "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            },
+            reviewSkill: {
+              name: "code-review",
+              path: "/skills/code-review",
+              contentDigest:
+                "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            },
+            implementationSkillRunId: null,
+            reviewSkillRunId: null,
+            validation: [],
+            diff: null,
+            review: null,
+            failure: null,
+            startedAt: "2026-04-01T14:00:00.000Z",
+            updatedAt: "2026-04-01T14:00:00.000Z",
+          },
+        ],
         attachedAt: "2026-04-01T00:00:00.000Z",
       };
       const synchronized = applyThreadDetailEvent(baseThread, {
@@ -853,6 +892,37 @@ describe("applyThreadDetailEvent", () => {
         expect(ticketingFailed.kind).toBe("updated");
         if (ticketingFailed.kind === "updated") {
           expect(ticketingFailed.thread.workflowAttachment).toBe(attachment);
+        }
+
+        const runStarted = applyThreadDetailEvent(baseThread, {
+          ...baseEventFields,
+          sequence: 18,
+          occurredAt: "2026-04-01T14:03:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.workflow-run-started",
+          payload: { threadId: ThreadId.make("thread-1"), attachment },
+        });
+        expect(runStarted.kind).toBe("updated");
+        if (runStarted.kind === "updated") {
+          expect(runStarted.thread.workflowAttachment).toBe(attachment);
+          const checkpointed = applyThreadDetailEvent(runStarted.thread, {
+            ...baseEventFields,
+            sequence: 19,
+            occurredAt: "2026-04-01T14:04:00.000Z",
+            aggregateKind: "thread",
+            aggregateId: ThreadId.make("thread-1"),
+            type: "thread.workflow-ticket-implementation-checkpointed",
+            payload: {
+              threadId: ThreadId.make("thread-1"),
+              implementation: attachment.ticketImplementations![0]!,
+              attachment,
+            },
+          });
+          expect(checkpointed.kind).toBe("updated");
+          if (checkpointed.kind === "updated") {
+            expect(checkpointed.thread.workflowAttachment).toBe(attachment);
+          }
         }
       }
     });

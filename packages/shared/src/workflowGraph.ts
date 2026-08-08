@@ -481,6 +481,17 @@ function trackerTicketNodeId(ticket: WorkflowTrackerProjection["tickets"][number
   return ticket.key === null ? ticketNodeId(`tracker:${ticket.number}`) : ticketNodeId(ticket.key);
 }
 
+/**
+ * A closed tracker row is not enough to release a dependent Ticket Frontier
+ * node. The integration stage must also attest that reviewed changes reached
+ * the Workstream Baseline and that tracker synchronization observed it.
+ */
+export function isIntegratedWorkflowTrackerTicket(
+  ticket: WorkflowTrackerProjection["tickets"][number],
+): boolean {
+  return ticket.state === "closed" && ticket.integration?.status === "integrated";
+}
+
 /** Materialize tracker-owned ticket identities without granting scope to later tickets. */
 export function completeWorkflowTicketing(input: {
   readonly attachment: WorkflowAttachment;

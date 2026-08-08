@@ -44,6 +44,7 @@ import {
   ThreadWorkflowAttachedPayload,
   ThreadWorkflowRunPreflightedPayload,
   ThreadWorkflowRunConfirmedPayload,
+  ThreadWorkflowRunAutomationUpdatedPayload,
   ThreadWorkflowArtifactAcknowledgedPayload,
   ThreadWorkflowAttachmentHintDismissedPayload,
   ThreadWorkflowAttachmentHintedPayload,
@@ -1048,6 +1049,27 @@ export function projectEvent(
         })),
       );
 
+    case "thread.workflow-run-started":
+    case "thread.workflow-run-draining":
+    case "thread.workflow-run-paused":
+    case "thread.workflow-run-resumed":
+    case "thread.workflow-node-held":
+    case "thread.workflow-node-released":
+      return decodeForEvent(
+        ThreadWorkflowRunAutomationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
     case "thread.workflow-synchronized":
       return decodeForEvent(
         ThreadWorkflowSynchronizedPayload,
@@ -1305,6 +1327,7 @@ export function projectEvent(
       );
 
     case "thread.workflow-ticket-implementation-updated":
+    case "thread.workflow-ticket-implementation-checkpointed":
       return decodeForEvent(
         ThreadWorkflowTicketImplementationUpdatedPayload,
         event.payload,

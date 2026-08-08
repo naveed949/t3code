@@ -448,6 +448,14 @@ export const WorkflowRunPreview = Schema.Struct({
 });
 export type WorkflowRunPreview = typeof WorkflowRunPreview.Type;
 
+export const WorkflowRunAutomationStatus = Schema.Literals([
+  "idle",
+  "running",
+  "draining",
+  "paused",
+]);
+export type WorkflowRunAutomationStatus = typeof WorkflowRunAutomationStatus.Type;
+
 export const WorkflowRun = Schema.Struct({
   configuration: WorkflowRunConfiguration,
   status: Schema.Literal("confirmed"),
@@ -457,6 +465,9 @@ export const WorkflowRun = Schema.Struct({
   // replay cannot silently create a second dispatch for the same run.
   dispatchIdentity: CommandId,
   immutableAtDispatch: IsoDateTime,
+  // Older confirmed runs remain readable and are treated as idle until an
+  // explicit Run workflow operation starts automation.
+  automationStatus: Schema.optional(WorkflowRunAutomationStatus),
 });
 export type WorkflowRun = typeof WorkflowRun.Type;
 
@@ -655,6 +666,14 @@ export const WorkflowTrackerTicket = Schema.Struct({
   blockedBy: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
   blocks: Schema.Array(Schema.Int.check(Schema.isGreaterThan(0))),
   includedInRun: Schema.Boolean,
+  integration: Schema.optional(
+    Schema.Struct({
+      status: Schema.Literal("integrated"),
+      baseline: TrimmedNonEmptyString,
+      reviewedAt: IsoDateTime,
+      synchronizedAt: IsoDateTime,
+    }),
+  ),
 });
 export type WorkflowTrackerTicket = typeof WorkflowTrackerTicket.Type;
 
@@ -729,11 +748,18 @@ export const WorkflowTicketImplementationStatus = Schema.Literals([
   "stopping",
   "needs-recovery",
   "cancelled",
+  "checkpointed",
   "reviewed",
   "needs-correction",
+  "needs-decision",
   "failed",
 ]);
 export type WorkflowTicketImplementationStatus = typeof WorkflowTicketImplementationStatus.Type;
+export const WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES = 4;
+
+export const WorkflowTicketImplementationDispatchMode = Schema.Literals(["user", "automatic"]);
+export type WorkflowTicketImplementationDispatchMode =
+  typeof WorkflowTicketImplementationDispatchMode.Type;
 
 export const WorkflowTicketImplementationAvailability = Schema.Struct({
   status: Schema.Literals([
@@ -743,8 +769,10 @@ export const WorkflowTicketImplementationAvailability = Schema.Struct({
     "stopping",
     "needs-recovery",
     "cancelled",
+    "checkpointed",
     "reviewed",
     "needs-correction",
+    "needs-decision",
     "failed",
   ]),
   canStart: Schema.Boolean,
@@ -786,11 +814,18 @@ export type WorkflowDiffEvidence = typeof WorkflowDiffEvidence.Type;
 
 export const WorkflowCodeReviewFinding = Schema.Struct({
   severity: Schema.Literals(["must-fix", "suggestion"]),
+  // Older review receipts may omit grounding. Such findings remain visible,
+  // but only explicitly grounded findings can block integration.
+  source: Schema.optional(Schema.Literals(["repository-standards", "ticket-specification"])),
   summary: TrimmedNonEmptyString,
   file: Schema.optional(TrimmedNonEmptyString),
   line: Schema.optional(PositiveInt),
 });
 export type WorkflowCodeReviewFinding = typeof WorkflowCodeReviewFinding.Type;
+
+export function isBlockingWorkflowCodeReviewFinding(finding: WorkflowCodeReviewFinding): boolean {
+  return finding.severity === "must-fix" && finding.source !== undefined;
+}
 
 const WorkflowTicketImplementationAcceptanceCriteria = Schema.String.check(
   Schema.isMaxLength(32_000),
@@ -809,6 +844,17 @@ export const WorkflowCodeReviewEvidence = Schema.Struct({
 });
 export type WorkflowCodeReviewEvidence = typeof WorkflowCodeReviewEvidence.Type;
 
+export const WorkflowCorrectionCycle = Schema.Struct({
+  cycle: PositiveInt,
+  findings: WorkflowTicketImplementationReviewFindings,
+  review: WorkflowCodeReviewEvidence,
+  startedAt: IsoDateTime,
+});
+export type WorkflowCorrectionCycle = typeof WorkflowCorrectionCycle.Type;
+const WorkflowTicketImplementationCorrectionCycles = Schema.Array(WorkflowCorrectionCycle).check(
+  Schema.isMaxLength(WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES),
+);
+
 /**
  * Projection-owned evidence for one ticket implementation. A `reviewed`
  * implementation is deliberately not a completed ticket: integration and
@@ -823,6 +869,7 @@ export const WorkflowTicketImplementation = Schema.Struct({
   title: TrimmedNonEmptyString,
   actionIdentity: TrimmedNonEmptyString,
   status: WorkflowTicketImplementationStatus,
+  dispatchMode: Schema.optional(WorkflowTicketImplementationDispatchMode),
   originThreadId: ThreadId,
   implementationThreadId: Schema.NullOr(ThreadId),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
@@ -840,6 +887,7 @@ export const WorkflowTicketImplementation = Schema.Struct({
   recoveryPhase: Schema.optional(Schema.Literals(["implementation", "review"])),
   recoveryAttempt: Schema.optional(NonNegativeInt),
   recoveryCheckpointTurnCount: Schema.optional(NonNegativeInt),
+  correctionCycles: Schema.optional(WorkflowTicketImplementationCorrectionCycles),
   failure: Schema.NullOr(TrimmedNonEmptyString),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
@@ -1631,6 +1679,53 @@ const ThreadWorkflowRunConfirmCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowRunStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowRunPauseCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.pause"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowRunResumeCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.resume"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowNodeHoldCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.node.hold"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  ticketNodeId: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowNodeReleaseCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.node.release"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  ticketNodeId: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowArtifactsViewCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.artifacts.view"),
   commandId: CommandId,
@@ -1688,6 +1783,7 @@ const ThreadWorkflowTicketImplementationStartCommand = Schema.Struct({
   ticketNodeId: TrimmedNonEmptyString,
   actionIdentity: TrimmedNonEmptyString,
   expectedWorkstreamVersion: NonNegativeInt,
+  dispatchMode: Schema.optional(WorkflowTicketImplementationDispatchMode),
   confirmed: Schema.Literal(true),
   createdAt: IsoDateTime,
 });
@@ -1771,6 +1867,11 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowAttachCommand,
   ThreadWorkflowRunPreflightCommand,
   ThreadWorkflowRunConfirmCommand,
+  ThreadWorkflowRunStartCommand,
+  ThreadWorkflowRunPauseCommand,
+  ThreadWorkflowRunResumeCommand,
+  ThreadWorkflowNodeHoldCommand,
+  ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
@@ -1812,6 +1913,11 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowAttachCommand,
   ThreadWorkflowRunPreflightCommand,
   ThreadWorkflowRunConfirmCommand,
+  ThreadWorkflowRunStartCommand,
+  ThreadWorkflowRunPauseCommand,
+  ThreadWorkflowRunResumeCommand,
+  ThreadWorkflowNodeHoldCommand,
+  ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
   ThreadWorkflowArtifactAcknowledgeCommand,
   ThreadWorkflowStaleResolveCommand,
@@ -1921,6 +2027,23 @@ const ThreadWorkflowTicketImplementationUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketImplementationCheckpointCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.checkpoint"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowRunDrainCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.run.drain.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.ticket-implementation.review.record"),
   commandId: CommandId,
@@ -1929,6 +2052,17 @@ const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
   expectedWorkstreamVersion: NonNegativeInt,
   review: WorkflowCodeReviewEvidence,
   validation: Schema.Array(WorkflowValidationEvidence),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowTicketImplementationCorrectionStartCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.correction.start"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  correctionCycle: PositiveInt,
+  findings: WorkflowTicketImplementationReviewFindings,
+  expectedWorkstreamVersion: NonNegativeInt,
   createdAt: IsoDateTime,
 });
 
@@ -1979,8 +2113,11 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadRevertCompleteCommand,
   ThreadWayfinderPublicationUpdateCommand,
   ThreadWorkflowTicketingPublicationUpdateCommand,
+  ThreadWorkflowRunDrainCompleteCommand,
   ThreadWorkflowTicketImplementationUpdateCommand,
+  ThreadWorkflowTicketImplementationCheckpointCommand,
   ThreadWorkflowTicketImplementationReviewRecordCommand,
+  ThreadWorkflowTicketImplementationCorrectionStartCommand,
   ThreadWayfinderMutationUpdateCommand,
   ThreadWayfinderReconciliationUpdateCommand,
   ThreadWayfinderResearchUpdateCommand,
@@ -2027,6 +2164,12 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-attached",
   "thread.workflow-run-preflighted",
   "thread.workflow-run-confirmed",
+  "thread.workflow-run-started",
+  "thread.workflow-run-draining",
+  "thread.workflow-run-paused",
+  "thread.workflow-run-resumed",
+  "thread.workflow-node-held",
+  "thread.workflow-node-released",
   "thread.workflow-synchronized",
   "thread.workflow-artifacts-viewed",
   "thread.workflow-artifact-acknowledged",
@@ -2045,6 +2188,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-ticket-implementation-requested",
   "thread.workflow-ticket-implementation-updated",
   "thread.workflow-ticket-implementation-recovery-requested",
+  "thread.workflow-ticket-implementation-checkpointed",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
   "thread.session-stop-requested",
@@ -2308,6 +2452,11 @@ export const ThreadWorkflowRunConfirmedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowRunAutomationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
 export const ThreadWorkflowSynchronizedPayload = Schema.Struct({
   threadId: ThreadId,
   attachment: WorkflowAttachment,
@@ -2412,6 +2561,8 @@ export const ThreadWorkflowTicketImplementationRecoveryRequestedPayload = Schema
   attachment: WorkflowAttachment,
   createdAt: IsoDateTime,
 });
+export const ThreadWorkflowTicketImplementationCheckpointedPayload =
+  ThreadWorkflowTicketImplementationUpdatedPayload;
 
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
@@ -2641,6 +2792,36 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-started"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-draining"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-paused"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-run-resumed"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-node-held"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-node-released"),
+    payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.workflow-synchronized"),
     payload: ThreadWorkflowSynchronizedPayload,
   }),
@@ -2728,6 +2909,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-ticket-implementation-recovery-requested"),
     payload: ThreadWorkflowTicketImplementationRecoveryRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-ticket-implementation-checkpointed"),
+    payload: ThreadWorkflowTicketImplementationCheckpointedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

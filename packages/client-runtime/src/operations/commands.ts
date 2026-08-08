@@ -55,6 +55,11 @@ export type DismissWorkflowAttachmentHintInput =
 export type AttachWorkflowInput = CommandInput<"thread.workflow.attach">;
 export type PreflightWorkflowRunInput = CommandInput<"thread.workflow.run.preflight">;
 export type ConfirmWorkflowRunInput = CommandInput<"thread.workflow.run.confirm">;
+export type StartWorkflowRunInput = CommandInput<"thread.workflow.run.start">;
+export type PauseWorkflowRunInput = CommandInput<"thread.workflow.run.pause">;
+export type ResumeWorkflowRunInput = CommandInput<"thread.workflow.run.resume">;
+export type HoldWorkflowNodeInput = CommandInput<"thread.workflow.node.hold">;
+export type ReleaseWorkflowNodeInput = CommandInput<"thread.workflow.node.release">;
 export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
 export type AcknowledgeWorkflowArtifactInput = CommandInput<"thread.workflow.artifact.acknowledge">;
 export type ResolveWorkflowStaleInput = CommandInput<"thread.workflow.stale.resolve">;
@@ -413,6 +418,66 @@ export const confirmWorkflowRun: (input: ConfirmWorkflowRunInput) => CommandEffe
   return yield* dispatch({
     ...input,
     type: "thread.workflow.run.confirm",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const startWorkflowRun: (input: StartWorkflowRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.startWorkflowRun",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.run.start",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const pauseWorkflowRun: (input: PauseWorkflowRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.pauseWorkflowRun",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.run.pause",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const resumeWorkflowRun: (input: ResumeWorkflowRunInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.resumeWorkflowRun",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.run.resume",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const holdWorkflowNode: (input: HoldWorkflowNodeInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.holdWorkflowNode",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.node.hold",
+    commandId: metadata.commandId,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const releaseWorkflowNode: (input: ReleaseWorkflowNodeInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.releaseWorkflowNode",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.node.release",
     commandId: metadata.commandId,
     createdAt: metadata.createdAt,
   });

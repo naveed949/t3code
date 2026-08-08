@@ -186,6 +186,12 @@ function nodeAttention(input: {
       label: `Ticket #${input.ticketNumber} was cancelled and does not satisfy required work.`,
     };
   }
+  if (input.ticketImplementation?.status === "needs-decision") {
+    return {
+      kind: "decision",
+      label: `Ticket #${input.ticketNumber} needs a decision after the automatic correction-cycle limit was reached.`,
+    };
+  }
   if (ticketNumberFromMutation(input.mutation) === input.ticketNumber) {
     return (
       mutationAttention(input.mutation) ?? { kind: "none", label: "No node attention required." }
@@ -218,6 +224,9 @@ function nodeState(input: {
     return { kind: "blocked", label: "Blocked" };
   }
   if (input.ticket.state === "closed") return { kind: "completed", label: "Completed" };
+  if (input.ticketImplementation?.status === "needs-decision") {
+    return { kind: "blocked", label: "Blocked" };
+  }
   if (
     input.ticketImplementation?.status === "dispatching" ||
     input.ticketImplementation?.status === "implementing" ||
