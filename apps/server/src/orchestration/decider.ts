@@ -433,9 +433,14 @@ type DecideOrchestrationCommandResult =
 const WORKFLOW_RUN_AUTHORITY = {
   createWorktree: true,
   runProvider: true,
-  mutateTracker: false,
+  mutateTracker: true,
   pushBaseline: false,
   createDraftPullRequest: false,
+} as const;
+
+const WORKFLOW_RUN_READ_ONLY_AUTHORITY = {
+  ...WORKFLOW_RUN_AUTHORITY,
+  mutateTracker: false,
 } as const;
 
 function workflowRunBlockers(
@@ -457,8 +462,13 @@ function workflowRunBlockers(
   if (configuration.executionLimit > configuration.environmentAutomationCapacity) {
     blockers.push("Execution Limit exceeds Environment Automation Capacity.");
   }
-  if (stableStringify(configuration.authority) !== stableStringify(WORKFLOW_RUN_AUTHORITY)) {
-    blockers.push("Run authority does not match the server-granted Workflow Run authority.");
+  if (
+    stableStringify(configuration.authority) !== stableStringify(WORKFLOW_RUN_AUTHORITY) &&
+    stableStringify(configuration.authority) !== stableStringify(WORKFLOW_RUN_READ_ONLY_AUTHORITY)
+  ) {
+    blockers.push(
+      "Run authority must request the server-supported worktree/provider/tracker capabilities without push or pull-request authority.",
+    );
   }
   if (!/^[0-9a-f]{40}$/i.test(configuration.fixedPoint)) {
     blockers.push("Fixed Point must be a full commit SHA.");
@@ -1007,6 +1017,7 @@ function ticketImplementationAvailability(input: {
       case "dispatching":
       case "implementing":
       case "reviewing":
+      case "integrating":
         return {
           status: "active",
           canStart: false,
@@ -1041,6 +1052,18 @@ function ticketImplementationAvailability(input: {
           status: "reviewed",
           canStart: false,
           reason: "Ticket Implementation is reviewed and awaits downstream integration.",
+        };
+      case "integration-failed":
+        return {
+          status: "integration-failed",
+          canStart: false,
+          reason: "Tracker synchronization failed after integration; retry tracker closure.",
+        };
+      case "integrated":
+        return {
+          status: "integrated",
+          canStart: false,
+          reason: "Ticket Implementation is integrated and tracker synchronization is confirmed.",
         };
       case "needs-correction":
         return {
@@ -1190,9 +1213,15 @@ function workflowTicketImplementationStatusTransitionAllowed(
     case "checkpointed":
       return false;
     case "reviewed":
+      return next === "integrating";
+    case "integrating":
+      return next === "integrating" || next === "integration-failed" || next === "integrated";
+    case "integration-failed":
+      return next === "integrating";
     case "needs-correction":
     case "needs-decision":
     case "failed":
+    case "integrated":
       return false;
   }
 }
@@ -1202,6 +1231,7 @@ function workflowTicketImplementationEventBase(input: {
     OrchestrationCommand,
     | { readonly type: "thread.workflow.ticket-implementation.start" }
     | { readonly type: "thread.workflow.ticket-implementation.update" }
+    | { readonly type: "thread.workflow.ticket-integration.retry" }
     | { readonly type: "thread.workflow.ticket-implementation.checkpoint" }
     | { readonly type: "thread.workflow.ticket-implementation.review.record" }
     | { readonly type: "thread.workflow.ticket-implementation.stop" }
@@ -3901,6 +3931,76 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
+    case "thread.workflow.ticket-integration.retry": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration retry requires an existing Ticket Implementation.",
+        });
+      }
+      if (attachment.workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration retry requires a confirmed Workflow Run.",
+        });
+      }
+      if (!attachment.workflowRun.configuration.authority.mutateTracker) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration retry requires tracker mutation authority.",
+        });
+      }
+      if (current.status !== "integration-failed" || current.integration?.status !== "failed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a failed integration can be retried.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration retry has a stale Workstream version.",
+        });
+      }
+      const integration = current.integration;
+      const implementation: WorkflowTicketImplementation = {
+        ...current,
+        status: "integrating",
+        integration: {
+          ...integration,
+          status: integration.failurePhase === "tracker" ? "tracker-closing" : "integrating",
+          failure: null,
+          failurePhase: null,
+          updatedAt: command.createdAt,
+        },
+        failure: null,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === command.implementationId ? implementation : candidate,
+          ),
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-updated",
+      });
+    }
+
     case "thread.workflow.ticket-implementation.checkpoint": {
       const thread = yield* requireThread({
         readModel,
@@ -4288,6 +4388,76 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             "Structured Code Review evidence must be recorded through the review command; an existing review may only be preserved unchanged.",
         });
       }
+      const integration = command.implementation.integration;
+      if (
+        ["integrating", "integration-failed", "integrated"].includes(
+          command.implementation.status,
+        ) &&
+        integration === undefined
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Integration statuses require server-owned integration evidence.",
+        });
+      }
+      if (
+        command.implementation.status === "integration-failed" &&
+        integration?.status !== "failed"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A failed integration status must preserve a retryable integration failure.",
+        });
+      }
+      if (
+        command.implementation.status === "integrating" &&
+        integration !== undefined &&
+        integration.status !== "integrating" &&
+        integration.status !== "tracker-closing"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An integrating Ticket Implementation must name its active integration phase.",
+        });
+      }
+      if (
+        command.implementation.status === "integrating" &&
+        !attachment.workflowRun?.configuration.authority.mutateTracker
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Tracker mutation authority is required before integration can start.",
+        });
+      }
+      if (
+        command.trackerProjection !== undefined &&
+        command.implementation.status !== "integrated"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Tracker synchronization can only be attached to an Integrated Ticket.",
+        });
+      }
+      if (command.implementation.status === "integrated") {
+        const trackerProjection = command.trackerProjection;
+        const trackerTicket = trackerProjection?.tickets.find(
+          (ticket) => ticket.number === current.ticketNumber,
+        );
+        if (
+          current.review?.status !== "passed" ||
+          current.validation.some((evidence) => evidence.status !== "passed") ||
+          integration?.status !== "integrated" ||
+          integration.baselineCommit === null ||
+          trackerProjection?.status !== "healthy" ||
+          trackerTicket?.state !== "closed"
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "An Integrated Ticket requires passed review, a baseline commit, and a healthy closed tracker projection.",
+          });
+        }
+      }
       if (
         !workflowTicketImplementationStatusTransitionAllowed(
           current.status,
@@ -4302,6 +4472,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const nextAttachment = refreshTicketImplementationAvailability(
         incrementWorkflowVersion({
           ...attachment,
+          ...(command.trackerProjection !== undefined
+            ? { trackerProjection: command.trackerProjection }
+            : {}),
           ticketImplementations: attachment.ticketImplementations!.map((implementation) =>
             implementation.id === command.implementationId
               ? command.implementation

@@ -1,8 +1,10 @@
 import { assert, describe, expect, it, vi } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { ChildProcessSpawner } from "effect/unstable/process";
 
 import { VcsRepositoryDetectionError } from "@t3tools/contracts";
+import type { VcsRepositoryIdentity } from "@t3tools/contracts";
 
 import * as GitManager from "./GitManager.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
@@ -23,7 +25,85 @@ function makeLayer(input: {
   );
 }
 
+function makeGitIntegrationLayer(input: {
+  readonly execute: GitVcsDriver.GitVcsDriver["Service"]["execute"];
+}) {
+  const repository = {} as VcsRepositoryIdentity;
+  const handle = {
+    kind: "git" as const,
+    repository,
+    driver: {},
+  } as unknown as VcsDriverRegistry.VcsDriverHandle;
+  return GitWorkflowService.layer.pipe(
+    Layer.provide(
+      Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+        detect: () => Effect.succeed(handle),
+        resolve: () => Effect.succeed(handle),
+      }),
+    ),
+    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ execute: input.execute })),
+    Layer.provide(Layer.mock(GitManager.GitManager)({})),
+  );
+}
+
 describe("GitWorkflowService", () => {
+  it.effect("merges a reviewed ticket branch into a clean Workstream Baseline", () => {
+    const commands: string[][] = [];
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => {
+        commands.push([...input.args]);
+        const stdout =
+          input.args[0] === "symbolic-ref"
+            ? "feature/development-workflow\n"
+            : input.args[0] === "rev-parse"
+              ? "merge-commit-sha\n"
+              : "";
+        return {
+          exitCode: ChildProcessSpawner.ExitCode(0),
+          stdout,
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const result = yield* workflow.integrateBranch({
+        cwd: "/repo",
+        targetBranch: "feature/development-workflow",
+        sourceBranch: "codex/ticket-37",
+      });
+
+      expect(result).toEqual({ commitSha: "merge-commit-sha" });
+      expect(commands).toEqual([
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["merge", "--no-ff", "--no-edit", "codex/ticket-37"],
+        ["rev-parse", "HEAD"],
+      ]);
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
+  it.effect("validates the integrated range at the fixed point", () => {
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => ({
+        exitCode: ChildProcessSpawner.ExitCode(0),
+        stdout: "",
+        stderr: "",
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }));
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      yield* workflow.validateIntegration({
+        cwd: "/repo",
+        fixedPoint: "2794a87560f910f1b6b5c59db1e2ac1bee9373b3",
+      });
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
   it.effect("returns an empty local status when no VCS repository is detected", () =>
     Effect.gen(function* () {
       const workflow = yield* GitWorkflowService.GitWorkflowService;

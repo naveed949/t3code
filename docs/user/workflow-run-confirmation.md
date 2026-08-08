@@ -8,6 +8,9 @@ The read-only preflight shows the exact Workflow Goal and Run Scope, the
 selected default provider and any undispatched node override, Required Skill
 availability, Fixed Point, Workstream Baseline, Remote Target, execution
 limit, environment capacity, and the authority that confirmation will grant.
+For the development workflow, confirmation authorizes tracker mutation so
+reviewed tickets can close and synchronize after baseline integration. Push
+and draft pull-request creation remain separate, ungranted approvals.
 
 The server re-discovers each selected provider's Required Skills and pins their
 content digests; client-provided capability claims are never trusted. It also

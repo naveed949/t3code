@@ -29,6 +29,7 @@ import {
   type StartWorkflowTicketImplementationInput,
   type StopWorkflowTicketImplementationInput,
   type RecoverWorkflowTicketImplementationInput,
+  type RetryWorkflowTicketIntegrationInput,
   type RevertThreadCheckpointInput,
   type SetThreadInteractionModeInput,
   type SetThreadRuntimeModeInput,
@@ -66,6 +67,7 @@ import {
   startWorkflowTicketImplementation,
   stopWorkflowTicketImplementation,
   recoverWorkflowTicketImplementation,
+  retryWorkflowTicketIntegration,
   revertThreadCheckpoint,
   setThreadInteractionMode,
   setThreadRuntimeMode,
@@ -107,6 +109,7 @@ export type {
   StartWorkflowTicketImplementationInput,
   StopWorkflowTicketImplementationInput,
   RecoverWorkflowTicketImplementationInput,
+  RetryWorkflowTicketIntegrationInput,
   RevertThreadCheckpointInput,
   SetThreadInteractionModeInput,
   SetThreadRuntimeModeInput,
@@ -340,6 +343,13 @@ export function createThreadEnvironmentAtoms<R, E>(
       label: "environment-data:commands:thread:recover-ticket-implementation",
       execute: (input: RecoverWorkflowTicketImplementationInput) =>
         recoverWorkflowTicketImplementation(input),
+      scheduler,
+      concurrency,
+    }),
+    retryTicketIntegration: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:retry-ticket-integration",
+      execute: (input: RetryWorkflowTicketIntegrationInput) =>
+        retryWorkflowTicketIntegration(input),
       scheduler,
       concurrency,
     }),

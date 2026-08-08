@@ -270,4 +270,82 @@ describe("deriveWayfinderWorkflowViewModel", () => {
     );
     expect(node?.accessibilityLabel).toContain("needs a decision");
   });
+
+  it("exposes tracker-closure recovery without replaying implementation", () => {
+    const implementation = {
+      id: "workflow-ticket-implementation:44",
+      workstreamId: WorkstreamId.make("workstream:release"),
+      nodeId: "ticket:44",
+      ticketKey: "choose-deployment",
+      ticketNumber: 44,
+      title: "Choose deployment",
+      actionIdentity: "client:implementation-44",
+      status: "integration-failed" as const,
+      originThreadId: ThreadId.make("workflow-origin:release"),
+      implementationThreadId: ThreadId.make("workflow-ticket-implementation-thread:44"),
+      worktreePath: "/tmp/workflow-ticket-44",
+      branch: "codex/workflow/ticket-44",
+      fixedPoint: "194ab170154225877be85c58fcdf615faed8a8f3",
+      acceptanceCriteria: "The implementation has structured review evidence.",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      implementSkill: {
+        name: "implement",
+        path: ".agents/skills/implement/SKILL.md",
+        contentDigest: `sha256:${"a".repeat(64)}`,
+      },
+      reviewSkill: {
+        name: "code-review",
+        path: ".agents/skills/code-review/SKILL.md",
+        contentDigest: `sha256:${"b".repeat(64)}`,
+      },
+      implementationSkillRunId: SkillRunId.make("skill-run:implement-44"),
+      reviewSkillRunId: SkillRunId.make("skill-run:review-44"),
+      validation: [],
+      diff: null,
+      review: null,
+      integration: {
+        status: "failed" as const,
+        baselineBranch: "feature/development-workflow",
+        baselineCommit: "integration-commit",
+        failurePhase: "tracker" as const,
+        failure: "Tracker closure failed.",
+        startedAt: "2026-01-04T00:00:00.000Z",
+        updatedAt: "2026-01-04T00:00:00.000Z",
+      },
+      failure: "Tracker closure failed.",
+      startedAt: "2026-01-04T00:00:00.000Z",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    } satisfies WorkflowTicketImplementation;
+    const workflowAttachment = {
+      originThreadId: ThreadId.make("workflow-origin:release"),
+      workstreamId: WorkstreamId.make("workstream:release"),
+      sourceSkillRunId: SkillRunId.make("skill-run:wayfinder-release"),
+      workflowGoal: "Ship the release.",
+      backfilledWayfinderData: {},
+      observationCursor: {
+        sourceSkillRunId: SkillRunId.make("skill-run:wayfinder-release"),
+        observedAt: "2026-01-04T00:00:00.000Z",
+      },
+      ticketImplementations: [implementation],
+      attachedAt: "2026-01-04T00:00:00.000Z",
+    } satisfies WorkflowAttachment;
+
+    const model = deriveWayfinderWorkflowViewModel({
+      map,
+      mutation: null,
+      research: null,
+      ticketThreads: [],
+      synchronization: null,
+      readiness: { ready: true, blockers: [] },
+      mutationsEnabled: true,
+      workflowAttachment,
+    });
+    const node = model.outline.find((candidate) => candidate.number === 44);
+    expect(node?.attention).toEqual({ kind: "recovery", label: "Tracker closure failed." });
+    expect(node?.allowedActions).toEqual(
+      expect.arrayContaining([
+        { id: "retry-ticket-integration", label: "Retry tracker closure", enabled: true },
+      ]),
+    );
+  });
 });

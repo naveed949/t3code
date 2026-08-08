@@ -40,6 +40,7 @@ import { WorkflowTicketImplementationReactor } from "../Services/WorkflowTicketI
 import { WorkflowTicketImplementationReactorLive } from "./WorkflowTicketImplementationReactor.ts";
 import * as IssueTracker from "../../nativeSkills/IssueTracker.ts";
 import * as GitWorkflowService from "../../git/GitWorkflowService.ts";
+import * as GitHubCli from "../../sourceControl/GitHubCli.ts";
 
 const orchestrationLayer = OrchestrationEngineLive.pipe(
   Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -133,7 +134,7 @@ const publishedTicketMap: WayfinderMapProjection = {
       state: "open",
       classification: "task",
       claimedBy: null,
-      blockedBy: [],
+      blockedBy: [37],
       blocks: [],
     },
   ],
@@ -146,8 +147,15 @@ const ticketTrackerRepository: IssueTracker.IssueTrackerRepository = {
   owner: "naveed949",
   name: "t3code",
 };
+let trackerMap = publishedTicketMap;
 const trackerCreatedIssues: number[] = [];
 const trackerLabels: string[] = [];
+const trackerClosedIssues: number[] = [];
+const trackerCloseAttempts: number[] = [];
+const integratedBranches: string[] = [];
+const validatedIntegrations: string[] = [];
+const integrationWorkspaces: string[] = [];
+let failTrackerClosureOnce = false;
 const fakeTicketTracker = IssueTracker.IssueTracker.of({
   resolveProjectRepository: () => Effect.succeed(ticketTrackerRepository),
   inspectCapabilities: () =>
@@ -159,8 +167,8 @@ const fakeTicketTracker = IssueTracker.IssueTracker.of({
       labels: ["ready-for-agent"],
     }),
   resolveIssue: () => Effect.succeed(null),
-  loadWayfinderMap: () => Effect.succeed({ kind: "loaded" as const, map: publishedTicketMap }),
-  reconcileWayfinderMap: () => Effect.succeed({ kind: "loaded" as const, map: publishedTicketMap }),
+  loadWayfinderMap: () => Effect.succeed({ kind: "loaded" as const, map: trackerMap }),
+  reconcileWayfinderMap: () => Effect.succeed({ kind: "loaded" as const, map: trackerMap }),
   claimIssue: () => Effect.succeed({ viewerLogin: "test" }),
   releaseIssue: () => Effect.void,
   ensureLabel: (input) => Effect.sync(() => void trackerLabels.push(input.name)),
@@ -183,7 +191,34 @@ const fakeTicketTracker = IssueTracker.IssueTracker.of({
   removeChild: () => Effect.void,
   removeBlockedBy: () => Effect.void,
   addIssueComment: () => Effect.void,
-  setIssueState: () => Effect.void,
+  setIssueState: ({ issueNumber, state }) =>
+    state !== "closed"
+      ? Effect.void
+      : failTrackerClosureOnce
+        ? Effect.sync(() => {
+            failTrackerClosureOnce = false;
+            trackerCloseAttempts.push(issueNumber);
+          }).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new GitHubCli.GitHubCliCommandError({
+                  command: "gh",
+                  cwd: "/tmp/t3-workflow-ticketing-projection",
+                  cause: new Error("tracker unavailable"),
+                }),
+              ),
+            ),
+          )
+        : Effect.sync(() => {
+            trackerCloseAttempts.push(issueNumber);
+            trackerClosedIssues.push(issueNumber);
+            trackerMap = {
+              ...trackerMap,
+              tickets: trackerMap.tickets.map((ticket) =>
+                ticket.number === issueNumber ? { ...ticket, state: "closed" as const } : ticket,
+              ),
+            };
+          }),
 });
 
 const ticketPublicationReceipts: OrchestrationRuntimeReceipt[] = [];
@@ -206,7 +241,14 @@ const ticketingEngineLayer = it.layer(
       Layer.mock(GitWorkflowService.GitWorkflowService)({
         listRefs: () =>
           Effect.succeed({
-            refs: [],
+            refs: [
+              {
+                name: "feature/development-workflow",
+                current: false,
+                isDefault: false,
+                worktreePath: "/tmp/t3-workflow-baseline",
+              },
+            ],
             isRepo: true,
             hasPrimaryRemote: true,
             nextCursor: null,
@@ -232,6 +274,17 @@ const ticketingEngineLayer = it.layer(
               deletions: 3,
             },
           }),
+        integrateBranch: ({ cwd, sourceBranch }) =>
+          Effect.sync(() => {
+            integrationWorkspaces.push(cwd);
+            integratedBranches.push(sourceBranch);
+            return { commitSha: "integration-baseline-commit" };
+          }),
+        validateIntegration: ({ cwd, fixedPoint: validationFixedPoint }) =>
+          Effect.sync(() => {
+            integrationWorkspaces.push(cwd);
+            validatedIntegrations.push(validationFixedPoint);
+          }),
       } satisfies Partial<GitWorkflowService.GitWorkflowService["Service"]>),
     ),
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -244,7 +297,10 @@ const ticketingEngineLayer = it.layer(
   ),
 );
 
-function workflowConfiguration(workstreamId: string): WorkflowRunConfiguration {
+function workflowConfiguration(
+  workstreamId: string,
+  mutateTracker = false,
+): WorkflowRunConfiguration {
   return {
     workflowGoal,
     runScope: [{ nodeId: `workflow:${workstreamId}`, label: "Workstream" }],
@@ -298,7 +354,7 @@ function workflowConfiguration(workstreamId: string): WorkflowRunConfiguration {
     authority: {
       createWorktree: true,
       runProvider: true,
-      mutateTracker: false,
+      mutateTracker,
       pushBaseline: false,
       createDraftPullRequest: false,
     },
@@ -609,6 +665,13 @@ ticketingEngineLayer(
 
           trackerCreatedIssues.length = 0;
           trackerLabels.length = 0;
+          trackerClosedIssues.length = 0;
+          trackerCloseAttempts.length = 0;
+          integratedBranches.length = 0;
+          validatedIntegrations.length = 0;
+          integrationWorkspaces.length = 0;
+          failTrackerClosureOnce = true;
+          trackerMap = publishedTicketMap;
           ticketPublicationReceipts.length = 0;
 
           yield* engine.dispatch({
@@ -693,7 +756,7 @@ ticketingEngineLayer(
           );
           assert.isDefined(sourceArtifact);
 
-          const baseConfiguration = workflowConfiguration(workstreamId);
+          const baseConfiguration = workflowConfiguration(workstreamId, true);
           const configuration = {
             ...baseConfiguration,
             requiredSkills: [
@@ -1493,6 +1556,37 @@ ticketingEngineLayer(
             createdAt: "2026-08-08T12:08:00.000Z",
           });
           yield* implementationReactor.drain;
+          const integrationFailureSnapshot = yield* snapshots.getSnapshot();
+          const integrationFailure = integrationFailureSnapshot.threads.find(
+            (thread) => thread.id === originThreadId,
+          )?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(integrationFailure);
+          assert.equal(integrationFailure.status, "integration-failed");
+          assert.equal(integrationFailure.integration?.failurePhase, "tracker");
+          assert.equal(
+            integrationFailure.integration?.baselineCommit,
+            "integration-baseline-commit",
+          );
+          const retryIntegrationResult = yield* engine.dispatch({
+            type: "thread.workflow.ticket-integration.retry",
+            commandId: CommandId.make("ticketing-projection-integration-retry"),
+            threadId: originThreadId,
+            implementationId: integrationFailure.id,
+            expectedWorkstreamVersion:
+              integrationFailureSnapshot.threads.find((thread) => thread.id === originThreadId)
+                ?.workflowAttachment?.workflowVersion ?? 0,
+            confirmed: true,
+            createdAt: "2026-08-08T12:08:30.000Z",
+          });
+          yield* implementationReactor.drain;
+          const retryReceipt = yield* receipts.getByCommandId({
+            commandId: CommandId.make("ticketing-projection-integration-retry"),
+          });
+          if (Option.isNone(retryReceipt)) {
+            throw new Error("integration retry command receipt was not persisted");
+          }
+          assert.equal(retryReceipt.value.status, "accepted");
+          assert.equal(retryReceipt.value.resultSequence, retryIntegrationResult.sequence);
           const reviewReadySnapshot = yield* snapshots.getSnapshot();
           const reviewThread = reviewReadySnapshot.threads.find(
             (thread) => thread.id === reviewingCorrection.implementationThreadId,
@@ -1508,16 +1602,48 @@ ticketingEngineLayer(
           const reviewed = reviewedSnapshot.threads.find((thread) => thread.id === originThreadId)
             ?.workflowAttachment?.ticketImplementations?.[0];
           assert.isDefined(reviewed);
-          assert.equal(reviewed.status, "reviewed");
+          assert.equal(reviewed.status, "integrated");
           assert.equal(reviewed.review?.status, "passed");
           assert.equal(reviewed.review?.fixedPoint, fixedPoint);
           assert.equal(reviewed.validation[0]?.status, "passed");
+          assert.equal(
+            reviewed.validation.find((evidence) => evidence.name === "integration-diff-check")
+              ?.status,
+            "passed",
+          );
           assert.equal(reviewed.correctionCycles?.length, 1);
+          assert.equal(reviewed.integration?.status, "integrated");
+          assert.equal(reviewed.integration?.baselineCommit, "integration-baseline-commit");
+          assert.deepEqual(integratedBranches, [reviewed.branch]);
+          assert.deepEqual(validatedIntegrations, [fixedPoint]);
+          assert.deepEqual(integrationWorkspaces, [
+            "/tmp/t3-workflow-baseline",
+            "/tmp/t3-workflow-baseline",
+          ]);
+          assert.deepEqual(trackerClosedIssues, [37]);
+          assert.deepEqual(trackerCloseAttempts, [37, 37]);
+          assert.equal(
+            reviewedSnapshot.threads
+              .find((thread) => thread.id === originThreadId)
+              ?.workflowAttachment?.trackerProjection?.tickets.find(
+                (ticket) => ticket.number === 37,
+              )?.state,
+            "closed",
+          );
+          assert.deepEqual(
+            reviewedSnapshot.threads
+              .find((thread) => thread.id === originThreadId)
+              ?.workflowAttachment?.trackerProjection?.tickets.find(
+                (ticket) => ticket.number === 38,
+              )?.blockedBy,
+            [],
+          );
           assert.isTrue(
             ticketPublicationReceipts.some(
               (receipt) =>
                 receipt.type === "workflow.ticket-implementation.progress" &&
-                receipt.status === "reviewed",
+                receipt.status === "integrated" &&
+                receipt.phase === "integration",
             ),
           );
         }),

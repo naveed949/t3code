@@ -346,7 +346,7 @@ effectIt.layer(
         expect(normalized.configuration.authority).toEqual({
           createWorktree: true,
           runProvider: true,
-          mutateTracker: false,
+          mutateTracker: true,
           pushBaseline: false,
           createDraftPullRequest: false,
         });

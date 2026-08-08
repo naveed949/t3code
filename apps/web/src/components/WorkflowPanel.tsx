@@ -29,6 +29,7 @@ function WorkflowNodeInspector(props: {
     nodeId: string,
     action: WorkflowTicketImplementationRecoveryAction,
   ) => void;
+  readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const implementation = props.node.ticketImplementation ?? null;
   const implementationAction = props.node.allowedActions.find(
@@ -45,6 +46,9 @@ function WorkflowNodeInspector(props: {
   );
   const restoreAction = props.node.allowedActions.find(
     (action) => action.id === "restore-ticket-implementation" && action.enabled,
+  );
+  const integrationRetryAction = props.node.allowedActions.find(
+    (action) => action.id === "retry-ticket-integration" && action.enabled,
   );
   return (
     <aside
@@ -200,6 +204,17 @@ function WorkflowNodeInspector(props: {
               : "Open implementation thread"}
           </button>
         ) : null}
+        {integrationRetryAction &&
+        implementation?.status === "integration-failed" &&
+        props.onRetryTicketIntegration ? (
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground"
+            onClick={() => props.onRetryTicketIntegration?.(implementation.id)}
+          >
+            {integrationRetryAction.label}
+          </button>
+        ) : null}
         {implementationAction && props.onStartTicketImplementation ? (
           <button
             type="button"
@@ -284,6 +299,7 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
     nodeId: string,
     action: WorkflowTicketImplementationRecoveryAction,
   ) => void;
+  readonly onRetryTicketIntegration?: (implementationId: string) => void;
   readonly initialSelectedNodeId?: string | null;
   readonly selectedNodeId?: string | null;
   readonly onSelectNode?: (nodeId: string | null) => void;
@@ -532,6 +548,9 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
             : {})}
           {...(props.onRecoverTicketImplementation
             ? { onRecoverTicketImplementation: props.onRecoverTicketImplementation }
+            : {})}
+          {...(props.onRetryTicketIntegration
+            ? { onRetryTicketIntegration: props.onRetryTicketIntegration }
             : {})}
         />
       ) : (

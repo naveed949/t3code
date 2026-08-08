@@ -99,7 +99,7 @@ const WORKFLOW_RUN_REQUIRED_STAGES = [
 const WORKFLOW_RUN_AUTHORITY = {
   createWorktree: true,
   runProvider: true,
-  mutateTracker: false,
+  mutateTracker: true,
   pushBaseline: false,
   createDraftPullRequest: false,
 } as const;

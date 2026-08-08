@@ -601,6 +601,10 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.recoverTicketImplementation,
     "recover ticket implementation",
   );
+  const retryWorkflowTicketIntegrationCommand = useAtomCommand(
+    threadEnvironment.retryTicketIntegration,
+    "retry ticket integration",
+  );
   const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
@@ -942,6 +946,22 @@ function WayfinderWorkbenchContent(props: {
     [props.environmentId, recoverWorkflowTicketImplementationCommand, workstream],
   );
 
+  const retryTicketIntegration = useCallback(
+    (implementationId: string) => {
+      const attachment = workstream?.workflowAttachment;
+      if (attachment === null || attachment === undefined) return;
+      void retryWorkflowTicketIntegrationCommand({
+        environmentId: props.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          implementationId,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+        },
+      });
+    },
+    [props.environmentId, retryWorkflowTicketIntegrationCommand, workstream],
+  );
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -1024,6 +1044,7 @@ function WayfinderWorkbenchContent(props: {
         onStartTicketImplementation={startTicketImplementation}
         onStopTicketImplementation={stopTicketImplementation}
         onRecoverTicketImplementation={recoverTicketImplementation}
+        onRetryTicketIntegration={retryTicketIntegration}
       />
 
       {linkedTicketAction === null ? (

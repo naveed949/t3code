@@ -34,6 +34,7 @@ export interface WayfinderWorkflowAction {
     | "reclaim-ticket"
     | "release-ticket"
     | "retry-research"
+    | "retry-ticket-integration"
     | "retry-thread-linkage"
     | "restore-ticket-implementation"
     | "resume-ticket-implementation"
@@ -192,6 +193,14 @@ function nodeAttention(input: {
       label: `Ticket #${input.ticketNumber} needs a decision after the automatic correction-cycle limit was reached.`,
     };
   }
+  if (input.ticketImplementation?.status === "integration-failed") {
+    return {
+      kind: "recovery",
+      label:
+        input.ticketImplementation.integration?.failure ??
+        `Integration for ticket #${input.ticketNumber} needs tracker recovery.`,
+    };
+  }
   if (ticketNumberFromMutation(input.mutation) === input.ticketNumber) {
     return (
       mutationAttention(input.mutation) ?? { kind: "none", label: "No node attention required." }
@@ -232,7 +241,8 @@ function nodeState(input: {
     input.ticketImplementation?.status === "implementing" ||
     input.ticketImplementation?.status === "reviewing" ||
     input.ticketImplementation?.status === "stopping" ||
-    input.ticketImplementation?.status === "reviewed"
+    input.ticketImplementation?.status === "reviewed" ||
+    input.ticketImplementation?.status === "integrating"
   ) {
     return { kind: "active", label: "Active" };
   }
@@ -308,6 +318,15 @@ function allowedActions(input: {
       action({
         id: "retry-thread-linkage",
         label: "Retry thread linkage",
+        enabled: input.mutationsEnabled,
+      }),
+    );
+  }
+  if (input.ticketImplementation?.status === "integration-failed") {
+    actions.push(
+      action({
+        id: "retry-ticket-integration",
+        label: "Retry tracker closure",
         enabled: input.mutationsEnabled,
       }),
     );
@@ -443,7 +462,9 @@ export function deriveWayfinderWorkflowViewModel(input: {
     }));
   const activeImplementationRuns = [...ticketImplementationByNumber.values()]
     .filter((implementation) =>
-      ["dispatching", "implementing", "reviewing", "stopping"].includes(implementation.status),
+      ["dispatching", "implementing", "reviewing", "stopping", "integrating"].includes(
+        implementation.status,
+      ),
     )
     .map((implementation) => ({
       kind: "ticket" as const,

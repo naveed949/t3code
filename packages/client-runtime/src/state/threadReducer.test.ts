@@ -12,7 +12,11 @@ import {
   TurnId,
   WorkstreamId,
 } from "@t3tools/contracts";
-import type { OrchestrationThread, WorkflowAttachment } from "@t3tools/contracts";
+import type {
+  OrchestrationThread,
+  WorkflowAttachment,
+  WorkflowTicketImplementation,
+} from "@t3tools/contracts";
 
 import { applyThreadDetailEvent } from "./threadReducer.ts";
 
@@ -749,6 +753,41 @@ describe("applyThreadDetailEvent", () => {
 
   describe("Development Workflow attachment events", () => {
     it("applies synchronized lineage and stale resolution to detail state", () => {
+      const implementation: WorkflowTicketImplementation = {
+        id: "workflow-ticket-implementation:42",
+        workstreamId: WorkstreamId.make("workstream:origin"),
+        nodeId: "ticket:42",
+        ticketKey: "naveed949/t3code#42",
+        ticketNumber: 42,
+        title: "Integrate reviewed workflow ticket",
+        actionIdentity: "client:implementation-42",
+        status: "checkpointed",
+        originThreadId: ThreadId.make("thread-1"),
+        implementationThreadId: null,
+        worktreePath: null,
+        branch: null,
+        fixedPoint: "2794a87560f910f1b6b5c59db1e2ac1bee9373b3",
+        acceptanceCriteria: "The ticket implementation is checkpointed.",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        implementSkill: {
+          name: "implement",
+          path: ".agents/skills/implement/SKILL.md",
+          contentDigest: `sha256:${"a".repeat(64)}`,
+        },
+        reviewSkill: {
+          name: "code-review",
+          path: ".agents/skills/code-review/SKILL.md",
+          contentDigest: `sha256:${"b".repeat(64)}`,
+        },
+        implementationSkillRunId: null,
+        reviewSkillRunId: null,
+        validation: [],
+        diff: null,
+        review: null,
+        failure: null,
+        startedAt: "2026-04-01T14:00:00.000Z",
+        updatedAt: "2026-04-01T14:04:00.000Z",
+      };
       const attachment: WorkflowAttachment = {
         originThreadId: ThreadId.make("thread-1"),
         workstreamId: WorkstreamId.make("workstream:origin"),

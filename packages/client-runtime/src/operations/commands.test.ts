@@ -34,6 +34,7 @@ import {
   publishWorkflowTicketBatch,
   reconcileWayfinderMap,
   resolveWorkflowStale,
+  retryWorkflowTicketIntegration,
   settleThread,
   startWorkflowTicketImplementation,
   stopThreadSession,
@@ -420,6 +421,34 @@ describe("environment commands", () => {
           expectedWorkstreamVersion: 4,
           confirmed: true,
           createdAt: "2026-08-08T12:00:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches an explicit tracker-closure retry command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* retryWorkflowTicketIntegration({
+        commandId: CommandId.make("ticket-integration-retry-command"),
+        threadId: ThreadId.make("thread-origin"),
+        implementationId: "workflow-ticket-implementation:38",
+        expectedWorkstreamVersion: 9,
+        confirmed: true,
+        createdAt: "2026-08-08T12:10:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.workflow.ticket-integration.retry",
+          commandId: "ticket-integration-retry-command",
+          threadId: "thread-origin",
+          implementationId: "workflow-ticket-implementation:38",
+          expectedWorkstreamVersion: 9,
+          confirmed: true,
+          createdAt: "2026-08-08T12:10:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

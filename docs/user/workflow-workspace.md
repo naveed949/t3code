@@ -53,3 +53,10 @@ not satisfy the ticket or release dependents. When a ready checkpoint is availab
 checkpoint** requires confirmation before changing the retained worktree. Recovery actions are
 explicit and stale or duplicate requests are rejected safely; the Workflow Projection remains the
 source of truth for the current state.
+
+A reviewed ticket then enters the serialized integration lane. T3 merges its dedicated ticket
+worktree into the confirmed Workstream Baseline, records focused validation, closes the canonical
+tracker issue, and synchronizes the Tracker Projection. Dependents remain blocked until all of
+those milestones succeed. If tracker closure fails, the inspector exposes **Retry tracker
+closure**; retrying resumes tracker synchronization without replaying the successful merge or
+validation.
