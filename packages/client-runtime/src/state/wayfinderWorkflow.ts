@@ -167,7 +167,14 @@ function nodeAttention(input: {
   readonly mutation: WayfinderMutation | null;
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly research: ReturnType<typeof deriveWayfinderResearchModel>["tickets"][number] | null;
+  readonly ticketImplementation: WorkflowTicketImplementation | null;
 }): WayfinderWorkflowAttention {
+  if (input.ticketImplementation?.status === "needs-decision") {
+    return {
+      kind: "decision",
+      label: `Ticket #${input.ticketNumber} needs a decision after the automatic correction-cycle limit was reached.`,
+    };
+  }
   if (ticketNumberFromMutation(input.mutation) === input.ticketNumber) {
     return (
       mutationAttention(input.mutation) ?? { kind: "none", label: "No node attention required." }
@@ -194,6 +201,9 @@ function nodeState(input: {
   readonly workflowRunnable: boolean;
 }): WayfinderWorkflowOutlineNode["state"] {
   if (input.ticket.state === "closed") return { kind: "completed", label: "Completed" };
+  if (input.ticketImplementation?.status === "needs-decision") {
+    return { kind: "blocked", label: "Blocked" };
+  }
   if (
     input.ticketImplementation?.status === "dispatching" ||
     input.ticketImplementation?.status === "implementing" ||
@@ -379,6 +389,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
       mutation: input.mutation,
       synchronization: input.synchronization,
       research,
+      ticketImplementation,
     });
     const blockedBy = [...ticket.blockedBy].sort((left, right) => left - right);
     const enables = [...ticket.blocks].sort((left, right) => left - right);
