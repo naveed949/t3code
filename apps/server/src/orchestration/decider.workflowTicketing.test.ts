@@ -15,6 +15,7 @@ import {
   type OrchestrationThread,
   type ResolvedSkillInvocation,
   type WorkflowAttachment,
+  type WorkflowGraphNode,
   type WorkflowPrdDocument,
   type WorkflowRun,
   type WorkflowTicketBatch,
@@ -394,6 +395,80 @@ const trackerProjection: WorkflowTrackerProjection = {
   synchronizedAt: publishedAt,
 };
 
+const implementationNodeId = "ticket:ticket-batch-publication";
+const implementationActionIdentity = "ticket-implementation:37:stage";
+const implementSkill = {
+  name: "implement",
+  path: "/skills/implement/SKILL.md",
+  contentDigest: "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+} as const;
+const reviewSkill = {
+  name: "code-review",
+  path: "/skills/code-review/SKILL.md",
+  contentDigest: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+} as const;
+
+function implementationReadModel(): OrchestrationReadModel {
+  const base = readModel();
+  const origin = base.threads.find((candidate) => candidate.id === originThreadId)!;
+  const attachment = origin.workflowAttachment!;
+  const ticketNode: WorkflowGraphNode = {
+    id: implementationNodeId,
+    kind: "ticket",
+    ticketKey: batch.tickets[0]!.key,
+    ticketNumber: 37,
+    title: batch.tickets[0]!.title,
+    state: "current",
+    sourceArtifactId: workflowPrdArtifactId,
+    includedInRun: true,
+    resolution: { status: "not-required" },
+  };
+  const workflowRun = attachment.workflowRun!;
+  const configuration = {
+    ...workflowRun.configuration,
+    runScope: [
+      ...workflowRun.configuration.runScope,
+      { nodeId: implementationNodeId, label: batch.tickets[0]!.title },
+    ],
+    requiredSkills: [
+      ...workflowRun.configuration.requiredSkills,
+      {
+        nodeId: `workflow:${workstreamId}`,
+        providerInstanceId,
+        stage: "implementation",
+        skill: implementSkill,
+        status: "available" as const,
+      },
+      {
+        nodeId: `workflow:${workstreamId}`,
+        providerInstanceId,
+        stage: "review",
+        skill: reviewSkill,
+        status: "available" as const,
+      },
+    ],
+  };
+  const nextAttachment: WorkflowAttachment = {
+    ...attachment,
+    workflowGraph: {
+      ...attachment.workflowGraph!,
+      nodes: [...attachment.workflowGraph!.nodes, ticketNode],
+      updatedAt: now,
+    },
+    workflowRun: { ...workflowRun, configuration },
+    trackerProjection,
+    workflowVersion: 3,
+  };
+  return {
+    ...base,
+    threads: base.threads.map((candidate) =>
+      candidate.id === originThreadId
+        ? { ...candidate, workflowAttachment: nextAttachment }
+        : candidate,
+    ),
+  };
+}
+
 function normalizeEvents(
   result:
     | Omit<OrchestrationEvent, "sequence">
@@ -591,5 +666,209 @@ it.layer(NodeServices.layer)("Ticket Batch publication boundary", (it) => {
           ]),
         );
       }),
+  );
+});
+
+it.layer(NodeServices.layer)("Ticket Implementation boundary", (it) => {
+  it.effect("starts one executable node and reuses the same Action Identity", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const command = {
+        type: "thread.workflow.ticket-implementation.start" as const,
+        commandId: CommandId.make("ticket-implementation-start"),
+        threadId: originThreadId,
+        ticketNodeId: implementationNodeId,
+        actionIdentity: implementationActionIdentity,
+        expectedWorkstreamVersion: 3,
+        confirmed: true as const,
+        createdAt: publishedAt,
+      };
+      const requested = yield* decideOrchestrationCommand({ readModel: model, command });
+      const requestedEvents = normalizeEvents(requested);
+      expect(requestedEvents.map((event) => event.type)).toEqual([
+        "thread.workflow-ticket-implementation-requested",
+      ]);
+      const afterRequest = yield* Effect.promise(() => applyEvents(model, requestedEvents));
+      const implementation =
+        afterRequest.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(implementation).toMatchObject({
+        status: "dispatching",
+        ticketNumber: 37,
+        fixedPoint: "2514a152021bf9522e501ceeae5e9ab292af29b6",
+        acceptanceCriteria: "Run /to-tickets and publish only the exact approved batch.",
+        implementSkill,
+        reviewSkill,
+      });
+      expect(
+        afterRequest.threads[0]?.workflowAttachment?.workflowGraph?.nodes.find(
+          (node) => node.id === implementationNodeId,
+        ),
+      ).toMatchObject({
+        implementationAvailability: {
+          status: "active",
+          canStart: false,
+        },
+      });
+
+      const replay = yield* decideOrchestrationCommand({ readModel: afterRequest, command });
+      const replayedImplementation = normalizeEvents(replay)[0];
+      expect(replayedImplementation?.type).toBe("thread.workflow-ticket-implementation-requested");
+      if (replayedImplementation?.type === "thread.workflow-ticket-implementation-requested") {
+        expect(replayedImplementation).toMatchObject({ payload: { implementation } });
+      }
+
+      const immutableUpdate = yield* decideOrchestrationCommand({
+        readModel: afterRequest,
+        command: {
+          type: "thread.workflow.ticket-implementation.update" as const,
+          commandId: CommandId.make("ticket-implementation-rebind-fixed-point"),
+          threadId: originThreadId,
+          implementationId: implementation!.id,
+          implementation: {
+            ...implementation!,
+            fixedPoint: "a-different-fixed-point",
+          },
+          expectedWorkstreamVersion:
+            afterRequest.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
+          createdAt: publishedAt,
+        },
+      }).pipe(Effect.flip);
+      expect(immutableUpdate._tag).toBe("OrchestrationCommandInvariantError");
+
+      const heldModel: OrchestrationReadModel = {
+        ...model,
+        threads: model.threads.map((candidate) =>
+          candidate.id === originThreadId
+            ? {
+                ...candidate,
+                workflowAttachment: {
+                  ...candidate.workflowAttachment!,
+                  workflowGraph: {
+                    ...candidate.workflowAttachment!.workflowGraph!,
+                    nodes: candidate.workflowAttachment!.workflowGraph!.nodes.map((node) =>
+                      node.id === implementationNodeId && node.kind === "ticket"
+                        ? { ...node, held: true }
+                        : node,
+                    ),
+                  },
+                },
+              }
+            : candidate,
+        ),
+      };
+      const rejection = yield* decideOrchestrationCommand({
+        readModel: heldModel,
+        command: { ...command, commandId: CommandId.make("ticket-implementation-held") },
+      }).pipe(Effect.flip);
+      expect(rejection._tag).toBe("OrchestrationCommandInvariantError");
+    }),
+  );
+
+  it.effect("records structured review evidence only after the pinned child completes", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const startCommand = {
+        type: "thread.workflow.ticket-implementation.start" as const,
+        commandId: CommandId.make("ticket-implementation-review-start"),
+        threadId: originThreadId,
+        ticketNodeId: implementationNodeId,
+        actionIdentity: "ticket-implementation:37:review-gate",
+        expectedWorkstreamVersion: 3,
+        confirmed: true as const,
+        createdAt: publishedAt,
+      };
+      const started = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: startCommand,
+      });
+      const afterStart = yield* Effect.promise(() => applyEvents(model, normalizeEvents(started)));
+      const startedImplementation =
+        afterStart.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(startedImplementation).toBeDefined();
+      const reviewSkillRunId = SkillRunId.make("skill-run:ticket-implementation-review");
+      const reviewInvocation: ResolvedSkillInvocation = {
+        skill: reviewSkill,
+        action: {
+          id: "work-ticket",
+          ticketNumber: 37,
+          sourceSkillRunId,
+          sourceThreadId: originThreadId,
+        },
+        execution: { mode: "generic", reason: "unregistered-skill" },
+        reconnectWorkstreamId: workstreamId,
+      };
+      const reviewTurn: OrchestrationLatestTurn = {
+        ...latestTurn(reviewInvocation, reviewSkillRunId),
+        state: "completed",
+        completedAt: publishedAt,
+        skillInvocation: {
+          ...latestTurn(reviewInvocation, reviewSkillRunId).skillInvocation!,
+          skillRunId: reviewSkillRunId,
+        },
+      };
+      const reviewingImplementation = {
+        ...startedImplementation!,
+        status: "reviewing" as const,
+        implementationThreadId: ThreadId.make("ticket-implementation-review-thread"),
+        reviewSkillRunId,
+        updatedAt: publishedAt,
+      };
+      const reviewingModel: OrchestrationReadModel = {
+        ...afterStart,
+        threads: [
+          ...afterStart.threads.map((candidate) =>
+            candidate.id === originThreadId
+              ? {
+                  ...candidate,
+                  workflowAttachment: {
+                    ...candidate.workflowAttachment!,
+                    ticketImplementations: [reviewingImplementation],
+                  },
+                }
+              : candidate,
+          ),
+          thread(reviewingImplementation.implementationThreadId, { latestTurn: reviewTurn }),
+        ],
+      };
+      const validation = [
+        {
+          name: "focused tests",
+          status: "passed" as const,
+          command:
+            "vp test run apps/server/src/orchestration/decider.workflowTicketImplementation.test.ts",
+          recordedAt: publishedAt,
+        },
+      ];
+      const review = {
+        status: "passed" as const,
+        skillRunId: reviewSkillRunId,
+        fixedPoint: reviewingImplementation.fixedPoint,
+        summary: "The implementation matches the ticket acceptance criteria.",
+        findings: [],
+        completedAt: publishedAt,
+      };
+      const recorded = yield* decideOrchestrationCommand({
+        readModel: reviewingModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.review.record" as const,
+          commandId: CommandId.make("ticket-implementation-review-record"),
+          threadId: originThreadId,
+          implementationId: reviewingImplementation.id,
+          expectedWorkstreamVersion:
+            reviewingModel.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
+          review,
+          validation,
+          createdAt: publishedAt,
+        },
+      });
+      const projected = yield* Effect.promise(() =>
+        applyEvents(reviewingModel, normalizeEvents(recorded)),
+      );
+      expect(projected.threads[0]?.workflowAttachment?.ticketImplementations?.[0]).toMatchObject({
+        status: "reviewed",
+        review,
+        validation,
+      });
+    }),
   );
 });

@@ -170,7 +170,7 @@ import {
   TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react";
-import { cn, randomHex } from "~/lib/utils";
+import { cn, randomHex, randomUUID } from "~/lib/utils";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { decodeProjectScriptKeybindingRule } from "~/lib/projectScriptKeybindings";
@@ -1254,6 +1254,10 @@ function ChatViewContent(props: ChatViewProps) {
     threadEnvironment.completeWorkflowSpecification,
     { reportFailure: false },
   );
+  const startWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.startTicketImplementation,
+    { reportFailure: false },
+  );
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1784,6 +1788,23 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, completeWorkflowSpecificationCommand],
+  );
+  const startWorkflowTicketImplementation = useCallback(
+    (ticketNodeId: string) => {
+      const attachment = activeWayfinderWorkstream?.workflowAttachment;
+      if (!activeThread || attachment === null || attachment === undefined) return;
+      void startWorkflowTicketImplementationCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          ticketNodeId,
+          actionIdentity: `web:${randomUUID()}`,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+        },
+      });
+    },
+    [activeThread, activeWayfinderWorkstream, startWorkflowTicketImplementationCommand],
   );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!activeThread) return;
@@ -6189,6 +6210,8 @@ function ChatViewContent(props: ChatViewProps) {
             activeWayfinderWorkstream.workflowAttachment.workflowRun !== undefined)
         }
         onStartToSpec={onStartWayfinderToSpec}
+        workflowAttachment={activeWayfinderWorkstream?.workflowAttachment ?? null}
+        onStartTicketImplementation={startWorkflowTicketImplementation}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
       />

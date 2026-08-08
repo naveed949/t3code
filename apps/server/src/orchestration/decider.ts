@@ -2,6 +2,7 @@ import {
   ApprovalRequestId,
   EventId,
   SkillRunId,
+  ThreadId,
   TrimmedNonEmptyString,
   UserInputQuestion,
   WayfinderMutationAction,
@@ -22,12 +23,21 @@ import {
   type WorkflowSpecificationStage,
   type WorkflowTicketBatch,
   type WorkflowTicketBatchPublication,
+  type WorkflowTicketImplementation,
+  type WorkflowTicketImplementationAvailability,
+  type WorkflowCodeReviewEvidence,
+  type WorkflowValidationEvidence,
+  type WorkflowTicketImplementationStatus,
   type WorkflowTicketingCheckpointRequest,
   type WorkflowTicketingStage,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
 import { stableStringify } from "@t3tools/shared/relaySigning";
+import {
+  workflowTicketImplementationBranch,
+  workflowTicketImplementationId,
+} from "@t3tools/shared/workflowTicketImplementation";
 import {
   acknowledgeWorkflowArtifact,
   completeWorkflowSpecification,
@@ -802,6 +812,241 @@ function workflowTicketingForThread(
     return null;
   }
   return { originThread, attachment, stage };
+}
+
+function workflowTicketImplementations(attachment: WorkflowAttachment) {
+  return attachment.ticketImplementations ?? [];
+}
+
+function implementationRequiredSkill(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly nodeId: string;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly stage: "implementation" | "review";
+  readonly skillName: "implement" | "code-review";
+}): WorkflowRunRequiredSkill | null {
+  const workflowRun = input.attachment.workflowRun;
+  if (workflowRun === undefined) return null;
+  const candidates = workflowRun.configuration.requiredSkills.filter(
+    (candidate) =>
+      candidate.stage === input.stage &&
+      candidate.skill.name === input.skillName &&
+      candidate.providerInstanceId === input.providerInstanceId &&
+      candidate.status === "available" &&
+      candidate.skill.path !== undefined &&
+      candidate.skill.contentDigest !== undefined &&
+      (candidate.nodeId === input.nodeId ||
+        candidate.nodeId === `workflow:${input.attachment.workstreamId}`),
+  );
+  return candidates[0] ?? null;
+}
+
+function ticketImplementationAvailability(input: {
+  readonly attachment: WorkflowAttachment;
+  readonly node: Extract<
+    NonNullable<WorkflowAttachment["workflowGraph"]>["nodes"][number],
+    {
+      readonly kind: "ticket";
+    }
+  >;
+}): WorkflowTicketImplementationAvailability {
+  const implementation = workflowTicketImplementations(input.attachment).find(
+    (candidate) => candidate.nodeId === input.node.id,
+  );
+  if (implementation !== undefined) {
+    switch (implementation.status) {
+      case "dispatching":
+      case "implementing":
+      case "reviewing":
+        return {
+          status: "active",
+          canStart: false,
+          reason: `Ticket Implementation is ${implementation.status}.`,
+        };
+      case "reviewed":
+        return {
+          status: "reviewed",
+          canStart: false,
+          reason: "Ticket Implementation is reviewed and awaits downstream integration.",
+        };
+      case "needs-correction":
+        return {
+          status: "needs-correction",
+          canStart: true,
+          reason: "A fresh correction cycle may retry this Ticket Implementation.",
+        };
+      case "failed":
+        return {
+          status: "failed",
+          canStart: true,
+          reason: "The previous Ticket Implementation failed before its review gate.",
+        };
+    }
+  }
+  if (input.node.state !== "current" || input.node.held === true) {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "The ticket is stale or held.",
+    };
+  }
+  const workflowRun = input.attachment.workflowRun;
+  if (workflowRun?.status !== "confirmed") {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "A confirmed Workflow Run is required.",
+    };
+  }
+  const inScope = workflowRun.configuration.runScope.some(
+    (scope) => scope.nodeId === input.node.id,
+  );
+  if (!inScope || !input.node.includedInRun) {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "The ticket is outside the confirmed Workflow Run scope.",
+    };
+  }
+  const trackerProjection =
+    input.attachment.trackerProjection ?? input.attachment.ticketingStage?.trackerProjection;
+  const trackerTicket = trackerProjection?.tickets.find(
+    (ticket) =>
+      ticket.number === input.node.ticketNumber &&
+      (ticket.key === null || ticket.key === input.node.ticketKey),
+  );
+  if (trackerProjection?.status !== "healthy" || trackerTicket === undefined) {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "A healthy tracker projection is required.",
+    };
+  }
+  if (
+    trackerTicket.state !== "open" ||
+    trackerTicket.blockedBy.length > 0 ||
+    trackerTicket.includedInRun !== true ||
+    trackerTicket.body === undefined
+  ) {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "The ticket must be open, unblocked, in scope, and carry acceptance criteria.",
+    };
+  }
+  const providerInstanceId =
+    workflowRun.configuration.providerOverrides.find(
+      (override) => override.nodeId === input.node.id,
+    )?.providerInstanceId ?? workflowRun.configuration.defaultProviderInstanceId;
+  if (
+    implementationRequiredSkill({
+      attachment: input.attachment,
+      nodeId: input.node.id,
+      providerInstanceId,
+      stage: "implementation",
+      skillName: "implement",
+    }) === null ||
+    implementationRequiredSkill({
+      attachment: input.attachment,
+      nodeId: input.node.id,
+      providerInstanceId,
+      stage: "review",
+      skillName: "code-review",
+    }) === null
+  ) {
+    return {
+      status: "blocked",
+      canStart: false,
+      reason: "The confirmed provider must expose pinned implementation and review skills.",
+    };
+  }
+  return {
+    status: "available",
+    canStart: true,
+    reason: "The ticket is an executable Workflow Frontier node.",
+  };
+}
+
+function refreshTicketImplementationAvailability(
+  attachment: WorkflowAttachment,
+): WorkflowAttachment {
+  const graph = attachment.workflowGraph;
+  if (graph === undefined) return attachment;
+  return {
+    ...attachment,
+    workflowGraph: {
+      ...graph,
+      nodes: graph.nodes.map((node) =>
+        node.kind === "ticket"
+          ? {
+              ...node,
+              implementationAvailability: ticketImplementationAvailability({ attachment, node }),
+            }
+          : node,
+      ),
+    },
+  };
+}
+
+function workflowTicketImplementationStatusTransitionAllowed(
+  current: WorkflowTicketImplementationStatus,
+  next: WorkflowTicketImplementationStatus,
+): boolean {
+  if (current === next) return true;
+  switch (current) {
+    case "dispatching":
+      return next === "implementing" || next === "failed";
+    case "implementing":
+      return next === "reviewing" || next === "failed";
+    case "reviewing":
+      return next === "failed";
+    case "reviewed":
+    case "needs-correction":
+    case "failed":
+      return false;
+  }
+}
+
+function workflowTicketImplementationEventBase(input: {
+  readonly command: Extract<
+    OrchestrationCommand,
+    | { readonly type: "thread.workflow.ticket-implementation.start" }
+    | { readonly type: "thread.workflow.ticket-implementation.update" }
+    | { readonly type: "thread.workflow.ticket-implementation.review.record" }
+  >;
+  readonly attachment: WorkflowAttachment;
+  readonly implementation: WorkflowTicketImplementation;
+  readonly eventType:
+    | "thread.workflow-ticket-implementation-requested"
+    | "thread.workflow-ticket-implementation-updated";
+}): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> {
+  return withEventBase({
+    aggregateKind: "thread",
+    aggregateId: input.command.threadId,
+    occurredAt: input.command.createdAt,
+    commandId: input.command.commandId,
+  }).pipe(
+    Effect.map(
+      (eventBase) =>
+        ({
+          ...eventBase,
+          type: input.eventType,
+          payload:
+            input.eventType === "thread.workflow-ticket-implementation-requested"
+              ? {
+                  threadId: input.command.threadId,
+                  implementation: input.implementation,
+                  attachment: input.attachment,
+                  createdAt: input.command.createdAt,
+                }
+              : {
+                  threadId: input.command.threadId,
+                  implementation: input.implementation,
+                  attachment: input.attachment,
+                },
+        }) as PlannedOrchestrationEvent,
+    ),
+  );
 }
 
 function incrementWorkflowVersion(attachment: WorkflowAttachment): WorkflowAttachment {
@@ -2502,7 +2747,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: preview.blockers.join(" "),
         });
       }
-      const nextAttachment = {
+      const nextAttachment = refreshTicketImplementationAvailability({
         ...attachment,
         workflowRun: {
           configuration: command.configuration,
@@ -2512,7 +2757,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           dispatchIdentity: command.commandId,
           immutableAtDispatch: command.createdAt,
         },
-      };
+      });
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -2871,32 +3116,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         stableStringify(stage.publication) === stableStringify(command.publication) &&
         (command.trackerProjection === undefined ||
           stableStringify(stage.trackerProjection) === stableStringify(command.trackerProjection));
-      const nextAttachment = alreadyApplied
-        ? attachment
-        : command.publication.status === "failed"
-          ? incrementWorkflowVersion({
-              ...attachment,
-              trackerProjection: command.trackerProjection,
-              ticketingStage: {
-                ...stage,
-                status: "failed",
+      const nextAttachment = refreshTicketImplementationAvailability(
+        alreadyApplied
+          ? attachment
+          : command.publication.status === "failed"
+            ? incrementWorkflowVersion({
+                ...attachment,
+                trackerProjection: command.trackerProjection,
+                ticketingStage: {
+                  ...stage,
+                  status: "failed",
+                  publication: command.publication,
+                  ...(command.trackerProjection !== undefined
+                    ? { trackerProjection: command.trackerProjection }
+                    : {}),
+                  ...(command.publication.failure !== undefined
+                    ? { failure: command.publication.failure }
+                    : {}),
+                  updatedAt: command.createdAt,
+                },
+              })
+            : completeWorkflowTicketing({
+                attachment,
+                batch: stage.approvedBatch,
                 publication: command.publication,
-                ...(command.trackerProjection !== undefined
-                  ? { trackerProjection: command.trackerProjection }
-                  : {}),
-                ...(command.publication.failure !== undefined
-                  ? { failure: command.publication.failure }
-                  : {}),
-                updatedAt: command.createdAt,
-              },
-            })
-          : completeWorkflowTicketing({
-              attachment,
-              batch: stage.approvedBatch,
-              publication: command.publication,
-              trackerProjection: command.trackerProjection!,
-              completedAt: command.createdAt,
-            });
+                trackerProjection: command.trackerProjection!,
+                completedAt: command.createdAt,
+              }),
+      );
       return {
         ...(yield* withEventBase({
           aggregateKind: "thread",
@@ -2910,6 +3157,419 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           attachment: nextAttachment,
         },
       };
+    }
+
+    case "thread.workflow.ticket-implementation.start": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined || attachment.workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation requires a confirmed Workflow Run.",
+        });
+      }
+      if (hasPendingWorkflowStaleness(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Ticket Implementation cannot start while the attached Workstream has unresolved upstream staleness.",
+        });
+      }
+
+      const existing = workflowTicketImplementations(attachment).find(
+        (implementation) => implementation.actionIdentity === command.actionIdentity,
+      );
+      if (existing !== undefined) {
+        if (existing.nodeId !== command.ticketNodeId) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Action Identity is already bound to a different Ticket Implementation.",
+          });
+        }
+        return yield* workflowTicketImplementationEventBase({
+          command,
+          attachment,
+          implementation: existing,
+          eventType: "thread.workflow-ticket-implementation-requested",
+        });
+      }
+
+      const currentWorkflowVersion = attachment.workflowVersion ?? 0;
+      if (command.expectedWorkstreamVersion !== currentWorkflowVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Stale Workstream version ${command.expectedWorkstreamVersion}; current version is ${currentWorkflowVersion}. Refresh the Workflow Projection before retrying.`,
+        });
+      }
+
+      const graphTicket = attachment.workflowGraph?.nodes.find(
+        (node) => node.kind === "ticket" && node.id === command.ticketNodeId,
+      );
+      if (graphTicket === undefined || graphTicket.kind !== "ticket") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation must target a ticket in the current Workflow Graph.",
+        });
+      }
+      const runScope = new Set(
+        attachment.workflowRun.configuration.runScope.map((scope) => scope.nodeId),
+      );
+      if (!runScope.has(graphTicket.id) || !graphTicket.includedInRun) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only an in-scope Ticket Implementation may be dispatched.",
+        });
+      }
+      if (graphTicket.state !== "current" || graphTicket.held === true) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Only a current, unheld Ticket Implementation may be dispatched.",
+        });
+      }
+      const trackerProjection =
+        attachment.trackerProjection ?? attachment.ticketingStage?.trackerProjection;
+      const trackerTicket = trackerProjection?.tickets.find(
+        (ticket) =>
+          ticket.number === graphTicket.ticketNumber &&
+          (ticket.key === null || ticket.key === graphTicket.ticketKey),
+      );
+      if (trackerProjection?.status !== "healthy" || trackerTicket === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation requires a healthy tracker projection for the target.",
+        });
+      }
+      if (
+        trackerTicket.state !== "open" ||
+        trackerTicket.blockedBy.length > 0 ||
+        trackerTicket.includedInRun !== true ||
+        trackerTicket.body === undefined
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Only an open, unblocked, in-scope Executable Node with exact acceptance criteria may start.",
+        });
+      }
+      const active = workflowTicketImplementations(attachment).find(
+        (implementation) =>
+          implementation.nodeId === command.ticketNodeId &&
+          ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+      );
+      if (active !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Ticket Implementation is already ${active.status} for the target node.`,
+        });
+      }
+
+      const providerInstanceId =
+        attachment.workflowRun.configuration.providerOverrides.find(
+          (override) => override.nodeId === graphTicket.id,
+        )?.providerInstanceId ?? attachment.workflowRun.configuration.defaultProviderInstanceId;
+      const implementSkill = implementationRequiredSkill({
+        attachment,
+        nodeId: graphTicket.id,
+        providerInstanceId,
+        stage: "implementation",
+        skillName: "implement",
+      });
+      const reviewSkill = implementationRequiredSkill({
+        attachment,
+        nodeId: graphTicket.id,
+        providerInstanceId,
+        stage: "review",
+        skillName: "code-review",
+      });
+      if (implementSkill === null || reviewSkill === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The confirmed Workflow Run must pin available implementation and Code Review skills for the selected provider.",
+        });
+      }
+
+      const implementation: WorkflowTicketImplementation = {
+        id: workflowTicketImplementationId({
+          workstreamId: attachment.workstreamId,
+          nodeId: graphTicket.id,
+          actionIdentity: command.actionIdentity,
+        }),
+        workstreamId: attachment.workstreamId,
+        nodeId: graphTicket.id,
+        ticketKey: graphTicket.ticketKey,
+        ticketNumber: graphTicket.ticketNumber,
+        title: graphTicket.title,
+        actionIdentity: command.actionIdentity,
+        status: "dispatching",
+        originThreadId: command.threadId,
+        implementationThreadId: null,
+        worktreePath: null,
+        branch: workflowTicketImplementationBranch({
+          ticketNumber: graphTicket.ticketNumber,
+          actionIdentity: command.actionIdentity,
+        }),
+        fixedPoint: attachment.workflowRun.configuration.fixedPoint,
+        acceptanceCriteria: trackerTicket.body,
+        providerInstanceId,
+        implementSkill: {
+          name: implementSkill.skill.name,
+          path: implementSkill.skill.path!,
+          contentDigest: implementSkill.skill.contentDigest!,
+        },
+        reviewSkill: {
+          name: reviewSkill.skill.name,
+          path: reviewSkill.skill.path!,
+          contentDigest: reviewSkill.skill.contentDigest!,
+        },
+        implementationSkillRunId: null,
+        reviewSkillRunId: null,
+        validation: [],
+        diff: null,
+        review: null,
+        failure: null,
+        startedAt: command.createdAt,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: [...workflowTicketImplementations(attachment), implementation],
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-requested",
+      });
+    }
+
+    case "thread.workflow.ticket-implementation.update": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation update requires an existing implementation.",
+        });
+      }
+      if (
+        command.implementation.id !== current.id ||
+        command.implementation.originThreadId !== command.threadId ||
+        command.implementation.actionIdentity !== current.actionIdentity
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation update does not match the server-owned identity.",
+        });
+      }
+      if (
+        stableStringify({
+          workstreamId: command.implementation.workstreamId,
+          nodeId: command.implementation.nodeId,
+          ticketKey: command.implementation.ticketKey,
+          ticketNumber: command.implementation.ticketNumber,
+          title: command.implementation.title,
+          actionIdentity: command.implementation.actionIdentity,
+          originThreadId: command.implementation.originThreadId,
+          fixedPoint: command.implementation.fixedPoint,
+          acceptanceCriteria: command.implementation.acceptanceCriteria,
+          providerInstanceId: command.implementation.providerInstanceId,
+          implementSkill: command.implementation.implementSkill,
+          reviewSkill: command.implementation.reviewSkill,
+        }) !==
+        stableStringify({
+          workstreamId: current.workstreamId,
+          nodeId: current.nodeId,
+          ticketKey: current.ticketKey,
+          ticketNumber: current.ticketNumber,
+          title: current.title,
+          actionIdentity: current.actionIdentity,
+          originThreadId: current.originThreadId,
+          fixedPoint: current.fixedPoint,
+          acceptanceCriteria: current.acceptanceCriteria,
+          providerInstanceId: current.providerInstanceId,
+          implementSkill: current.implementSkill,
+          reviewSkill: current.reviewSkill,
+        })
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Ticket Implementation provider, skill, acceptance criteria, and Fixed Point identities are immutable after dispatch.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Ticket Implementation update has a stale Workstream version.",
+        });
+      }
+      if (command.implementation.status === "reviewed" || command.implementation.review !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Structured Code Review evidence must be recorded through the review command.",
+        });
+      }
+      if (
+        !workflowTicketImplementationStatusTransitionAllowed(
+          current.status,
+          command.implementation.status,
+        )
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Ticket Implementation cannot transition from ${current.status} to ${command.implementation.status}.`,
+        });
+      }
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((implementation) =>
+            implementation.id === command.implementationId
+              ? command.implementation
+              : implementation,
+          ),
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation: command.implementation,
+        eventType: "thread.workflow-ticket-implementation-updated",
+      });
+    }
+
+    case "thread.workflow.ticket-implementation.review.record": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence requires an existing Ticket Implementation.",
+        });
+      }
+      if (
+        current.status === "reviewed" &&
+        current.review !== null &&
+        stableStringify(current.review) === stableStringify(command.review) &&
+        stableStringify(current.validation) === stableStringify(command.validation)
+      ) {
+        return yield* workflowTicketImplementationEventBase({
+          command,
+          attachment,
+          implementation: current,
+          eventType: "thread.workflow-ticket-implementation-updated",
+        });
+      }
+      if (current.status !== "reviewing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence can only complete a reviewing Ticket Implementation.",
+        });
+      }
+      if (current.reviewSkillRunId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence requires the pinned /code-review Skill Run.",
+        });
+      }
+      if (
+        command.review.skillRunId !== current.reviewSkillRunId ||
+        command.review.fixedPoint !== current.fixedPoint
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence must reference the original Fixed Point and Skill Run.",
+        });
+      }
+      const reviewThread = current.implementationThreadId
+        ? readModel.threads.find((candidate) => candidate.id === current.implementationThreadId)
+        : undefined;
+      const projectedReviewSkillRunId = reviewThread?.latestTurn?.skillInvocation?.skillRunId;
+      if (
+        reviewThread?.latestTurn?.state !== "completed" ||
+        (projectedReviewSkillRunId !== undefined &&
+          projectedReviewSkillRunId !== current.reviewSkillRunId)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Code Review evidence requires a completed pinned /code-review turn; the server-owned Skill Run must remain the current child.",
+        });
+      }
+      if (command.validation.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence must include structured validation evidence.",
+        });
+      }
+      if (
+        command.review.status === "passed" &&
+        (command.validation.some((evidence) => evidence.status !== "passed") ||
+          command.review.findings.some((finding) => finding.severity === "must-fix"))
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A passed Code Review requires only passed validation and no must-fix findings.",
+        });
+      }
+      if (
+        command.review.status === "must-fix" &&
+        !command.review.findings.some((finding) => finding.severity === "must-fix")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A must-fix Code Review must retain at least one structured must-fix finding.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Code Review evidence has a stale Workstream version.",
+        });
+      }
+      const implementation: WorkflowTicketImplementation = {
+        ...current,
+        status: command.review.status === "passed" ? "reviewed" : "needs-correction",
+        validation: command.validation,
+        review: command.review,
+        failure: null,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === command.implementationId ? implementation : candidate,
+          ),
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-updated",
+      });
     }
 
     case "thread.wayfinder.publish": {

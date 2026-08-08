@@ -35,6 +35,7 @@ import {
   reconcileWayfinderMap,
   resolveWorkflowStale,
   settleThread,
+  startWorkflowTicketImplementation,
   stopThreadSession,
   unsettleThread,
   viewWorkflowArtifacts,
@@ -389,6 +390,36 @@ describe("environment commands", () => {
           },
           confirmed: true,
           createdAt: "2026-08-03T12:06:00.000Z",
+        },
+      ]);
+    }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),
+  );
+
+  it.effect("dispatches an idempotent ticket implementation start command", () =>
+    Effect.gen(function* () {
+      const dispatched: ClientOrchestrationCommand[] = [];
+      const supervisor = yield* makeSupervisor(dispatched);
+
+      yield* startWorkflowTicketImplementation({
+        commandId: CommandId.make("ticket-implementation-start-command"),
+        threadId: ThreadId.make("thread-origin"),
+        ticketNodeId: "ticket:38",
+        actionIdentity: "web:ticket-38-action-1",
+        expectedWorkstreamVersion: 4,
+        confirmed: true,
+        createdAt: "2026-08-08T12:00:00.000Z",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+
+      expect(dispatched).toEqual([
+        {
+          type: "thread.workflow.ticket-implementation.start",
+          commandId: "ticket-implementation-start-command",
+          threadId: "thread-origin",
+          ticketNodeId: "ticket:38",
+          actionIdentity: "web:ticket-38-action-1",
+          expectedWorkstreamVersion: 4,
+          confirmed: true,
+          createdAt: "2026-08-08T12:00:00.000Z",
         },
       ]);
     }).pipe(Effect.provide(TEST_CRYPTO_LAYER)),

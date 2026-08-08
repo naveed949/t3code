@@ -26,3 +26,16 @@ checkpoint, recovery, and decision states are called out in the visual projectio
 labels.
 
 Mobile keeps the complete outline and inspector rather than showing the graph canvas.
+
+## Ticket implementation and review
+
+After a Workflow Run is confirmed and a ticket is executable, its Node Inspector offers **Start
+implementation**. T3 records the isolated worktree, linked implementation thread, provider and
+skill identities, Fixed Point, validation, diff summary, and Code Review outcome in the Workflow
+Projection. Dispatching, implementation, review, reviewed, correction, and failure milestones stay
+visible while the work progresses.
+
+Code Review is a required child of the implementation. A completed provider turn remains in review
+until it supplies structured review evidence; ordinary prose does not mark the ticket reviewed.
+A reviewed ticket still awaits downstream integration, so it does not release dependent tickets by
+itself.
