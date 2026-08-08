@@ -3445,6 +3445,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Stopping a Ticket Implementation requires an existing implementation.",
         });
       }
+      if (command.actionIdentity !== current.actionIdentity) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop does not match the server-owned Ticket Implementation identity.",
+        });
+      }
       if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -3542,6 +3548,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: "Recovery requires an existing Ticket Implementation.",
+        });
+      }
+      if (command.actionIdentity !== current.actionIdentity) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Recovery does not match the server-owned Ticket Implementation identity.",
         });
       }
       if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {

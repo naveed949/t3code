@@ -126,6 +126,13 @@ The read model of tracker-owned ticket identity, parentage, blocker edges, and o
 after Ticket Batch publication. T3 owns the workflow history and Run Scope inclusion; the tracker
 remains authoritative for the synchronized external relationships and state.
 
+#### Needs Recovery
+
+The attention state for an accepted provider run that stopped or may have produced side effects
+before its workflow milestone completed. T3 retains the linked thread, worktree, checkpoints, and
+diff; recovery is explicit through inspection, resume, cancellation with changes, or confirmed
+checkpoint restoration. Needs Recovery is not completion and does not release dependents.
+
 #### Workflow PRD
 
 A versioned, structured specification artifact produced by the Specification stage. The normal graph

@@ -9,6 +9,7 @@ import {
   ProviderDriverKind,
   type ProjectId,
   type OrchestrationSession,
+  type WorkflowTicketImplementation,
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
@@ -373,6 +374,48 @@ const make = Effect.gen(function* () {
       createdAt: event.payload.createdAt,
     });
     return true;
+  });
+
+  const recoverWorkflowImplementationAfterStopFailure = Effect.fn(
+    "recoverWorkflowImplementationAfterStopFailure",
+  )(function* (input: {
+    readonly event: Extract<ProviderIntentEvent, { type: "thread.session-stop-requested" }>;
+    readonly cause: Cause.Cause<unknown>;
+  }) {
+    const workflowRecovery = input.event.payload.workflowRecovery;
+    if (workflowRecovery === undefined) return;
+    const snapshot = yield* projectionSnapshotQuery.getSnapshot();
+    const originThread = snapshot.threads.find(
+      (thread) => thread.id === workflowRecovery.originThreadId,
+    );
+    const implementation = originThread?.workflowAttachment?.ticketImplementations?.find(
+      (candidate) => candidate.id === workflowRecovery.implementationId,
+    );
+    const attachment = originThread?.workflowAttachment;
+    if (
+      originThread === undefined ||
+      implementation === undefined ||
+      attachment === undefined ||
+      implementation.status !== "stopping"
+    ) {
+      return;
+    }
+    const recovered: WorkflowTicketImplementation = {
+      ...implementation,
+      status: "needs-recovery",
+      recoveryPhase: implementation.recoveryPhase ?? "implementation",
+      failure: `Provider interruption failed before a typed terminal outcome: ${Cause.pretty(input.cause)}`,
+      updatedAt: input.event.payload.createdAt,
+    };
+    yield* orchestrationEngine.dispatch({
+      type: "thread.workflow.ticket-implementation.update",
+      commandId: yield* serverCommandId("workflow-ticket-implementation-stop-failure"),
+      threadId: originThread.id,
+      implementationId: implementation.id,
+      implementation: recovered,
+      expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      createdAt: input.event.payload.createdAt,
+    });
   });
 
   const formatFailureDetail = (cause: Cause.Cause<unknown>): string => {
@@ -1318,7 +1361,16 @@ const make = Effect.gen(function* () {
 
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      const stopSession = providerService.stopSession({ threadId: thread.id });
+      if (event.payload.workflowRecovery === undefined) {
+        yield* stopSession;
+      } else {
+        yield* stopSession.pipe(
+          Effect.catchCause((cause) =>
+            recoverWorkflowImplementationAfterStopFailure({ event, cause }),
+          ),
+        );
+      }
     }
 
     // Workflow Ticket Implementations must wait for the provider's typed

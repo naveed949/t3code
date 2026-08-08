@@ -17,6 +17,7 @@ import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import { parseWorkflowTicketImplementationReviewResult } from "../WorkflowTicketImplementationReview.ts";
+import * as Cause from "effect/Cause";
 import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -593,6 +594,9 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       const updated = yield* updateImplementation({
         implementationId: implementation.id,
         patch: {
+          status: phase === "review" ? "reviewing" : "implementing",
+          recoveryPhase: phase,
+          failure: null,
           ...(phase === "implementation" && skillRunId !== null
             ? { implementationSkillRunId: skillRunId }
             : {}),
@@ -670,6 +674,46 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     });
   });
 
+  const recoverAfterProcessorFailure = Effect.fn(
+    "WorkflowTicketImplementationReactor.recoverAfterProcessorFailure",
+  )(function* (input: {
+    readonly implementationId: string;
+    readonly cause: Cause.Cause<unknown>;
+    readonly updatedAt: string;
+  }) {
+    const snapshot = yield* snapshots.getSnapshot();
+    const originThread = snapshot.threads.find((thread) =>
+      thread.workflowAttachment?.ticketImplementations?.some(
+        (implementation) => implementation.id === input.implementationId,
+      ),
+    );
+    const implementation = originThread?.workflowAttachment?.ticketImplementations?.find(
+      (candidate) => candidate.id === input.implementationId,
+    );
+    if (
+      originThread === undefined ||
+      implementation === undefined ||
+      implementation.status === "cancelled" ||
+      implementation.status === "reviewed"
+    ) {
+      return;
+    }
+    const recovered = yield* updateImplementation({
+      implementationId: implementation.id,
+      patch: {
+        status: "needs-recovery",
+        recoveryPhase:
+          implementation.recoveryPhase ??
+          (implementation.status === "reviewing" ? "review" : "implementation"),
+        failure: `Ticket implementation effect failed before its milestone completed: ${Cause.pretty(input.cause)}`,
+        updatedAt: input.updatedAt,
+      },
+    });
+    if (recovered !== null) {
+      yield* publishProgress({ implementation: recovered, message: recovered.failure });
+    }
+  });
+
   const processTurnStartRequested = Effect.fn(
     "WorkflowTicketImplementationReactor.processTurnStartRequested",
   )(function* (event: TurnStartRequestedEvent) {
@@ -706,13 +750,29 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   ) {
     switch (event.type) {
       case "thread.workflow-ticket-implementation-requested":
-        yield* processRequested(event);
+        yield* processRequested(event).pipe(
+          Effect.catchCause((cause) =>
+            recoverAfterProcessorFailure({
+              implementationId: event.payload.implementation.id,
+              cause,
+              updatedAt: event.payload.createdAt,
+            }),
+          ),
+        );
         return;
       case "thread.workflow-ticket-implementation-updated":
         yield* processUpdated(event);
         return;
       case "thread.workflow-ticket-implementation-recovery-requested":
-        yield* processRecoveryRequested(event);
+        yield* processRecoveryRequested(event).pipe(
+          Effect.catchCause((cause) =>
+            recoverAfterProcessorFailure({
+              implementationId: event.payload.implementationId,
+              cause,
+              updatedAt: event.payload.createdAt,
+            }),
+          ),
+        );
         return;
       case "thread.session-set":
         yield* processSessionSet(event);

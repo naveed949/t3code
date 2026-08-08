@@ -211,6 +211,12 @@ function nodeState(input: {
   readonly ticketImplementation: WorkflowTicketImplementation | null;
   readonly workflowRunnable: boolean;
 }): WayfinderWorkflowOutlineNode["state"] {
+  if (
+    input.ticketImplementation?.status === "needs-recovery" ||
+    input.ticketImplementation?.status === "cancelled"
+  ) {
+    return { kind: "blocked", label: "Blocked" };
+  }
   if (input.ticket.state === "closed") return { kind: "completed", label: "Completed" };
   if (
     input.ticketImplementation?.status === "dispatching" ||
@@ -220,12 +226,6 @@ function nodeState(input: {
     input.ticketImplementation?.status === "reviewed"
   ) {
     return { kind: "active", label: "Active" };
-  }
-  if (
-    input.ticketImplementation?.status === "needs-recovery" ||
-    input.ticketImplementation?.status === "cancelled"
-  ) {
-    return { kind: "blocked", label: "Blocked" };
   }
   if (input.workflowRunnable) return { kind: "runnable", label: "Runnable" };
   if (input.frontier.has(input.ticket.number)) return { kind: "runnable", label: "Runnable" };

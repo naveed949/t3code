@@ -882,7 +882,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         case "thread.workflow-ticket-batch-publication-updated":
         case "thread.workflow-ticketing-failed":
         case "thread.workflow-ticket-implementation-requested":
-        case "thread.workflow-ticket-implementation-updated": {
+        case "thread.workflow-ticket-implementation-updated":
+        case "thread.workflow-ticket-implementation-recovery-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           });

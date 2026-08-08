@@ -1834,6 +1834,7 @@ function ChatViewContent(props: ChatViewProps) {
         input: {
           threadId: attachment.originThreadId,
           implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
           expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
           confirmed: true,
         },
@@ -1870,6 +1871,7 @@ function ChatViewContent(props: ChatViewProps) {
         input: {
           threadId: attachment.originThreadId,
           implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
           action,
           expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
           confirmed: true,

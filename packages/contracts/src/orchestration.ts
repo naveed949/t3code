@@ -1697,6 +1697,7 @@ const ThreadWorkflowTicketImplementationStopCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   implementationId: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
   expectedWorkstreamVersion: NonNegativeInt,
   confirmed: Schema.Literal(true),
   createdAt: IsoDateTime,
@@ -1710,11 +1711,17 @@ export const WorkflowTicketImplementationRecoveryAction = Schema.Literals([
 export type WorkflowTicketImplementationRecoveryAction =
   typeof WorkflowTicketImplementationRecoveryAction.Type;
 
+export const WorkflowRecoveryContext = Schema.Struct({
+  originThreadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+});
+
 const ThreadWorkflowTicketImplementationRecoverCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.ticket-implementation.recover"),
   commandId: CommandId,
   threadId: ThreadId,
   implementationId: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
   action: WorkflowTicketImplementationRecoveryAction,
   expectedWorkstreamVersion: NonNegativeInt,
   confirmed: Schema.Literal(true),
@@ -2410,12 +2417,7 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
   createdAt: IsoDateTime,
-  workflowRecovery: Schema.optional(
-    Schema.Struct({
-      originThreadId: ThreadId,
-      implementationId: TrimmedNonEmptyString,
-    }),
-  ),
+  workflowRecovery: Schema.optional(WorkflowRecoveryContext),
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
@@ -2426,12 +2428,7 @@ export const ThreadRevertedPayload = Schema.Struct({
 export const ThreadSessionStopRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   createdAt: IsoDateTime,
-  workflowRecovery: Schema.optional(
-    Schema.Struct({
-      originThreadId: ThreadId,
-      implementationId: TrimmedNonEmptyString,
-    }),
-  ),
+  workflowRecovery: Schema.optional(WorkflowRecoveryContext),
 });
 
 export const ThreadSessionSetPayload = Schema.Struct({
