@@ -571,6 +571,7 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly workflowGraph?: WorkflowGraph | null;
   readonly workflowAttachment?: WorkflowAttachment | null;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [workflowWorkspaceOpen, setWorkflowWorkspaceOpen] = useState(false);
@@ -754,6 +755,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           {...(props.onReturnToThread ? { onOpenThread: props.onReturnToThread } : {})}
           {...(props.onStartTicketImplementation
             ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
+          {...(props.onRetryTicketIntegration
+            ? { onRetryTicketIntegration: props.onRetryTicketIntegration }
             : {})}
         />
 

@@ -37,5 +37,9 @@ visible while the work progresses.
 
 Code Review is a required child of the implementation. A completed provider turn remains in review
 until it supplies structured review evidence; ordinary prose does not mark the ticket reviewed.
-A reviewed ticket still awaits downstream integration, so it does not release dependent tickets by
-itself.
+A reviewed ticket then enters the serialized integration lane. T3 merges its dedicated ticket
+worktree into the confirmed Workstream Baseline, records focused validation, closes the canonical
+tracker issue, and synchronizes the Tracker Projection. Dependents remain blocked until all of
+those milestones succeed. If tracker closure fails, the inspector exposes **Retry tracker
+closure**; retrying resumes tracker synchronization without replaying the successful merge or
+validation.

@@ -63,6 +63,8 @@ export type CompleteWorkflowSpecificationInput =
 export type PublishWorkflowTicketBatchInput = CommandInput<"thread.workflow.ticketing.publish">;
 export type StartWorkflowTicketImplementationInput =
   CommandInput<"thread.workflow.ticket-implementation.start">;
+export type RetryWorkflowTicketIntegrationInput =
+  CommandInput<"thread.workflow.ticket-integration.retry">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
 
@@ -459,6 +461,20 @@ export const startWorkflowTicketImplementation: (
     return yield* dispatch({
       ...input,
       type: "thread.workflow.ticket-implementation.start",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const retryWorkflowTicketIntegration: (
+  input: RetryWorkflowTicketIntegrationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.retryWorkflowTicketIntegration")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.ticket-integration.retry",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });
