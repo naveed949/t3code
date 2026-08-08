@@ -68,6 +68,10 @@ export type CompleteWorkflowSpecificationInput =
 export type PublishWorkflowTicketBatchInput = CommandInput<"thread.workflow.ticketing.publish">;
 export type StartWorkflowTicketImplementationInput =
   CommandInput<"thread.workflow.ticket-implementation.start">;
+export type StopWorkflowTicketImplementationInput =
+  CommandInput<"thread.workflow.ticket-implementation.stop">;
+export type RecoverWorkflowTicketImplementationInput =
+  CommandInput<"thread.workflow.ticket-implementation.recover">;
 export type RetryWorkflowTicketIntegrationInput =
   CommandInput<"thread.workflow.ticket-integration.retry">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
@@ -526,6 +530,34 @@ export const startWorkflowTicketImplementation: (
     return yield* dispatch({
       ...input,
       type: "thread.workflow.ticket-implementation.start",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const stopWorkflowTicketImplementation: (
+  input: StopWorkflowTicketImplementationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.stopWorkflowTicketImplementation")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.ticket-implementation.stop",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const recoverWorkflowTicketImplementation: (
+  input: RecoverWorkflowTicketImplementationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.recoverWorkflowTicketImplementation")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.ticket-implementation.recover",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

@@ -21,6 +21,7 @@ import {
   type WayfinderResearchAction,
   type WorkflowRunConfiguration,
   type WorkflowPrdDocument,
+  type WorkflowTicketImplementationRecoveryAction,
   OrchestrationThreadActivity,
   ProviderInteractionMode,
   ProviderDriverKind,
@@ -1258,6 +1259,14 @@ function ChatViewContent(props: ChatViewProps) {
     threadEnvironment.startTicketImplementation,
     { reportFailure: false },
   );
+  const stopWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.stopTicketImplementation,
+    { reportFailure: false },
+  );
+  const recoverWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.recoverTicketImplementation,
+    { reportFailure: false },
+  );
   const retryWorkflowTicketIntegrationCommand = useAtomCommand(
     threadEnvironment.retryTicketIntegration,
     { reportFailure: false },
@@ -1810,6 +1819,76 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, activeWayfinderWorkstream, startWorkflowTicketImplementationCommand],
   );
+  const stopWorkflowTicketImplementation = useCallback(
+    (ticketNodeId: string) => {
+      const attachment = activeWayfinderWorkstream?.workflowAttachment;
+      const implementation = attachment?.ticketImplementations?.find(
+        (candidate) => candidate.nodeId === ticketNodeId,
+      );
+      if (
+        !activeThread ||
+        attachment === null ||
+        attachment === undefined ||
+        implementation === undefined
+      ) {
+        return;
+      }
+      void stopWorkflowTicketImplementationCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+        },
+      });
+    },
+    [activeThread, activeWayfinderWorkstream, stopWorkflowTicketImplementationCommand],
+  );
+  const recoverWorkflowTicketImplementation = useCallback(
+    (ticketNodeId: string, action: WorkflowTicketImplementationRecoveryAction) => {
+      const attachment = activeWayfinderWorkstream?.workflowAttachment;
+      const implementation = attachment?.ticketImplementations?.find(
+        (candidate) => candidate.nodeId === ticketNodeId,
+      );
+      if (
+        !activeThread ||
+        attachment === null ||
+        attachment === undefined ||
+        implementation === undefined
+      ) {
+        return;
+      }
+      if (
+        (action === "cancel-with-changes" || action === "restore-to-checkpoint") &&
+        !window.confirm(
+          action === "cancel-with-changes"
+            ? "Cancel this run while retaining its worktree and changes?"
+            : "Restore the retained worktree to its selected checkpoint?",
+        )
+      ) {
+        return;
+      }
+      void recoverWorkflowTicketImplementationCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
+          action,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+          ...(action === "restore-to-checkpoint" &&
+          implementation.recoveryCheckpointTurnCount !== undefined
+            ? { checkpointTurnCount: implementation.recoveryCheckpointTurnCount }
+            : {}),
+        },
+      });
+    },
+    [activeThread, activeWayfinderWorkstream, recoverWorkflowTicketImplementationCommand],
+  );
+
   const retryWorkflowTicketIntegration = useCallback(
     (implementationId: string) => {
       const attachment = activeWayfinderWorkstream?.workflowAttachment;
@@ -6232,6 +6311,8 @@ function ChatViewContent(props: ChatViewProps) {
         onStartToSpec={onStartWayfinderToSpec}
         workflowAttachment={activeWayfinderWorkstream?.workflowAttachment ?? null}
         onStartTicketImplementation={startWorkflowTicketImplementation}
+        onStopTicketImplementation={stopWorkflowTicketImplementation}
+        onRecoverTicketImplementation={recoverWorkflowTicketImplementation}
         onRetryTicketIntegration={retryWorkflowTicketIntegration}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}

@@ -1023,6 +1023,24 @@ function ticketImplementationAvailability(input: {
           canStart: false,
           reason: `Ticket Implementation is ${implementation.status}.`,
         };
+      case "stopping":
+        return {
+          status: "stopping",
+          canStart: false,
+          reason: "Provider interruption is still awaiting a typed terminal outcome.",
+        };
+      case "needs-recovery":
+        return {
+          status: "needs-recovery",
+          canStart: false,
+          reason: "The accepted Ticket Implementation needs an explicit recovery action.",
+        };
+      case "cancelled":
+        return {
+          status: "cancelled",
+          canStart: false,
+          reason: "The cancelled Ticket Implementation does not satisfy required work.",
+        };
       case "checkpointed":
         return {
           status: "checkpointed",
@@ -1182,9 +1200,16 @@ function workflowTicketImplementationStatusTransitionAllowed(
     case "dispatching":
       return next === "implementing" || next === "failed";
     case "implementing":
-      return next === "reviewing" || next === "checkpointed" || next === "failed";
+      return (
+        next === "reviewing" || next === "checkpointed" || next === "failed" || next === "stopping"
+      );
     case "reviewing":
-      return next === "checkpointed" || next === "failed";
+      return next === "checkpointed" || next === "failed" || next === "stopping";
+    case "stopping":
+      return next === "needs-recovery";
+    case "needs-recovery":
+      return next === "implementing" || next === "reviewing" || next === "cancelled";
+    case "cancelled":
     case "checkpointed":
       return false;
     case "reviewed":
@@ -1209,6 +1234,8 @@ function workflowTicketImplementationEventBase(input: {
     | { readonly type: "thread.workflow.ticket-integration.retry" }
     | { readonly type: "thread.workflow.ticket-implementation.checkpoint" }
     | { readonly type: "thread.workflow.ticket-implementation.review.record" }
+    | { readonly type: "thread.workflow.ticket-implementation.stop" }
+    | { readonly type: "thread.workflow.ticket-implementation.recover" }
     | { readonly type: "thread.workflow.ticket-implementation.correction.start" }
   >;
   readonly attachment: WorkflowAttachment;
@@ -1242,6 +1269,47 @@ function workflowTicketImplementationEventBase(input: {
                   implementation: input.implementation,
                   attachment: input.attachment,
                 },
+        }) as PlannedOrchestrationEvent,
+    ),
+  );
+}
+
+function workflowTicketImplementationRecoveryEventBase(input: {
+  readonly command: Extract<
+    OrchestrationCommand,
+    { readonly type: "thread.workflow.ticket-implementation.recover" }
+  >;
+  readonly attachment: WorkflowAttachment;
+  readonly implementation: WorkflowTicketImplementation;
+  readonly action: Extract<
+    OrchestrationCommand,
+    { readonly type: "thread.workflow.ticket-implementation.recover" }
+  >["action"];
+  readonly checkpointTurnCount?: number;
+}): Effect.Effect<PlannedOrchestrationEvent, PlatformError.PlatformError, Crypto.Crypto> {
+  return withEventBase({
+    aggregateKind: "thread",
+    aggregateId: input.command.threadId,
+    occurredAt: input.command.createdAt,
+    commandId: input.command.commandId,
+  }).pipe(
+    Effect.map(
+      (eventBase) =>
+        ({
+          ...eventBase,
+          type: "thread.workflow-ticket-implementation-recovery-requested",
+          payload: {
+            threadId: input.command.threadId,
+            implementationId: input.implementation.id,
+            implementationThreadId: input.implementation.implementationThreadId!,
+            action: input.action,
+            ...(input.checkpointTurnCount === undefined
+              ? {}
+              : { checkpointTurnCount: input.checkpointTurnCount }),
+            implementation: input.implementation,
+            attachment: input.attachment,
+            createdAt: input.command.createdAt,
+          },
         }) as PlannedOrchestrationEvent,
     ),
   );
@@ -1512,6 +1580,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           exceptProjectId: command.projectId,
         });
       }
+
       const occurredAt = yield* nowIso;
       return {
         ...(yield* withEventBase({
@@ -3756,12 +3825,25 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const active = workflowTicketImplementations(attachment).find(
         (implementation) =>
           implementation.nodeId === command.ticketNodeId &&
-          ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+          ["dispatching", "implementing", "reviewing", "stopping", "needs-recovery"].includes(
+            implementation.status,
+          ),
       );
       if (active !== undefined) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
           detail: `Ticket Implementation is already ${active.status} for the target node.`,
+        });
+      }
+      const cancelled = workflowTicketImplementations(attachment).find(
+        (implementation) =>
+          implementation.nodeId === command.ticketNodeId && implementation.status === "cancelled",
+      );
+      if (cancelled !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The required Ticket Implementation was cancelled and cannot be replaced by a new run.",
         });
       }
 
@@ -3975,6 +4057,256 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         implementation,
         eventType: "thread.workflow-ticket-implementation-checkpointed",
       });
+    }
+
+    case "thread.workflow.ticket-implementation.stop": {
+      const originThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = originThread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stopping a Ticket Implementation requires an existing implementation.",
+        });
+      }
+      if (command.actionIdentity !== current.actionIdentity) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop does not match the server-owned Ticket Implementation identity.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop has a stale Workstream version; refresh the Workflow Projection first.",
+        });
+      }
+      if (current.implementationThreadId === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A Ticket Implementation can only be stopped after its provider thread is retained.",
+        });
+      }
+      if (
+        current.status !== "dispatching" &&
+        current.status !== "implementing" &&
+        current.status !== "reviewing"
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Ticket Implementation cannot be stopped from ${current.status}.`,
+        });
+      }
+      const implementationThread = readModel.threads.find(
+        (thread) => thread.id === current.implementationThreadId,
+      );
+      if (
+        implementationThread?.session === null ||
+        implementationThread?.session === undefined ||
+        (implementationThread.session.status !== "starting" &&
+          implementationThread.session.status !== "running" &&
+          implementationThread.session.status !== "ready")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The retained provider thread has no active session to interrupt.",
+        });
+      }
+
+      const implementation: WorkflowTicketImplementation = {
+        ...current,
+        status: "stopping",
+        recoveryPhase: current.status === "reviewing" ? "review" : "implementation",
+        failure: null,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === current.id ? implementation : candidate,
+          ),
+        }),
+      );
+      const implementationUpdated = yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-updated",
+      });
+      const stopBase = yield* withEventBase({
+        aggregateKind: "thread",
+        aggregateId: current.implementationThreadId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      });
+      return [
+        implementationUpdated,
+        {
+          ...stopBase,
+          type: "thread.session-stop-requested",
+          payload: {
+            threadId: current.implementationThreadId,
+            createdAt: command.createdAt,
+            workflowRecovery: {
+              originThreadId: command.threadId,
+              implementationId: current.id,
+            },
+          },
+        },
+      ];
+    }
+
+    case "thread.workflow.ticket-implementation.recover": {
+      const originThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = originThread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Recovery requires an existing Ticket Implementation.",
+        });
+      }
+      if (command.actionIdentity !== current.actionIdentity) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Recovery does not match the server-owned Ticket Implementation identity.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Recovery has a stale Workstream version; refresh the Workflow Projection first.",
+        });
+      }
+      if (current.status !== "needs-recovery") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Recovery actions are only available from Needs Recovery, not ${current.status}.`,
+        });
+      }
+
+      const implementationThreadId = current.implementationThreadId;
+      const implementationThread =
+        implementationThreadId === null
+          ? undefined
+          : readModel.threads.find((thread) => thread.id === implementationThreadId);
+      if (implementationThreadId === null || implementationThread === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Recovery requires the retained provider thread.",
+        });
+      }
+
+      let implementation: WorkflowTicketImplementation;
+      switch (command.action) {
+        case "resume": {
+          const recoveryPhase = current.recoveryPhase ?? "implementation";
+          implementation = {
+            ...current,
+            status: recoveryPhase === "review" ? "reviewing" : "implementing",
+            implementationSkillRunId:
+              recoveryPhase === "implementation" ? null : current.implementationSkillRunId,
+            reviewSkillRunId: recoveryPhase === "review" ? null : current.reviewSkillRunId,
+            recoveryPhase,
+            recoveryAttempt: (current.recoveryAttempt ?? 0) + 1,
+            failure: null,
+            updatedAt: command.createdAt,
+          };
+          break;
+        }
+        case "cancel-with-changes":
+          implementation = {
+            ...current,
+            status: "cancelled",
+            updatedAt: command.createdAt,
+          };
+          break;
+        case "restore-to-checkpoint": {
+          if (command.checkpointTurnCount === undefined) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: "Restore requires an explicit checkpoint turn count.",
+            });
+          }
+          const checkpointAvailable =
+            command.checkpointTurnCount === 0 ||
+            implementationThread.checkpoints.some(
+              (checkpoint) =>
+                checkpoint.checkpointTurnCount === command.checkpointTurnCount &&
+                checkpoint.status === "ready",
+            );
+          if (!checkpointAvailable) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Checkpoint turn ${command.checkpointTurnCount} is not available for explicit restore.`,
+            });
+          }
+          implementation = {
+            ...current,
+            recoveryCheckpointTurnCount: command.checkpointTurnCount,
+            updatedAt: command.createdAt,
+          };
+          break;
+        }
+      }
+
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === current.id ? implementation : candidate,
+          ),
+        }),
+      );
+      const recoveryRequested = yield* workflowTicketImplementationRecoveryEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        action: command.action,
+        ...(command.checkpointTurnCount === undefined
+          ? {}
+          : { checkpointTurnCount: command.checkpointTurnCount }),
+      });
+      if (command.action !== "restore-to-checkpoint") {
+        return recoveryRequested;
+      }
+
+      const checkpointBase = yield* withEventBase({
+        aggregateKind: "thread",
+        aggregateId: implementationThreadId,
+        occurredAt: command.createdAt,
+        commandId: command.commandId,
+      });
+      return [
+        recoveryRequested,
+        {
+          ...checkpointBase,
+          type: "thread.checkpoint-revert-requested",
+          payload: {
+            threadId: implementationThreadId,
+            turnCount: command.checkpointTurnCount!,
+            createdAt: command.createdAt,
+            workflowRecovery: {
+              originThreadId: command.threadId,
+              implementationId: implementation.id,
+            },
+          },
+        },
+      ];
     }
 
     case "thread.workflow.ticket-implementation.update": {

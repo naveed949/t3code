@@ -2,7 +2,7 @@ import type {
   WayfinderWorkflowOutlineNode,
   WayfinderWorkflowViewModel,
 } from "@t3tools/client-runtime/state/wayfinder-workflow";
-import type { ThreadId } from "@t3tools/contracts";
+import type { ThreadId, WorkflowTicketImplementationRecoveryAction } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -13,12 +13,29 @@ function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onStopTicketImplementation?: (nodeId: string) => void;
+  readonly onRecoverTicketImplementation?: (
+    nodeId: string,
+    action: WorkflowTicketImplementationRecoveryAction,
+  ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const canonicalEvidence = props.node.evidence.find((evidence) => evidence.url !== undefined);
   const implementation = props.node.ticketImplementation ?? null;
   const implementationAction = props.node.allowedActions.find(
     (action) => action.id === "start-ticket-implementation" && action.enabled,
+  );
+  const stopAction = props.node.allowedActions.find(
+    (action) => action.id === "stop-ticket-implementation" && action.enabled,
+  );
+  const resumeAction = props.node.allowedActions.find(
+    (action) => action.id === "resume-ticket-implementation" && action.enabled,
+  );
+  const cancelAction = props.node.allowedActions.find(
+    (action) => action.id === "cancel-ticket-implementation" && action.enabled,
+  );
+  const restoreAction = props.node.allowedActions.find(
+    (action) => action.id === "restore-ticket-implementation" && action.enabled,
   );
   const integrationRetryAction = props.node.allowedActions.find(
     (action) => action.id === "retry-ticket-integration" && action.enabled,
@@ -177,7 +194,9 @@ function WorkflowNodeInspector(props: {
             onPress={() => props.onOpenThread(implementation.implementationThreadId!)}
           >
             <Text className="text-xs font-semibold text-foreground">
-              Open implementation thread
+              {implementation.status === "needs-recovery"
+                ? "Inspect retained work"
+                : "Open implementation thread"}
             </Text>
           </Pressable>
         ) : null}
@@ -190,6 +209,46 @@ function WorkflowNodeInspector(props: {
             <Text className="text-xs font-semibold text-foreground">
               {implementationAction.label}
             </Text>
+          </Pressable>
+        ) : null}
+        {stopAction && props.onStopTicketImplementation ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => props.onStopTicketImplementation?.(props.node.id)}
+          >
+            <Text className="text-xs font-semibold text-foreground">Stop</Text>
+          </Pressable>
+        ) : null}
+        {resumeAction && props.onRecoverTicketImplementation ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() => props.onRecoverTicketImplementation?.(props.node.id, "resume")}
+          >
+            <Text className="text-xs font-semibold text-foreground">Resume</Text>
+          </Pressable>
+        ) : null}
+        {cancelAction && props.onRecoverTicketImplementation ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() =>
+              props.onRecoverTicketImplementation?.(props.node.id, "cancel-with-changes")
+            }
+          >
+            <Text className="text-xs font-semibold text-foreground">Cancel with changes</Text>
+          </Pressable>
+        ) : null}
+        {restoreAction && props.onRecoverTicketImplementation ? (
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-lg border border-border px-3 py-2"
+            onPress={() =>
+              props.onRecoverTicketImplementation?.(props.node.id, "restore-to-checkpoint")
+            }
+          >
+            <Text className="text-xs font-semibold text-foreground">Restore checkpoint</Text>
           </Pressable>
         ) : null}
         {integrationRetryAction &&
@@ -239,6 +298,11 @@ export function WorkflowPanel(props: {
   readonly model: WayfinderWorkflowViewModel;
   readonly onOpenThread: (threadId: ThreadId) => void;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onStopTicketImplementation?: (nodeId: string) => void;
+  readonly onRecoverTicketImplementation?: (
+    nodeId: string,
+    action: WorkflowTicketImplementationRecoveryAction,
+  ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -404,6 +468,12 @@ export function WorkflowPanel(props: {
           onOpenThread={props.onOpenThread}
           {...(props.onStartTicketImplementation
             ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
+          {...(props.onStopTicketImplementation
+            ? { onStopTicketImplementation: props.onStopTicketImplementation }
+            : {})}
+          {...(props.onRecoverTicketImplementation
+            ? { onRecoverTicketImplementation: props.onRecoverTicketImplementation }
             : {})}
           {...(props.onRetryTicketIntegration
             ? { onRetryTicketIntegration: props.onRetryTicketIntegration }

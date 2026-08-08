@@ -27,6 +27,7 @@ import type {
   WayfinderSynchronizationState,
   WorkflowAttachment,
   WorkflowGraph,
+  WorkflowTicketImplementationRecoveryAction,
 } from "@t3tools/contracts";
 import {
   deriveWayfinderReadiness,
@@ -571,6 +572,11 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly workflowGraph?: WorkflowGraph | null;
   readonly workflowAttachment?: WorkflowAttachment | null;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onStopTicketImplementation?: (nodeId: string) => void;
+  readonly onRecoverTicketImplementation?: (
+    nodeId: string,
+    action: WorkflowTicketImplementationRecoveryAction,
+  ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -755,6 +761,12 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
           {...(props.onReturnToThread ? { onOpenThread: props.onReturnToThread } : {})}
           {...(props.onStartTicketImplementation
             ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
+          {...(props.onStopTicketImplementation
+            ? { onStopTicketImplementation: props.onStopTicketImplementation }
+            : {})}
+          {...(props.onRecoverTicketImplementation
+            ? { onRecoverTicketImplementation: props.onRecoverTicketImplementation }
             : {})}
           {...(props.onRetryTicketIntegration
             ? { onRetryTicketIntegration: props.onRetryTicketIntegration }

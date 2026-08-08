@@ -27,6 +27,7 @@ import {
   type WayfinderReconcileReason,
   type WayfinderResearchAction,
   type WayfinderResearchState,
+  type WorkflowTicketImplementationRecoveryAction,
 } from "@t3tools/contracts";
 import {
   StackActions,
@@ -592,6 +593,14 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.startTicketImplementation,
     "start ticket implementation",
   );
+  const stopWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.stopTicketImplementation,
+    "stop ticket implementation",
+  );
+  const recoverWorkflowTicketImplementationCommand = useAtomCommand(
+    threadEnvironment.recoverTicketImplementation,
+    "recover ticket implementation",
+  );
   const retryWorkflowTicketIntegrationCommand = useAtomCommand(
     threadEnvironment.retryTicketIntegration,
     "retry ticket integration",
@@ -864,6 +873,79 @@ function WayfinderWorkbenchContent(props: {
     },
     [props.environmentId, startWorkflowTicketImplementationCommand, workstream],
   );
+  const stopTicketImplementation = useCallback(
+    (ticketNodeId: string) => {
+      const attachment = workstream?.workflowAttachment;
+      const implementation = attachment?.ticketImplementations?.find(
+        (candidate) => candidate.nodeId === ticketNodeId,
+      );
+      if (attachment === null || attachment === undefined || implementation === undefined) return;
+      Alert.alert(
+        "Stop implementation?",
+        "The provider will be interrupted and retained work will need recovery.",
+        [
+          { text: "Keep running", style: "cancel" },
+          {
+            text: "Stop",
+            style: "destructive",
+            onPress: () =>
+              void stopWorkflowTicketImplementationCommand({
+                environmentId: props.environmentId,
+                input: {
+                  threadId: attachment.originThreadId,
+                  implementationId: implementation.id,
+                  actionIdentity: implementation.actionIdentity,
+                  expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+                  confirmed: true,
+                },
+              }),
+          },
+        ],
+      );
+    },
+    [props.environmentId, stopWorkflowTicketImplementationCommand, workstream],
+  );
+  const recoverTicketImplementation = useCallback(
+    (ticketNodeId: string, action: WorkflowTicketImplementationRecoveryAction) => {
+      const attachment = workstream?.workflowAttachment;
+      const implementation = attachment?.ticketImplementations?.find(
+        (candidate) => candidate.nodeId === ticketNodeId,
+      );
+      if (attachment === null || attachment === undefined || implementation === undefined) return;
+      const dispatch = () =>
+        void recoverWorkflowTicketImplementationCommand({
+          environmentId: props.environmentId,
+          input: {
+            threadId: attachment.originThreadId,
+            implementationId: implementation.id,
+            actionIdentity: implementation.actionIdentity,
+            action,
+            expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+            confirmed: true,
+            ...(action === "restore-to-checkpoint" &&
+            implementation.recoveryCheckpointTurnCount !== undefined
+              ? { checkpointTurnCount: implementation.recoveryCheckpointTurnCount }
+              : {}),
+          },
+        });
+      if (action === "cancel-with-changes" || action === "restore-to-checkpoint") {
+        Alert.alert(
+          action === "cancel-with-changes" ? "Cancel implementation?" : "Restore checkpoint?",
+          action === "cancel-with-changes"
+            ? "Changes and the worktree will be retained, but this required work remains cancelled."
+            : "Restore the retained worktree to the selected checkpoint?",
+          [
+            { text: "Keep", style: "cancel" },
+            { text: "Confirm", style: "destructive", onPress: dispatch },
+          ],
+        );
+        return;
+      }
+      dispatch();
+    },
+    [props.environmentId, recoverWorkflowTicketImplementationCommand, workstream],
+  );
+
   const retryTicketIntegration = useCallback(
     (implementationId: string) => {
       const attachment = workstream?.workflowAttachment;
@@ -880,7 +962,6 @@ function WayfinderWorkbenchContent(props: {
     },
     [props.environmentId, retryWorkflowTicketIntegrationCommand, workstream],
   );
-
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -961,6 +1042,8 @@ function WayfinderWorkbenchContent(props: {
         model={workflowPresentation}
         onOpenThread={props.onReturnToThread}
         onStartTicketImplementation={startTicketImplementation}
+        onStopTicketImplementation={stopTicketImplementation}
+        onRecoverTicketImplementation={recoverTicketImplementation}
         onRetryTicketIntegration={retryTicketIntegration}
       />
 

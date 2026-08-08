@@ -704,7 +704,7 @@ const make = Effect.gen(function* () {
     }
 
     const sessionRuntime = yield* resolveSessionRuntimeForThread(event.payload.threadId);
-    if (Option.isNone(sessionRuntime)) {
+    if (Option.isNone(sessionRuntime) && event.payload.workflowRecovery === undefined) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -713,7 +713,15 @@ const make = Effect.gen(function* () {
       }).pipe(Effect.catch(() => Effect.void));
       return;
     }
-    if (!isGitWorkspace(sessionRuntime.value.cwd)) {
+    const checkpointCwd = Option.isSome(sessionRuntime)
+      ? sessionRuntime.value.cwd
+      : yield* resolveCheckpointCwd({
+          threadId: thread.id,
+          thread,
+          projects: yield* resolveThreadProjects(thread.projectId),
+          preferSessionRuntime: true,
+        });
+    if (!checkpointCwd || !isGitWorkspace(checkpointCwd)) {
       yield* appendRevertFailureActivity({
         threadId: event.payload.threadId,
         turnCount: event.payload.turnCount,
@@ -756,7 +764,7 @@ const make = Effect.gen(function* () {
     }
 
     const restored = yield* checkpointStore.restoreCheckpoint({
-      cwd: sessionRuntime.value.cwd,
+      cwd: checkpointCwd,
       checkpointRef: targetCheckpointRef,
       fallbackToHead: event.payload.turnCount === 0,
     });
@@ -772,10 +780,10 @@ const make = Effect.gen(function* () {
 
     // Refresh the workspace entry index so the @-mention file picker
     // reflects the reverted filesystem state.
-    yield* workspaceEntries.refresh(sessionRuntime.value.cwd);
+    yield* workspaceEntries.refresh(checkpointCwd);
 
     const rolledBackTurns = Math.max(0, currentTurnCount - event.payload.turnCount);
-    if (rolledBackTurns > 0) {
+    if (rolledBackTurns > 0 && Option.isSome(sessionRuntime)) {
       yield* providerService.rollbackConversation({
         threadId: sessionRuntime.value.threadId,
         numTurns: rolledBackTurns,
@@ -791,7 +799,7 @@ const make = Effect.gen(function* () {
 
     if (staleCheckpointRefs.length > 0) {
       yield* checkpointStore.deleteCheckpointRefs({
-        cwd: sessionRuntime.value.cwd,
+        cwd: checkpointCwd,
         checkpointRefs: staleCheckpointRefs,
       });
     }

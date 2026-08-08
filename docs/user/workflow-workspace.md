@@ -37,6 +37,23 @@ visible while the work progresses.
 
 Code Review is a required child of the implementation. A completed provider turn remains in review
 until it supplies structured review evidence; ordinary prose does not mark the ticket reviewed.
+A reviewed ticket still awaits downstream integration, so it does not release dependent tickets by
+itself.
+
+## Stopping and recovering an implementation
+
+Use **Stop** when an accepted provider run should be interrupted. Stop does not pause the run or
+roll back its work. T3 retains the linked implementation thread, isolated worktree, checkpoints,
+and available diff while the provider reports its typed terminal outcome.
+
+The node then shows **Needs Recovery**. Open **Inspect retained work** to review the retained
+thread and changes, or choose **Resume** to start the pinned implementation or review step again
+in the same worktree. **Cancel with changes** is terminal: it keeps the worktree and diff but does
+not satisfy the ticket or release dependents. When a ready checkpoint is available, **Restore
+checkpoint** requires confirmation before changing the retained worktree. Recovery actions are
+explicit and stale or duplicate requests are rejected safely; the Workflow Projection remains the
+source of truth for the current state.
+
 A reviewed ticket then enters the serialized integration lane. T3 merges its dedicated ticket
 worktree into the confirmed Workstream Baseline, records focused validation, closes the canonical
 tracker issue, and synchronizes the Tracker Projection. Dependents remain blocked until all of

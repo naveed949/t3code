@@ -1,5 +1,6 @@
 import {
   ApprovalRequestId,
+  CheckpointRef,
   CommandId,
   EventId,
   MessageId,
@@ -1065,6 +1066,290 @@ it.layer(NodeServices.layer)("Ticket Implementation boundary", (it) => {
         review,
         validation,
       });
+    }),
+  );
+
+  it.effect("stops an accepted implementation without dropping recovery evidence", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const started = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.ticket-implementation.start" as const,
+          commandId: CommandId.make("ticket-implementation-stop-start"),
+          threadId: originThreadId,
+          ticketNodeId: implementationNodeId,
+          actionIdentity: "ticket-implementation:37:stop",
+          expectedWorkstreamVersion: 3,
+          confirmed: true as const,
+          createdAt: publishedAt,
+        },
+      });
+      const afterStart = yield* Effect.promise(() => applyEvents(model, normalizeEvents(started)));
+      const dispatched = afterStart.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(dispatched).toBeDefined();
+      const implementationThreadId = ThreadId.make("ticket-implementation-stop-thread");
+      const accepted = {
+        ...dispatched!,
+        status: "implementing" as const,
+        implementationThreadId,
+        implementationSkillRunId: SkillRunId.make("skill-run:ticket-implementation-stop"),
+        worktreePath: "/tmp/t3-ticket-implementation-stop",
+        diff: {
+          fixedPoint: dispatched!.fixedPoint,
+          files: [{ path: "src/changed.ts", additions: 2, deletions: 1 }],
+          additions: 2,
+          deletions: 1,
+          capturedAt: publishedAt,
+        },
+        updatedAt: publishedAt,
+      };
+      const acceptedModel: OrchestrationReadModel = {
+        ...afterStart,
+        threads: [
+          ...afterStart.threads.map((candidate) =>
+            candidate.id === originThreadId
+              ? {
+                  ...candidate,
+                  workflowAttachment: {
+                    ...candidate.workflowAttachment!,
+                    ticketImplementations: [accepted],
+                  },
+                }
+              : candidate,
+          ),
+          {
+            ...thread(implementationThreadId),
+            branch: accepted.branch,
+            worktreePath: accepted.worktreePath,
+            session: {
+              threadId: implementationThreadId,
+              status: "running" as const,
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access" as const,
+              activeTurnId: TurnId.make("turn:ticket-implementation-stop"),
+              lastError: null,
+              updatedAt: publishedAt,
+            },
+            checkpoints: [
+              {
+                turnId: TurnId.make("turn:ticket-implementation-stop"),
+                checkpointTurnCount: 1,
+                checkpointRef: CheckpointRef.make("refs/t3/checkpoints/stop/turn/1"),
+                status: "ready" as const,
+                files: [],
+                assistantMessageId: null,
+                completedAt: publishedAt,
+              },
+            ],
+          },
+        ],
+      };
+      const stop = yield* decideOrchestrationCommand({
+        readModel: acceptedModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.stop" as const,
+          commandId: CommandId.make("ticket-implementation-stop"),
+          threadId: originThreadId,
+          implementationId: accepted.id,
+          actionIdentity: accepted.actionIdentity,
+          expectedWorkstreamVersion: acceptedModel.threads[0]!.workflowAttachment!.workflowVersion!,
+          confirmed: true as const,
+          createdAt: resolvedAt,
+        },
+      });
+
+      const stopEvents = normalizeEvents(stop);
+      expect(stopEvents.map((event) => event.type)).toEqual([
+        "thread.workflow-ticket-implementation-updated",
+        "thread.session-stop-requested",
+      ]);
+      const afterStop = yield* Effect.promise(() => applyEvents(acceptedModel, stopEvents));
+      const stopped = afterStop.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(stopped).toMatchObject({
+        status: "stopping",
+        implementationThreadId,
+        worktreePath: accepted.worktreePath,
+        diff: accepted.diff,
+      });
+      const stopRequest = stopEvents[1];
+      expect(stopRequest).toMatchObject({
+        type: "thread.session-stop-requested",
+        payload: {
+          threadId: implementationThreadId,
+          workflowRecovery: {
+            originThreadId,
+            implementationId: accepted.id,
+          },
+        },
+      });
+    }),
+  );
+
+  it.effect("requires explicit recovery actions and keeps cancellation terminal", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const implementation = {
+        id: "implementation:recovery",
+        workstreamId,
+        nodeId: implementationNodeId,
+        ticketKey: batch.tickets[0]!.key,
+        ticketNumber: 37,
+        title: batch.tickets[0]!.title,
+        actionIdentity: "ticket-implementation:37:recovery",
+        status: "needs-recovery" as const,
+        originThreadId,
+        implementationThreadId: ThreadId.make("ticket-implementation-recovery-thread"),
+        worktreePath: "/tmp/t3-ticket-implementation-recovery",
+        branch: "codex/ticket-37-recovery",
+        fixedPoint: "2514a152021bf9522e501ceeae5e9ab292af29b6",
+        acceptanceCriteria: batch.tickets[0]!.body,
+        providerInstanceId,
+        implementSkill,
+        reviewSkill,
+        implementationSkillRunId: SkillRunId.make("skill-run:recovery-interrupted"),
+        reviewSkillRunId: null,
+        validation: [],
+        diff: {
+          fixedPoint: "2514a152021bf9522e501ceeae5e9ab292af29b6",
+          files: [{ path: "src/changed.ts", additions: 2, deletions: 1 }],
+          additions: 2,
+          deletions: 1,
+          capturedAt: publishedAt,
+        },
+        review: null,
+        recoveryPhase: "implementation" as const,
+        recoveryAttempt: 0,
+        recoveryCheckpointTurnCount: 1,
+        failure: "The provider session stopped before the workflow milestone completed.",
+        startedAt: now,
+        updatedAt: publishedAt,
+      };
+      const recoveryThread = {
+        ...thread(implementation.implementationThreadId),
+        checkpoints: [
+          {
+            turnId: TurnId.make("turn:recovery"),
+            checkpointTurnCount: 1,
+            checkpointRef: CheckpointRef.make("refs/t3/checkpoints/recovery/turn/1"),
+            status: "ready" as const,
+            files: [],
+            assistantMessageId: null,
+            completedAt: publishedAt,
+          },
+        ],
+      };
+      const recoveryModel: OrchestrationReadModel = {
+        ...model,
+        threads: [
+          ...model.threads.map((candidate) =>
+            candidate.id === originThreadId
+              ? {
+                  ...candidate,
+                  workflowAttachment: {
+                    ...candidate.workflowAttachment!,
+                    workflowVersion: 4,
+                    ticketImplementations: [implementation],
+                  },
+                }
+              : candidate,
+          ),
+          recoveryThread,
+        ],
+      };
+      const resume = yield* decideOrchestrationCommand({
+        readModel: recoveryModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.recover" as const,
+          commandId: CommandId.make("ticket-implementation-resume"),
+          threadId: originThreadId,
+          implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
+          action: "resume" as const,
+          expectedWorkstreamVersion: 4,
+          confirmed: true as const,
+          createdAt: resolvedAt,
+        },
+      });
+      const resumed = yield* Effect.promise(() =>
+        applyEvents(recoveryModel, normalizeEvents(resume)),
+      );
+      expect(resumed.threads[0]?.workflowAttachment?.ticketImplementations?.[0]).toMatchObject({
+        status: "implementing",
+        implementationThreadId: implementation.implementationThreadId,
+        worktreePath: implementation.worktreePath,
+        diff: implementation.diff,
+        recoveryAttempt: 1,
+      });
+
+      const restore = yield* decideOrchestrationCommand({
+        readModel: recoveryModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.recover" as const,
+          commandId: CommandId.make("ticket-implementation-restore"),
+          threadId: originThreadId,
+          implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
+          action: "restore-to-checkpoint" as const,
+          checkpointTurnCount: 1,
+          expectedWorkstreamVersion: 4,
+          confirmed: true as const,
+          createdAt: resolvedAt,
+        },
+      });
+      expect(normalizeEvents(restore).map((event) => event.type)).toEqual([
+        "thread.workflow-ticket-implementation-recovery-requested",
+        "thread.checkpoint-revert-requested",
+      ]);
+      expect(normalizeEvents(restore)[1]).toMatchObject({
+        type: "thread.checkpoint-revert-requested",
+        payload: {
+          workflowRecovery: {
+            originThreadId,
+            implementationId: implementation.id,
+          },
+        },
+      });
+
+      const cancelled = yield* decideOrchestrationCommand({
+        readModel: recoveryModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.recover" as const,
+          commandId: CommandId.make("ticket-implementation-cancel"),
+          threadId: originThreadId,
+          implementationId: implementation.id,
+          actionIdentity: implementation.actionIdentity,
+          action: "cancel-with-changes" as const,
+          expectedWorkstreamVersion: 4,
+          confirmed: true as const,
+          createdAt: resolvedAt,
+        },
+      });
+      const cancelledModel = yield* Effect.promise(() =>
+        applyEvents(recoveryModel, normalizeEvents(cancelled)),
+      );
+      expect(
+        cancelledModel.threads[0]?.workflowAttachment?.ticketImplementations?.[0],
+      ).toMatchObject({
+        status: "cancelled",
+        worktreePath: implementation.worktreePath,
+        diff: implementation.diff,
+      });
+      const restartAfterCancel = yield* decideOrchestrationCommand({
+        readModel: cancelledModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.start" as const,
+          commandId: CommandId.make("ticket-implementation-restart-after-cancel"),
+          threadId: originThreadId,
+          ticketNodeId: implementationNodeId,
+          actionIdentity: "ticket-implementation:37:another-attempt",
+          expectedWorkstreamVersion: 5,
+          confirmed: true as const,
+          createdAt: resolvedAt,
+        },
+      }).pipe(Effect.flip);
+      expect(restartAfterCancel._tag).toBe("OrchestrationCommandInvariantError");
     }),
   );
 

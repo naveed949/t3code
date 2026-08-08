@@ -1286,12 +1286,98 @@ ticketingEngineLayer(
           assert.equal(reviewing.diff?.fixedPoint, fixedPoint);
           assert.isNotNull(reviewing.reviewSkillRunId);
 
+          const stopCommandId = CommandId.make("ticketing-projection-review-stop");
+          const stopResult = yield* engine.dispatch({
+            type: "thread.workflow.ticket-implementation.stop",
+            commandId: stopCommandId,
+            threadId: originThreadId,
+            implementationId: reviewing.id,
+            actionIdentity: reviewing.actionIdentity,
+            expectedWorkstreamVersion:
+              afterReviewDispatch.threads.find((thread) => thread.id === originThreadId)
+                ?.workflowAttachment?.workflowVersion ?? 0,
+            confirmed: true,
+            createdAt: "2026-08-08T12:05:10.000Z",
+          });
+          yield* implementationReactor.drain;
+          const stopReceipt = yield* receipts.getByCommandId({ commandId: stopCommandId });
+          if (Option.isNone(stopReceipt)) {
+            throw new Error("implementation stop command receipt was not persisted");
+          }
+          assert.equal(stopReceipt.value.status, "accepted");
+          assert.equal(stopReceipt.value.resultSequence, stopResult.sequence);
+          const stoppingSnapshot = yield* snapshots.getSnapshot();
+          const stopping = stoppingSnapshot.threads.find((thread) => thread.id === originThreadId)
+            ?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(stopping);
+          assert.equal(stopping.status, "stopping");
+          assert.equal(stopping.diff?.fixedPoint, fixedPoint);
+
           yield* engine.dispatch({
             type: "thread.session.set",
-            commandId: CommandId.make("ticketing-projection-review-running"),
+            commandId: CommandId.make("ticketing-projection-review-stopped"),
             threadId: reviewing.implementationThreadId!,
             session: {
               threadId: reviewing.implementationThreadId!,
+              status: "stopped",
+              providerName: "codex",
+              providerInstanceId,
+              runtimeMode: "full-access",
+              activeTurnId: null,
+              lastError: "Provider interruption requested by user.",
+              updatedAt: "2026-08-08T12:05:15.000Z",
+            },
+            createdAt: "2026-08-08T12:05:15.000Z",
+          });
+          yield* implementationReactor.drain;
+          const needsRecoverySnapshot = yield* snapshots.getSnapshot();
+          const needsRecovery = needsRecoverySnapshot.threads.find(
+            (thread) => thread.id === originThreadId,
+          )?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(needsRecovery);
+          assert.equal(needsRecovery.status, "needs-recovery");
+          assert.equal(needsRecovery.recoveryPhase, "review");
+          assert.equal(needsRecovery.failure, "Provider interruption requested by user.");
+          assert.equal(needsRecovery.diff?.fixedPoint, fixedPoint);
+
+          const resumeCommandId = CommandId.make("ticketing-projection-review-resume");
+          const resumeResult = yield* engine.dispatch({
+            type: "thread.workflow.ticket-implementation.recover",
+            commandId: resumeCommandId,
+            threadId: originThreadId,
+            implementationId: needsRecovery.id,
+            actionIdentity: needsRecovery.actionIdentity,
+            action: "resume",
+            expectedWorkstreamVersion:
+              needsRecoverySnapshot.threads.find((thread) => thread.id === originThreadId)
+                ?.workflowAttachment?.workflowVersion ?? 0,
+            confirmed: true,
+            createdAt: "2026-08-08T12:05:20.000Z",
+          });
+          yield* Effect.yieldNow;
+          yield* implementationReactor.drain;
+          const resumeReceipt = yield* receipts.getByCommandId({ commandId: resumeCommandId });
+          if (Option.isNone(resumeReceipt)) {
+            throw new Error("implementation resume command receipt was not persisted");
+          }
+          assert.equal(resumeReceipt.value.status, "accepted");
+          assert.equal(resumeReceipt.value.resultSequence, resumeResult.sequence);
+          const afterRecovery = yield* snapshots.getSnapshot();
+          const reviewingAfterRecovery = afterRecovery.threads.find(
+            (thread) => thread.id === originThreadId,
+          )?.workflowAttachment?.ticketImplementations?.[0];
+          assert.isDefined(reviewingAfterRecovery);
+          assert.equal(reviewingAfterRecovery.status, "reviewing");
+          assert.equal(reviewingAfterRecovery.recoveryAttempt, 1);
+          assert.equal(reviewingAfterRecovery.diff?.fixedPoint, fixedPoint);
+          assert.isNotNull(reviewingAfterRecovery.reviewSkillRunId);
+
+          yield* engine.dispatch({
+            type: "thread.session.set",
+            commandId: CommandId.make("ticketing-projection-review-running"),
+            threadId: reviewingAfterRecovery.implementationThreadId!,
+            session: {
+              threadId: reviewingAfterRecovery.implementationThreadId!,
               status: "running",
               providerName: "codex",
               providerInstanceId,
@@ -1306,7 +1392,7 @@ ticketingEngineLayer(
           yield* engine.dispatch({
             type: "thread.message.assistant.delta",
             commandId: CommandId.make("ticketing-projection-review-result-delta"),
-            threadId: reviewing.implementationThreadId!,
+            threadId: reviewingAfterRecovery.implementationThreadId!,
             messageId: MessageId.make("assistant:ticket-implementation-review"),
             turnId: TurnId.make("turn:ticket-implementation-review"),
             delta:
@@ -1316,7 +1402,7 @@ ticketingEngineLayer(
           yield* engine.dispatch({
             type: "thread.message.assistant.complete",
             commandId: CommandId.make("ticketing-projection-review-result-complete"),
-            threadId: reviewing.implementationThreadId!,
+            threadId: reviewingAfterRecovery.implementationThreadId!,
             messageId: MessageId.make("assistant:ticket-implementation-review"),
             turnId: TurnId.make("turn:ticket-implementation-review"),
             createdAt: "2026-08-08T12:05:50.000Z",
@@ -1324,9 +1410,9 @@ ticketingEngineLayer(
           yield* engine.dispatch({
             type: "thread.session.set",
             commandId: CommandId.make("ticketing-projection-review-ready"),
-            threadId: reviewing.implementationThreadId!,
+            threadId: reviewingAfterRecovery.implementationThreadId!,
             session: {
-              threadId: reviewing.implementationThreadId!,
+              threadId: reviewingAfterRecovery.implementationThreadId!,
               status: "ready",
               providerName: "codex",
               providerInstanceId,
@@ -1506,6 +1592,12 @@ ticketingEngineLayer(
             (thread) => thread.id === reviewingCorrection.implementationThreadId,
           );
           assert.isDefined(reviewThread);
+          assert.equal(reviewThread?.latestTurn?.skillInvocation?.skill.name, "code-review");
+          assert.equal(
+            reviewThread?.latestTurn?.state,
+            "completed",
+            `reviewRun=${String(reviewingCorrection.reviewSkillRunId)} latestRun=${String(reviewThread?.latestTurn?.skillInvocation?.skillRunId)}`,
+          );
           const reviewedSnapshot = yield* snapshots.getSnapshot();
           const reviewed = reviewedSnapshot.threads.find((thread) => thread.id === originThreadId)
             ?.workflowAttachment?.ticketImplementations?.[0];

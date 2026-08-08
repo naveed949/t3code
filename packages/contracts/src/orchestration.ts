@@ -745,6 +745,9 @@ export const WorkflowTicketImplementationStatus = Schema.Literals([
   "dispatching",
   "implementing",
   "reviewing",
+  "stopping",
+  "needs-recovery",
+  "cancelled",
   "checkpointed",
   "reviewed",
   "needs-correction",
@@ -766,6 +769,9 @@ export const WorkflowTicketImplementationAvailability = Schema.Struct({
     "available",
     "blocked",
     "active",
+    "stopping",
+    "needs-recovery",
+    "cancelled",
     "checkpointed",
     "reviewed",
     "needs-correction",
@@ -911,6 +917,9 @@ export const WorkflowTicketImplementation = Schema.Struct({
   validation: WorkflowTicketImplementationValidationList,
   diff: Schema.NullOr(WorkflowDiffEvidence),
   review: Schema.NullOr(WorkflowCodeReviewEvidence),
+  recoveryPhase: Schema.optional(Schema.Literals(["implementation", "review"])),
+  recoveryAttempt: Schema.optional(NonNegativeInt),
+  recoveryCheckpointTurnCount: Schema.optional(NonNegativeInt),
   integration: Schema.optional(WorkflowTicketIntegration),
   correctionCycles: Schema.optional(WorkflowTicketImplementationCorrectionCycles),
   failure: Schema.NullOr(TrimmedNonEmptyString),
@@ -1813,6 +1822,17 @@ const ThreadWorkflowTicketImplementationStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketImplementationStopCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.stop"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowTicketIntegrationRetryCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.ticket-integration.retry"),
   commandId: CommandId,
@@ -1823,6 +1843,31 @@ const ThreadWorkflowTicketIntegrationRetryCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const WorkflowTicketImplementationRecoveryAction = Schema.Literals([
+  "resume",
+  "cancel-with-changes",
+  "restore-to-checkpoint",
+]);
+export type WorkflowTicketImplementationRecoveryAction =
+  typeof WorkflowTicketImplementationRecoveryAction.Type;
+
+export const WorkflowRecoveryContext = Schema.Struct({
+  originThreadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+});
+
+const ThreadWorkflowTicketImplementationRecoverCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-implementation.recover"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  actionIdentity: TrimmedNonEmptyString,
+  action: WorkflowTicketImplementationRecoveryAction,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  checkpointTurnCount: Schema.optional(NonNegativeInt),
+  createdAt: IsoDateTime,
+});
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1876,6 +1921,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
   ThreadWorkflowTicketImplementationStartCommand,
+  ThreadWorkflowTicketImplementationStopCommand,
+  ThreadWorkflowTicketImplementationRecoverCommand,
   ThreadWorkflowTicketIntegrationRetryCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
@@ -1921,6 +1968,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
   ThreadWorkflowTicketImplementationStartCommand,
+  ThreadWorkflowTicketImplementationStopCommand,
+  ThreadWorkflowTicketImplementationRecoverCommand,
   ThreadWorkflowTicketIntegrationRetryCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
@@ -2184,6 +2233,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-ticketing-failed",
   "thread.workflow-ticket-implementation-requested",
   "thread.workflow-ticket-implementation-updated",
+  "thread.workflow-ticket-implementation-recovery-requested",
   "thread.workflow-ticket-implementation-checkpointed",
   "thread.checkpoint-revert-requested",
   "thread.reverted",
@@ -2547,6 +2597,16 @@ export const ThreadWorkflowTicketImplementationUpdatedPayload = Schema.Struct({
   attachment: WorkflowAttachment,
 });
 
+export const ThreadWorkflowTicketImplementationRecoveryRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  implementationThreadId: ThreadId,
+  action: WorkflowTicketImplementationRecoveryAction,
+  checkpointTurnCount: Schema.optional(NonNegativeInt),
+  implementation: WorkflowTicketImplementation,
+  attachment: WorkflowAttachment,
+  createdAt: IsoDateTime,
+});
 export const ThreadWorkflowTicketImplementationCheckpointedPayload =
   ThreadWorkflowTicketImplementationUpdatedPayload;
 
@@ -2554,6 +2614,7 @@ export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
   createdAt: IsoDateTime,
+  workflowRecovery: Schema.optional(WorkflowRecoveryContext),
 });
 
 export const ThreadRevertedPayload = Schema.Struct({
@@ -2564,6 +2625,7 @@ export const ThreadRevertedPayload = Schema.Struct({
 export const ThreadSessionStopRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   createdAt: IsoDateTime,
+  workflowRecovery: Schema.optional(WorkflowRecoveryContext),
 });
 
 export const ThreadSessionSetPayload = Schema.Struct({
@@ -2891,6 +2953,11 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-ticket-implementation-recovery-requested"),
+    payload: ThreadWorkflowTicketImplementationRecoveryRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal("thread.workflow-ticket-implementation-checkpointed"),
     payload: ThreadWorkflowTicketImplementationCheckpointedPayload,
   }),
@@ -3102,6 +3169,7 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    currentProjection: Schema.optional(OrchestrationShellSnapshot),
     preflightBlockers: Schema.optional(
       Schema.Array(
         Schema.Struct({
