@@ -63,6 +63,7 @@ import {
   ThreadWorkflowTicketingFailedPayload,
   ThreadWorkflowTicketImplementationRequestedPayload,
   ThreadWorkflowTicketImplementationUpdatedPayload,
+  ThreadWorkflowTicketImplementationRecoveryRequestedPayload,
 } from "./Schemas.ts";
 
 type ThreadPatch = Partial<Omit<OrchestrationThread, "id" | "projectId">>;
@@ -1306,6 +1307,22 @@ export function projectEvent(
     case "thread.workflow-ticket-implementation-updated":
       return decodeForEvent(
         ThreadWorkflowTicketImplementationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-ticket-implementation-recovery-requested":
+      return decodeForEvent(
+        ThreadWorkflowTicketImplementationRecoveryRequestedPayload,
         event.payload,
         event.type,
         "payload",

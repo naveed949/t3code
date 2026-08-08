@@ -1321,6 +1321,15 @@ const make = Effect.gen(function* () {
       yield* providerService.stopSession({ threadId: thread.id });
     }
 
+    // Workflow Ticket Implementations must wait for the provider's typed
+    // session outcome (usually session.exited) before entering Needs Recovery.
+    // The generic thread stop path retains its historical immediate stopped
+    // projection; this marker keeps the workflow path truthful while the
+    // provider interruption is still in flight.
+    if (event.payload.workflowRecovery !== undefined) {
+      return;
+    }
+
     yield* setThreadSession({
       threadId: thread.id,
       session: {

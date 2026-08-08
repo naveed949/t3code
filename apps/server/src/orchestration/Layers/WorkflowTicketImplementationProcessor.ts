@@ -29,12 +29,19 @@ type TicketImplementationUpdatedEvent = Extract<
   OrchestrationEvent,
   { type: "thread.workflow-ticket-implementation-updated" }
 >;
+type TicketImplementationRecoveryRequestedEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.workflow-ticket-implementation-recovery-requested" }
+>;
 type SessionSetEvent = Extract<OrchestrationEvent, { type: "thread.session-set" }>;
+type RevertedEvent = Extract<OrchestrationEvent, { type: "thread.reverted" }>;
 type TurnStartRequestedEvent = Extract<OrchestrationEvent, { type: "thread.turn-start-requested" }>;
 type WorkflowTicketImplementationEvent =
   | TicketImplementationRequestedEvent
   | TicketImplementationUpdatedEvent
+  | TicketImplementationRecoveryRequestedEvent
   | SessionSetEvent
+  | RevertedEvent
   | TurnStartRequestedEvent;
 
 function implementationById(
@@ -58,7 +65,8 @@ function implementationPhase(
   if (
     implementation.status === "reviewing" ||
     implementation.status === "reviewed" ||
-    implementation.status === "needs-correction"
+    implementation.status === "needs-correction" ||
+    (implementation.status === "needs-recovery" && implementation.recoveryPhase === "review")
   ) {
     return "review";
   }
@@ -275,11 +283,15 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       ) {
         return latestTurn.skillInvocation.skillRunId;
       }
-      const messageId = MessageId.make(`${input.implementation.id}:message:${input.phase}`);
+      const recoveryAttempt = input.implementation.recoveryAttempt ?? 0;
+      const attemptSuffix = recoveryAttempt === 0 ? "" : `:recovery-${recoveryAttempt}`;
+      const messageId = MessageId.make(
+        `${input.implementation.id}:message:${input.phase}${attemptSuffix}`,
+      );
       yield* orchestrationEngine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make(
-          `server:ticket-implementation:${input.implementation.id}:${input.phase}:turn-start`,
+          `server:ticket-implementation:${input.implementation.id}:${input.phase}:turn-start${attemptSuffix}`,
         ),
         threadId,
         message: {
@@ -417,15 +429,31 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       const terminal = ["error", "stopped", "interrupted"].includes(event.payload.session.status);
       if (
         terminal &&
-        (implementation.status === "implementing" || implementation.status === "reviewing")
+        (implementation.status === "implementing" ||
+          implementation.status === "reviewing" ||
+          implementation.status === "stopping")
       ) {
+        const readyCheckpoints = implementationThread.checkpoints.filter(
+          (checkpoint) => checkpoint.status === "ready",
+        );
+        const latestCheckpointTurnCount = readyCheckpoints.reduce(
+          (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+          0,
+        );
+        const recoveryPhase =
+          implementation.recoveryPhase ??
+          (implementation.status === "reviewing" ? "review" : "implementation");
         const failed = yield* updateImplementation({
           implementationId: implementation.id,
           patch: {
-            status: "failed",
+            status: "needs-recovery",
+            recoveryPhase,
+            ...(readyCheckpoints.length > 0
+              ? { recoveryCheckpointTurnCount: latestCheckpointTurnCount }
+              : {}),
             failure:
               event.payload.session.lastError ??
-              "The provider session stopped before the workflow milestone completed.",
+              "The accepted provider run stopped before the workflow milestone completed.",
             updatedAt: event.payload.session.updatedAt,
           },
         });
@@ -545,6 +573,87 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     },
   );
 
+  const processRecoveryRequested = Effect.fn(
+    "WorkflowTicketImplementationReactor.processRecoveryRequested",
+  )(function* (event: TicketImplementationRecoveryRequestedEvent) {
+    const snapshot = yield* snapshots.getSnapshot();
+    const originThread = snapshot.threads.find((thread) => thread.id === event.payload.threadId);
+    const implementation = originThread?.workflowAttachment?.ticketImplementations?.find(
+      (candidate) => candidate.id === event.payload.implementationId,
+    );
+    if (originThread === undefined || implementation === undefined) return;
+
+    if (event.payload.action === "resume") {
+      const phase = implementation.recoveryPhase ?? "implementation";
+      const skillRunId = yield* startSkillTurn({
+        originThread,
+        implementation,
+        phase,
+      });
+      const updated = yield* updateImplementation({
+        implementationId: implementation.id,
+        patch: {
+          ...(phase === "implementation" && skillRunId !== null
+            ? { implementationSkillRunId: skillRunId }
+            : {}),
+          ...(phase === "review" && skillRunId !== null ? { reviewSkillRunId: skillRunId } : {}),
+          updatedAt: event.payload.createdAt,
+        },
+      });
+      if (updated !== null) {
+        yield* publishProgress({
+          implementation: updated,
+          message: `Explicitly resumed the retained ${phase} run in its existing ticket worktree.`,
+          phase,
+        });
+      }
+      return;
+    }
+
+    yield* publishProgress({
+      implementation,
+      message:
+        event.payload.action === "cancel-with-changes"
+          ? "Cancelled while retaining the linked thread, worktree, checkpoints, and diff."
+          : `Restore to checkpoint turn ${event.payload.checkpointTurnCount ?? 0} was requested explicitly.`,
+    });
+  });
+
+  const processReverted = Effect.fn("WorkflowTicketImplementationReactor.processReverted")(
+    function* (event: RevertedEvent) {
+      const snapshot = yield* snapshots.getSnapshot();
+      const originThread = snapshot.threads.find((thread) =>
+        thread.workflowAttachment?.ticketImplementations?.some(
+          (implementation) => implementation.implementationThreadId === event.payload.threadId,
+        ),
+      );
+      const implementation = originThread?.workflowAttachment?.ticketImplementations?.find(
+        (candidate) => candidate.implementationThreadId === event.payload.threadId,
+      );
+      if (
+        originThread === undefined ||
+        implementation === undefined ||
+        implementation.status !== "needs-recovery" ||
+        implementation.recoveryCheckpointTurnCount !== event.payload.turnCount
+      ) {
+        return;
+      }
+      const restored = yield* updateImplementation({
+        implementationId: implementation.id,
+        patch: {
+          failure: null,
+          updatedAt: event.occurredAt,
+        },
+      });
+      if (restored !== null) {
+        yield* publishProgress({
+          implementation: restored,
+          message: `Checkpoint turn ${event.payload.turnCount} restored; the run still needs an explicit next action.`,
+        });
+      }
+    },
+  );
+
   const processUpdated = Effect.fn("WorkflowTicketImplementationReactor.processUpdated")(function* (
     event: TicketImplementationUpdatedEvent,
   ) {
@@ -553,7 +662,11 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       message:
         event.payload.implementation.status === "reviewed"
           ? "Structured Code Review evidence recorded; integration remains a downstream milestone."
-          : null,
+          : event.payload.implementation.status === "needs-recovery"
+            ? "The accepted run needs recovery; retained execution evidence is available for inspection."
+            : event.payload.implementation.status === "cancelled"
+              ? "The run was cancelled without deleting its retained changes."
+              : null,
     });
   });
 
@@ -598,8 +711,14 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       case "thread.workflow-ticket-implementation-updated":
         yield* processUpdated(event);
         return;
+      case "thread.workflow-ticket-implementation-recovery-requested":
+        yield* processRecoveryRequested(event);
+        return;
       case "thread.session-set":
         yield* processSessionSet(event);
+        return;
+      case "thread.reverted":
+        yield* processReverted(event);
         return;
       case "thread.turn-start-requested":
         yield* processTurnStartRequested(event);

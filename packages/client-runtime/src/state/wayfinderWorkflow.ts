@@ -27,14 +27,19 @@ export interface WayfinderWorkflowAttention {
 export interface WayfinderWorkflowAction {
   readonly id:
     | "cancel-research"
+    | "cancel-ticket-implementation"
+    | "inspect-ticket-implementation"
     | "open-canonical-ticket"
     | "open-linked-thread"
     | "reclaim-ticket"
     | "release-ticket"
     | "retry-research"
     | "retry-thread-linkage"
+    | "restore-ticket-implementation"
+    | "resume-ticket-implementation"
     | "start-research"
     | "start-ticket-implementation"
+    | "stop-ticket-implementation"
     | "start-work";
   readonly label: string;
   readonly enabled: boolean;
@@ -167,7 +172,20 @@ function nodeAttention(input: {
   readonly mutation: WayfinderMutation | null;
   readonly synchronization: WayfinderSynchronizationState | null;
   readonly research: ReturnType<typeof deriveWayfinderResearchModel>["tickets"][number] | null;
+  readonly ticketImplementation: WorkflowTicketImplementation | null;
 }): WayfinderWorkflowAttention {
+  if (input.ticketImplementation?.status === "needs-recovery") {
+    return {
+      kind: "recovery",
+      label: `Ticket #${input.ticketNumber} needs recovery; inspect the retained work before resuming, cancelling, or restoring it.`,
+    };
+  }
+  if (input.ticketImplementation?.status === "cancelled") {
+    return {
+      kind: "decision",
+      label: `Ticket #${input.ticketNumber} was cancelled and does not satisfy required work.`,
+    };
+  }
   if (ticketNumberFromMutation(input.mutation) === input.ticketNumber) {
     return (
       mutationAttention(input.mutation) ?? { kind: "none", label: "No node attention required." }
@@ -198,9 +216,16 @@ function nodeState(input: {
     input.ticketImplementation?.status === "dispatching" ||
     input.ticketImplementation?.status === "implementing" ||
     input.ticketImplementation?.status === "reviewing" ||
+    input.ticketImplementation?.status === "stopping" ||
     input.ticketImplementation?.status === "reviewed"
   ) {
     return { kind: "active", label: "Active" };
+  }
+  if (
+    input.ticketImplementation?.status === "needs-recovery" ||
+    input.ticketImplementation?.status === "cancelled"
+  ) {
+    return { kind: "blocked", label: "Blocked" };
   }
   if (input.workflowRunnable) return { kind: "runnable", label: "Runnable" };
   if (input.frontier.has(input.ticket.number)) return { kind: "runnable", label: "Runnable" };
@@ -293,6 +318,56 @@ function allowedActions(input: {
       }),
     );
   }
+  if (input.ticketImplementation?.status === "stopping") {
+    actions.push(
+      action({
+        id: "stop-ticket-implementation",
+        label: "Stop requested",
+        enabled: false,
+      }),
+    );
+  } else if (
+    (input.ticketImplementation?.status === "dispatching" ||
+      input.ticketImplementation?.status === "implementing" ||
+      input.ticketImplementation?.status === "reviewing") &&
+    input.ticketImplementation.implementationThreadId !== null
+  ) {
+    actions.push(
+      action({
+        id: "stop-ticket-implementation",
+        label: "Stop",
+        enabled: input.mutationsEnabled,
+      }),
+    );
+  }
+  if (input.ticketImplementation?.status === "needs-recovery") {
+    actions.push(
+      action({
+        id: "inspect-ticket-implementation",
+        label: "Inspect retained work",
+        enabled: input.ticketImplementation.implementationThreadId !== null,
+      }),
+      action({
+        id: "resume-ticket-implementation",
+        label: "Resume",
+        enabled: input.mutationsEnabled,
+      }),
+      action({
+        id: "cancel-ticket-implementation",
+        label: "Cancel with changes",
+        enabled: input.mutationsEnabled,
+      }),
+    );
+    if (input.ticketImplementation.recoveryCheckpointTurnCount !== undefined) {
+      actions.push(
+        action({
+          id: "restore-ticket-implementation",
+          label: `Restore checkpoint ${input.ticketImplementation.recoveryCheckpointTurnCount}`,
+          enabled: input.mutationsEnabled,
+        }),
+      );
+    }
+  }
   if (claim.canRelease) {
     actions.push(
       action({ id: "release-ticket", label: "Release", enabled: input.mutationsEnabled }),
@@ -359,7 +434,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
     }));
   const activeImplementationRuns = [...ticketImplementationByNumber.values()]
     .filter((implementation) =>
-      ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+      ["dispatching", "implementing", "reviewing", "stopping"].includes(implementation.status),
     )
     .map((implementation) => ({
       kind: "ticket" as const,
@@ -379,6 +454,7 @@ export function deriveWayfinderWorkflowViewModel(input: {
       mutation: input.mutation,
       synchronization: input.synchronization,
       research,
+      ticketImplementation,
     });
     const blockedBy = [...ticket.blockedBy].sort((left, right) => left - right);
     const enables = [...ticket.blocks].sort((left, right) => left - right);
