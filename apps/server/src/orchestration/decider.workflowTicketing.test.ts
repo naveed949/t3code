@@ -871,4 +871,290 @@ it.layer(NodeServices.layer)("Ticket Implementation boundary", (it) => {
       });
     }),
   );
+
+  it.effect("starts one bounded correction cycle in the same ticket worktree", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const started = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.ticket-implementation.start" as const,
+          commandId: CommandId.make("ticket-implementation-correction-start"),
+          threadId: originThreadId,
+          ticketNodeId: implementationNodeId,
+          actionIdentity: "ticket-implementation:37:correction",
+          expectedWorkstreamVersion: 3,
+          confirmed: true as const,
+          createdAt: publishedAt,
+        },
+      });
+      const afterStart = yield* Effect.promise(() => applyEvents(model, normalizeEvents(started)));
+      const initial = afterStart.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(initial).toBeDefined();
+
+      const reviewSkillRunId = SkillRunId.make("skill-run:ticket-implementation-correction-review");
+      const reviewInvocation: ResolvedSkillInvocation = {
+        skill: reviewSkill,
+        action: {
+          id: "work-ticket",
+          ticketNumber: 37,
+          sourceSkillRunId,
+          sourceThreadId: originThreadId,
+        },
+        execution: { mode: "generic", reason: "unregistered-skill" },
+        reconnectWorkstreamId: workstreamId,
+      };
+      const reviewTurn: OrchestrationLatestTurn = {
+        ...latestTurn(reviewInvocation, reviewSkillRunId),
+        state: "completed",
+        completedAt: publishedAt,
+        skillInvocation: {
+          ...latestTurn(reviewInvocation, reviewSkillRunId).skillInvocation!,
+          skillRunId: reviewSkillRunId,
+        },
+      };
+      const reviewing = {
+        ...initial!,
+        status: "reviewing" as const,
+        implementationThreadId: ThreadId.make("ticket-implementation-correction-thread"),
+        reviewSkillRunId,
+        updatedAt: publishedAt,
+      };
+      const reviewingModel: OrchestrationReadModel = {
+        ...afterStart,
+        threads: [
+          ...afterStart.threads.map((candidate) =>
+            candidate.id === originThreadId
+              ? {
+                  ...candidate,
+                  workflowAttachment: {
+                    ...candidate.workflowAttachment!,
+                    ticketImplementations: [reviewing],
+                  },
+                }
+              : candidate,
+          ),
+          thread(reviewing.implementationThreadId, { latestTurn: reviewTurn }),
+        ],
+      };
+      const finding = {
+        severity: "must-fix" as const,
+        source: "ticket-specification" as const,
+        summary: "The correction must preserve the original acceptance criteria.",
+      };
+      const review = {
+        status: "must-fix" as const,
+        skillRunId: reviewSkillRunId,
+        fixedPoint: reviewing.fixedPoint,
+        summary: "The pinned review found one ticket-specification finding.",
+        findings: [finding],
+        completedAt: publishedAt,
+      };
+      const reviewRecorded = yield* decideOrchestrationCommand({
+        readModel: reviewingModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.review.record" as const,
+          commandId: CommandId.make("ticket-implementation-correction-review-record"),
+          threadId: originThreadId,
+          implementationId: reviewing.id,
+          expectedWorkstreamVersion:
+            reviewingModel.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
+          review,
+          validation: [
+            {
+              name: "focused tests",
+              status: "passed" as const,
+              recordedAt: publishedAt,
+            },
+          ],
+          createdAt: publishedAt,
+        },
+      });
+      const afterReview = yield* Effect.promise(() =>
+        applyEvents(reviewingModel, normalizeEvents(reviewRecorded)),
+      );
+      const needsCorrection =
+        afterReview.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(needsCorrection).toMatchObject({ status: "needs-correction", review });
+
+      const correctionCommand = {
+        type: "thread.workflow.ticket-implementation.correction.start" as const,
+        commandId: CommandId.make("ticket-implementation-correction-cycle-1"),
+        threadId: originThreadId,
+        implementationId: needsCorrection!.id,
+        correctionCycle: 1,
+        findings: [finding],
+        expectedWorkstreamVersion: afterReview.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
+        createdAt: publishedAt,
+      };
+      const correctionStarted = yield* decideOrchestrationCommand({
+        readModel: afterReview,
+        command: correctionCommand,
+      });
+      const afterCorrection = yield* Effect.promise(() =>
+        applyEvents(afterReview, normalizeEvents(correctionStarted)),
+      );
+      const correcting = afterCorrection.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(correcting).toMatchObject({
+        status: "implementing",
+        implementationThreadId: needsCorrection!.implementationThreadId,
+        worktreePath: needsCorrection!.worktreePath,
+        branch: needsCorrection!.branch,
+        fixedPoint: needsCorrection!.fixedPoint,
+        acceptanceCriteria: needsCorrection!.acceptanceCriteria,
+        implementationSkillRunId: null,
+        reviewSkillRunId: null,
+        review,
+        correctionCycles: [{ cycle: 1, findings: [finding], review }],
+      });
+
+      const duplicate = yield* decideOrchestrationCommand({
+        readModel: afterCorrection,
+        command: {
+          ...correctionCommand,
+          commandId: CommandId.make("ticket-implementation-correction-duplicate"),
+        },
+      });
+      const afterDuplicate = yield* Effect.promise(() =>
+        applyEvents(afterCorrection, normalizeEvents(duplicate)),
+      );
+      expect(
+        afterDuplicate.threads[0]?.workflowAttachment?.ticketImplementations?.[0],
+      ).toMatchObject({
+        status: "implementing",
+        correctionCycles: [{ cycle: 1 }],
+      });
+    }),
+  );
+
+  it.effect("stops at Needs Decision after the fourth grounded correction cycle", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const implementation = {
+        id: "workflow-ticket-implementation:decision",
+        workstreamId,
+        nodeId: implementationNodeId,
+        ticketKey: batch.tickets[0]!.key,
+        ticketNumber: 37,
+        title: batch.tickets[0]!.title,
+        actionIdentity: "ticket-implementation:37:decision",
+        status: "reviewing" as const,
+        originThreadId,
+        implementationThreadId: ThreadId.make("ticket-implementation-decision-thread"),
+        worktreePath: "/tmp/t3-ticket-implementation-decision",
+        branch: "codex/workflow/ticket-37-decision",
+        fixedPoint: "2514a152021bf9522e501ceeae5e9ab292af29b6",
+        acceptanceCriteria: batch.tickets[0]!.body,
+        providerInstanceId,
+        implementSkill,
+        reviewSkill,
+        implementationSkillRunId: SkillRunId.make("skill-run:implementation-decision"),
+        reviewSkillRunId: SkillRunId.make("skill-run:review-decision-final"),
+        validation: [],
+        diff: null,
+        review: null,
+        failure: null,
+        correctionCycles: [1, 2, 3, 4].map((cycle) => ({
+          cycle,
+          findings: [
+            {
+              severity: "must-fix" as const,
+              source: "repository-standards" as const,
+              summary: `Finding from correction cycle ${cycle}.`,
+            },
+          ],
+          review: {
+            status: "must-fix" as const,
+            skillRunId: SkillRunId.make(`skill-run:review-decision-${cycle}`),
+            fixedPoint: "2514a152021bf9522e501ceeae5e9ab292af29b6",
+            summary: `Review ${cycle}`,
+            findings: [
+              {
+                severity: "must-fix" as const,
+                source: "repository-standards" as const,
+                summary: `Finding from correction cycle ${cycle}.`,
+              },
+            ],
+            completedAt: publishedAt,
+          },
+          startedAt: publishedAt,
+        })),
+        startedAt: publishedAt,
+        updatedAt: publishedAt,
+      };
+      const reviewSkillRunId = SkillRunId.make("skill-run:review-decision-final");
+      const reviewInvocation: ResolvedSkillInvocation = {
+        skill: reviewSkill,
+        action: {
+          id: "work-ticket",
+          ticketNumber: 37,
+          sourceSkillRunId,
+          sourceThreadId: originThreadId,
+        },
+        execution: { mode: "generic", reason: "unregistered-skill" },
+        reconnectWorkstreamId: workstreamId,
+      };
+      const reviewTurn: OrchestrationLatestTurn = {
+        ...latestTurn(reviewInvocation, reviewSkillRunId),
+        state: "completed",
+        completedAt: publishedAt,
+        skillInvocation: {
+          ...latestTurn(reviewInvocation, reviewSkillRunId).skillInvocation!,
+          skillRunId: reviewSkillRunId,
+        },
+      };
+      const reviewingModel: OrchestrationReadModel = {
+        ...model,
+        threads: [
+          ...model.threads.map((candidate) =>
+            candidate.id === originThreadId
+              ? {
+                  ...candidate,
+                  workflowAttachment: {
+                    ...candidate.workflowAttachment!,
+                    ticketImplementations: [implementation],
+                  },
+                }
+              : candidate,
+          ),
+          thread(implementation.implementationThreadId, { latestTurn: reviewTurn }),
+        ],
+      };
+      const finding = {
+        severity: "must-fix" as const,
+        source: "ticket-specification" as const,
+        summary: "The fourth correction still misses the ticket specification.",
+      };
+      const review = {
+        status: "must-fix" as const,
+        skillRunId: reviewSkillRunId,
+        fixedPoint: implementation.fixedPoint,
+        summary: "The fourth correction still has a blocking finding.",
+        findings: [finding],
+        completedAt: publishedAt,
+      };
+      const recorded = yield* decideOrchestrationCommand({
+        readModel: reviewingModel,
+        command: {
+          type: "thread.workflow.ticket-implementation.review.record" as const,
+          commandId: CommandId.make("ticket-implementation-decision-review"),
+          threadId: originThreadId,
+          implementationId: implementation.id,
+          expectedWorkstreamVersion:
+            reviewingModel.threads[0]?.workflowAttachment?.workflowVersion ?? 0,
+          review,
+          validation: [
+            { name: "focused tests", status: "passed" as const, recordedAt: publishedAt },
+          ],
+          createdAt: publishedAt,
+        },
+      });
+      const projected = yield* Effect.promise(() =>
+        applyEvents(reviewingModel, normalizeEvents(recorded)),
+      );
+      const needsDecision = projected.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(needsDecision).toMatchObject({ status: "needs-decision", review });
+      expect(needsDecision?.correctionCycles?.map((cycle) => cycle.cycle)).toEqual([1, 2, 3, 4]);
+    }),
+  );
 });

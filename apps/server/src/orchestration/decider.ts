@@ -26,10 +26,13 @@ import {
   type WorkflowTicketImplementation,
   type WorkflowTicketImplementationAvailability,
   type WorkflowCodeReviewEvidence,
+  type WorkflowCodeReviewFinding,
   type WorkflowValidationEvidence,
   type WorkflowTicketImplementationStatus,
   type WorkflowTicketingCheckpointRequest,
   type WorkflowTicketingStage,
+  isBlockingWorkflowCodeReviewFinding,
+  WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES,
 } from "@t3tools/contracts";
 import { createEmptyWayfinderDraft } from "@t3tools/shared/wayfinderDraft";
 import { deriveWayfinderReadiness } from "@t3tools/shared/wayfinderReadiness";
@@ -818,6 +821,18 @@ function workflowTicketImplementations(attachment: WorkflowAttachment) {
   return attachment.ticketImplementations ?? [];
 }
 
+function workflowTicketImplementationCorrectionCycles(
+  implementation: WorkflowTicketImplementation,
+) {
+  return implementation.correctionCycles ?? [];
+}
+
+function blockingReviewFindings(
+  review: WorkflowCodeReviewEvidence | null,
+): ReadonlyArray<WorkflowCodeReviewFinding> {
+  return review?.findings.filter(isBlockingWorkflowCodeReviewFinding) ?? [];
+}
+
 function implementationRequiredSkill(input: {
   readonly attachment: WorkflowAttachment;
   readonly nodeId: string;
@@ -874,6 +889,12 @@ function ticketImplementationAvailability(input: {
           status: "needs-correction",
           canStart: true,
           reason: "A fresh correction cycle may retry this Ticket Implementation.",
+        };
+      case "needs-decision":
+        return {
+          status: "needs-decision",
+          canStart: false,
+          reason: "Automatic correction cycles are exhausted; a user decision is required.",
         };
       case "failed":
         return {
@@ -1002,6 +1023,7 @@ function workflowTicketImplementationStatusTransitionAllowed(
       return next === "failed";
     case "reviewed":
     case "needs-correction":
+    case "needs-decision":
     case "failed":
       return false;
   }
@@ -1013,6 +1035,7 @@ function workflowTicketImplementationEventBase(input: {
     | { readonly type: "thread.workflow.ticket-implementation.start" }
     | { readonly type: "thread.workflow.ticket-implementation.update" }
     | { readonly type: "thread.workflow.ticket-implementation.review.record" }
+    | { readonly type: "thread.workflow.ticket-implementation.correction.start" }
   >;
   readonly attachment: WorkflowAttachment;
   readonly implementation: WorkflowTicketImplementation;
@@ -3331,6 +3354,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         validation: [],
         diff: null,
         review: null,
+        correctionCycles: [],
         failure: null,
         startedAt: command.createdAt,
         updatedAt: command.createdAt,
@@ -3417,10 +3441,15 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Ticket Implementation update has a stale Workstream version.",
         });
       }
-      if (command.implementation.status === "reviewed" || command.implementation.review !== null) {
+      if (
+        command.implementation.status === "reviewed" ||
+        (command.implementation.review !== null &&
+          stableStringify(command.implementation.review) !== stableStringify(current.review))
+      ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
-          detail: "Structured Code Review evidence must be recorded through the review command.",
+          detail:
+            "Structured Code Review evidence must be recorded through the review command; an existing review may only be preserved unchanged.",
         });
       }
       if (
@@ -3523,10 +3552,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Code Review evidence must include structured validation evidence.",
         });
       }
+      const blockingFindings = blockingReviewFindings(command.review);
       if (
         command.review.status === "passed" &&
         (command.validation.some((evidence) => evidence.status !== "passed") ||
-          command.review.findings.some((finding) => finding.severity === "must-fix"))
+          blockingFindings.length > 0)
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -3548,11 +3578,123 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Code Review evidence has a stale Workstream version.",
         });
       }
+      const correctionCycles = workflowTicketImplementationCorrectionCycles(current);
       const implementation: WorkflowTicketImplementation = {
         ...current,
-        status: command.review.status === "passed" ? "reviewed" : "needs-correction",
+        status:
+          command.review.status === "passed" || blockingFindings.length === 0
+            ? "reviewed"
+            : correctionCycles.length >= WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES
+              ? "needs-decision"
+              : "needs-correction",
         validation: command.validation,
         review: command.review,
+        failure: null,
+        updatedAt: command.createdAt,
+      };
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion({
+          ...attachment,
+          ticketImplementations: attachment.ticketImplementations!.map((candidate) =>
+            candidate.id === command.implementationId ? implementation : candidate,
+          ),
+        }),
+      );
+      return yield* workflowTicketImplementationEventBase({
+        command,
+        attachment: nextAttachment,
+        implementation,
+        eventType: "thread.workflow-ticket-implementation-updated",
+      });
+    }
+
+    case "thread.workflow.ticket-implementation.correction.start": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.ticketImplementations?.find(
+        (implementation) => implementation.id === command.implementationId,
+      );
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Correction Cycle requires an existing Ticket Implementation.",
+        });
+      }
+      const correctionCycles = workflowTicketImplementationCorrectionCycles(current);
+      const duplicateCycle = correctionCycles.find(
+        (cycle) =>
+          cycle.cycle === command.correctionCycle &&
+          stableStringify(cycle.findings) === stableStringify(command.findings),
+      );
+      if (duplicateCycle !== undefined) {
+        return yield* workflowTicketImplementationEventBase({
+          command,
+          attachment,
+          implementation: current,
+          eventType: "thread.workflow-ticket-implementation-updated",
+        });
+      }
+      if (current.status !== "needs-correction") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "A Correction Cycle can only start for a Ticket Implementation needing correction.",
+        });
+      }
+      if (current.review === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Correction Cycle requires preserved Code Review evidence.",
+        });
+      }
+      const blockingFindings = blockingReviewFindings(current.review);
+      if (
+        blockingFindings.length === 0 ||
+        stableStringify(blockingFindings) !== stableStringify(command.findings)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Correction Cycle must use the current grounded Must-Fix Findings.",
+        });
+      }
+      if (command.correctionCycle !== correctionCycles.length + 1) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Correction Cycles must advance one cycle at a time.",
+        });
+      }
+      if (command.correctionCycle > WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The automatic Correction Cycle limit has been reached.",
+        });
+      }
+      if (command.expectedWorkstreamVersion !== (attachment.workflowVersion ?? 0)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Correction Cycle has a stale Workstream version.",
+        });
+      }
+      const implementation: WorkflowTicketImplementation = {
+        ...current,
+        status: "implementing",
+        implementationSkillRunId: null,
+        reviewSkillRunId: null,
+        validation: [],
+        diff: null,
+        correctionCycles: [
+          ...correctionCycles,
+          {
+            cycle: command.correctionCycle,
+            findings: command.findings,
+            review: current.review,
+            startedAt: command.createdAt,
+          },
+        ],
         failure: null,
         updatedAt: command.createdAt,
       };

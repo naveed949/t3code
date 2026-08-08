@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
-import { ThreadId } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  SkillRunId,
+  ThreadId,
+  WorkstreamId,
+  type WorkflowAttachment,
+  type WorkflowTicketImplementation,
+} from "@t3tools/contracts";
 
 import { deriveWayfinderWorkflowViewModel } from "./wayfinderWorkflow.ts";
 
@@ -190,5 +197,77 @@ describe("deriveWayfinderWorkflowViewModel", () => {
         { id: "release-ticket", label: "Release", enabled: true },
       ]),
     );
+  });
+
+  it("surfaces exhausted correction cycles as a decision without a retry action", () => {
+    const implementation = {
+      id: "workflow-ticket-implementation:44",
+      workstreamId: WorkstreamId.make("workstream:release"),
+      nodeId: "ticket:44",
+      ticketKey: "choose-deployment",
+      ticketNumber: 44,
+      title: "Choose deployment",
+      actionIdentity: "client:implementation-44",
+      status: "needs-decision",
+      originThreadId: ThreadId.make("workflow-origin:release"),
+      implementationThreadId: ThreadId.make("workflow-ticket-implementation-thread:44"),
+      worktreePath: "/tmp/workflow-ticket-44",
+      branch: "codex/workflow/ticket-44",
+      fixedPoint: "194ab170154225877be85c58fcdf615faed8a8f3",
+      acceptanceCriteria: "The implementation has structured review evidence.",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      implementSkill: {
+        name: "implement",
+        path: ".agents/skills/implement/SKILL.md",
+        contentDigest: `sha256:${"a".repeat(64)}`,
+      },
+      reviewSkill: {
+        name: "code-review",
+        path: ".agents/skills/code-review/SKILL.md",
+        contentDigest: `sha256:${"b".repeat(64)}`,
+      },
+      implementationSkillRunId: SkillRunId.make("skill-run:implement-44"),
+      reviewSkillRunId: SkillRunId.make("skill-run:review-44"),
+      validation: [],
+      diff: null,
+      review: null,
+      failure: null,
+      startedAt: "2026-01-04T00:00:00.000Z",
+      updatedAt: "2026-01-04T00:00:00.000Z",
+    } satisfies WorkflowTicketImplementation;
+    const workflowAttachment = {
+      originThreadId: ThreadId.make("workflow-origin:release"),
+      workstreamId: WorkstreamId.make("workstream:release"),
+      sourceSkillRunId: SkillRunId.make("skill-run:wayfinder-release"),
+      workflowGoal: "Ship the release.",
+      backfilledWayfinderData: {},
+      observationCursor: {
+        sourceSkillRunId: SkillRunId.make("skill-run:wayfinder-release"),
+        observedAt: "2026-01-04T00:00:00.000Z",
+      },
+      ticketImplementations: [implementation],
+      attachedAt: "2026-01-04T00:00:00.000Z",
+    } satisfies WorkflowAttachment;
+    const model = deriveWayfinderWorkflowViewModel({
+      map,
+      mutation: null,
+      research: null,
+      ticketThreads: [],
+      synchronization: null,
+      readiness: { ready: true, blockers: [] },
+      mutationsEnabled: true,
+      workflowAttachment,
+    });
+
+    const node = model.outline.find((candidate) => candidate.number === 44);
+    expect(node?.state).toEqual({ kind: "blocked", label: "Blocked" });
+    expect(node?.attention).toEqual({
+      kind: "decision",
+      label: "Ticket #44 needs a decision after the automatic correction-cycle limit was reached.",
+    });
+    expect(node?.allowedActions).not.toEqual(
+      expect.arrayContaining([{ id: "start-ticket-implementation" }]),
+    );
+    expect(node?.accessibilityLabel).toContain("needs a decision");
   });
 });
