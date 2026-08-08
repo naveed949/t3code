@@ -750,6 +750,9 @@ export const WorkflowTicketImplementationStatus = Schema.Literals([
   "needs-correction",
   "needs-decision",
   "failed",
+  "integrating",
+  "integration-failed",
+  "integrated",
 ]);
 export type WorkflowTicketImplementationStatus = typeof WorkflowTicketImplementationStatus.Type;
 export const WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES = 4;
@@ -768,6 +771,9 @@ export const WorkflowTicketImplementationAvailability = Schema.Struct({
     "needs-correction",
     "needs-decision",
     "failed",
+    "integrating",
+    "integration-failed",
+    "integrated",
   ]),
   canStart: Schema.Boolean,
   reason: TrimmedNonEmptyString,
@@ -786,6 +792,33 @@ export type WorkflowValidationEvidence = typeof WorkflowValidationEvidence.Type;
 const WorkflowTicketImplementationValidationList = Schema.Array(WorkflowValidationEvidence).check(
   Schema.isMaxLength(128),
 );
+
+export const WorkflowTicketIntegrationFailurePhase = Schema.Literals([
+  "merge",
+  "validation",
+  "tracker",
+]);
+export type WorkflowTicketIntegrationFailurePhase =
+  typeof WorkflowTicketIntegrationFailurePhase.Type;
+
+export const WorkflowTicketIntegrationStatus = Schema.Literals([
+  "integrating",
+  "tracker-closing",
+  "failed",
+  "integrated",
+]);
+export type WorkflowTicketIntegrationStatus = typeof WorkflowTicketIntegrationStatus.Type;
+
+export const WorkflowTicketIntegration = Schema.Struct({
+  status: WorkflowTicketIntegrationStatus,
+  baselineBranch: TrimmedNonEmptyString,
+  baselineCommit: Schema.NullOr(TrimmedNonEmptyString),
+  failurePhase: Schema.NullOr(WorkflowTicketIntegrationFailurePhase),
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowTicketIntegration = typeof WorkflowTicketIntegration.Type;
 
 export const WorkflowDiffEvidenceFile = Schema.Struct({
   path: TrimmedNonEmptyString,
@@ -878,6 +911,7 @@ export const WorkflowTicketImplementation = Schema.Struct({
   validation: WorkflowTicketImplementationValidationList,
   diff: Schema.NullOr(WorkflowDiffEvidence),
   review: Schema.NullOr(WorkflowCodeReviewEvidence),
+  integration: Schema.optional(WorkflowTicketIntegration),
   correctionCycles: Schema.optional(WorkflowTicketImplementationCorrectionCycles),
   failure: Schema.NullOr(TrimmedNonEmptyString),
   startedAt: IsoDateTime,
@@ -1779,6 +1813,16 @@ const ThreadWorkflowTicketImplementationStartCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowTicketIntegrationRetryCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.ticket-integration.retry"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  implementationId: TrimmedNonEmptyString,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal("thread.checkpoint.revert"),
   commandId: CommandId,
@@ -1832,6 +1876,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
   ThreadWorkflowTicketImplementationStartCommand,
+  ThreadWorkflowTicketIntegrationRetryCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1876,6 +1921,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowSpecificationCompleteCommand,
   ThreadWorkflowTicketingPublishCommand,
   ThreadWorkflowTicketImplementationStartCommand,
+  ThreadWorkflowTicketIntegrationRetryCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ]);
@@ -1973,6 +2019,7 @@ const ThreadWorkflowTicketImplementationUpdateCommand = Schema.Struct({
   threadId: ThreadId,
   implementationId: TrimmedNonEmptyString,
   implementation: WorkflowTicketImplementation,
+  trackerProjection: Schema.optional(WorkflowTrackerProjection),
   expectedWorkstreamVersion: NonNegativeInt,
   createdAt: IsoDateTime,
 });

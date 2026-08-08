@@ -86,6 +86,15 @@ export class GitWorkflowService extends Context.Service<
     readonly switchRef: (
       input: VcsSwitchRefInput,
     ) => Effect.Effect<VcsSwitchRefResult, GitCommandError>;
+    readonly integrateBranch: (input: {
+      readonly cwd: string;
+      readonly targetBranch: string;
+      readonly sourceBranch: string;
+    }) => Effect.Effect<{ readonly commitSha: string }, GitCommandError>;
+    readonly validateIntegration: (input: {
+      readonly cwd: string;
+      readonly fixedPoint: string;
+    }) => Effect.Effect<void, GitCommandError>;
     readonly renameBranch: (input: {
       readonly cwd: string;
       readonly oldBranch: string;
@@ -249,6 +258,73 @@ export const make = Effect.gen(function* () {
     (input: Input) =>
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)));
 
+  const integrateBranch = Effect.fn("GitWorkflowService.integrateBranch")(function* (input: {
+    readonly cwd: string;
+    readonly targetBranch: string;
+    readonly sourceBranch: string;
+  }) {
+    yield* ensureGitCommand("GitWorkflowService.integrateBranch", input.cwd);
+    const currentBranch = yield* git.execute({
+      operation: "GitWorkflowService.integrateBranch.current-branch",
+      cwd: input.cwd,
+      args: ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    });
+    if (currentBranch.stdout.trim() !== input.targetBranch) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.integrateBranch",
+        command: "symbolic-ref",
+        cwd: input.cwd,
+        detail: `Integration requires the Workstream Baseline ${input.targetBranch} to be checked out; found ${currentBranch.stdout.trim() || "detached HEAD"}.`,
+      });
+    }
+
+    const status = yield* git.execute({
+      operation: "GitWorkflowService.integrateBranch.clean-check",
+      cwd: input.cwd,
+      args: ["status", "--porcelain"],
+    });
+    if (status.stdout.trim().length > 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.integrateBranch",
+        command: "status",
+        cwd: input.cwd,
+        detail: "Integration requires a clean Workstream Baseline working tree.",
+      });
+    }
+
+    yield* git.execute({
+      operation: "GitWorkflowService.integrateBranch.merge",
+      cwd: input.cwd,
+      args: ["merge", "--no-ff", "--no-edit", input.sourceBranch],
+    });
+    const head = yield* git.execute({
+      operation: "GitWorkflowService.integrateBranch.head",
+      cwd: input.cwd,
+      args: ["rev-parse", "HEAD"],
+    });
+    const commitSha = head.stdout.trim();
+    if (commitSha.length === 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.integrateBranch",
+        command: "rev-parse",
+        cwd: input.cwd,
+        detail: "The successful integration did not produce a baseline commit SHA.",
+      });
+    }
+    return { commitSha };
+  });
+
+  const validateIntegration = Effect.fn("GitWorkflowService.validateIntegration")(
+    function* (input: { readonly cwd: string; readonly fixedPoint: string }) {
+      yield* ensureGitCommand("GitWorkflowService.validateIntegration", input.cwd);
+      yield* git.execute({
+        operation: "GitWorkflowService.validateIntegration.diff-check",
+        cwd: input.cwd,
+        args: ["diff", "--check", `${input.fixedPoint}..HEAD`],
+      });
+    },
+  );
+
   return GitWorkflowService.of({
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(
@@ -319,6 +395,8 @@ export const make = Effect.gen(function* () {
       ensureGitCommand("GitWorkflowService.switchRef", input.cwd).pipe(
         Effect.andThen(Effect.scoped(git.switchRef(input))),
       ),
+    integrateBranch,
+    validateIntegration,
     renameBranch: (input) =>
       ensureGit("GitWorkflowService.renameBranch", input.cwd).pipe(
         Effect.andThen(git.renameBranch(input)),

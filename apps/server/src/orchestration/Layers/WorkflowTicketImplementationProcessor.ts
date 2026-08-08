@@ -7,7 +7,10 @@ import {
   type OrchestrationEvent,
   type OrchestrationThread,
   type WorkflowDiffEvidence,
+  type WorkflowValidationEvidence,
+  type WorkflowTrackerProjection,
   type WorkflowTicketImplementation,
+  type WayfinderMapProjection,
   type WorkstreamId,
 } from "@t3tools/contracts";
 import {
@@ -16,6 +19,7 @@ import {
 } from "@t3tools/shared/workflowTicketImplementation";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { IssueTracker } from "../../nativeSkills/IssueTracker.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
@@ -76,9 +80,16 @@ function implementationById(
 
 function implementationPhase(
   implementation: WorkflowTicketImplementation,
-  fallback: "worktree" | "implementation" | "review" = "implementation",
-): "worktree" | "implementation" | "review" {
+  fallback: "worktree" | "implementation" | "review" | "integration" = "implementation",
+): "worktree" | "implementation" | "review" | "integration" {
   if (implementation.status === "dispatching") return "worktree";
+  if (
+    implementation.status === "integrating" ||
+    implementation.status === "integration-failed" ||
+    implementation.status === "integrated"
+  ) {
+    return "integration";
+  }
   if (
     implementation.status === "reviewing" ||
     implementation.status === "reviewed" ||
@@ -88,6 +99,52 @@ function implementationPhase(
     return "review";
   }
   return fallback;
+}
+
+function failureMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function trackerProjectionFromMap(input: {
+  readonly map: WayfinderMapProjection;
+  readonly previous: WorkflowTrackerProjection;
+  readonly synchronizedAt: string;
+}): WorkflowTrackerProjection {
+  const previousByNumber = new Map(
+    input.previous.tickets.map((ticket) => [ticket.number, ticket] as const),
+  );
+  const mapByNumber = new Map(input.map.tickets.map((ticket) => [ticket.number, ticket] as const));
+  return {
+    status: "healthy",
+    canonicalReference: {
+      number: input.map.canonicalReference.number,
+      title: input.map.canonicalReference.title,
+      url: input.map.canonicalReference.url,
+      state: input.map.canonicalReference.state,
+    },
+    ...(input.map.revision !== undefined
+      ? { revision: input.map.revision }
+      : input.previous.revision !== undefined
+        ? { revision: input.previous.revision }
+        : {}),
+    ...(input.previous.batchId !== undefined ? { batchId: input.previous.batchId } : {}),
+    tickets: input.map.tickets.map((ticket) => {
+      const previous = previousByNumber.get(ticket.number);
+      return {
+        key: previous?.key ?? null,
+        number: ticket.number,
+        title: ticket.title,
+        url: ticket.url,
+        state: ticket.state,
+        ...(previous?.body !== undefined ? { body: previous.body } : {}),
+        parentNumber: previous?.parentNumber ?? input.map.canonicalReference.number,
+        blockedBy: ticket.blockedBy.filter((number) => mapByNumber.get(number)?.state !== "closed"),
+        blocks: ticket.blocks,
+        includedInRun: previous?.includedInRun ?? false,
+      };
+    }),
+    synchronizedAt: input.synchronizedAt,
+  };
 }
 
 function correctionCycleNumber(implementation: WorkflowTicketImplementation): number {
@@ -151,8 +208,31 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   const orchestrationEngine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
   const git = yield* GitWorkflowService;
+  const tracker = yield* IssueTracker;
   const receipts = yield* RuntimeReceiptBus;
   let lastServedWorkstreamId: WorkstreamId | null = null;
+
+  const resolveIntegrationWorkspace = Effect.fn(
+    "WorkflowTicketImplementationReactor.resolveIntegrationWorkspace",
+  )(function* (input: { readonly cwd: string; readonly baselineBranch: string }) {
+    const refsResult = yield* git
+      .listRefs({
+        cwd: input.cwd,
+        query: input.baselineBranch,
+        includeMatchingRemoteRefs: false,
+        refKind: "local",
+        refresh: true,
+      })
+      .pipe(Effect.result);
+    if (Result.isFailure(refsResult)) return null;
+    const baselineRef = refsResult.success.refs.find((ref) => ref.name === input.baselineBranch);
+    if (baselineRef === undefined) return null;
+    if (baselineRef.worktreePath !== null) return baselineRef.worktreePath;
+    const worktreeResult = yield* git
+      .createWorktree({ cwd: input.cwd, refName: input.baselineBranch, path: null })
+      .pipe(Effect.result);
+    return Result.isSuccess(worktreeResult) ? worktreeResult.success.worktree.path : null;
+  });
 
   const serverCommandId = Effect.fn("WorkflowTicketImplementationReactor.serverCommandId")(
     function* (tag: string) {
@@ -164,7 +244,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     function* (input: {
       readonly implementation: WorkflowTicketImplementation;
       readonly message: string | null;
-      readonly phase?: "worktree" | "implementation" | "review";
+      readonly phase?: "worktree" | "implementation" | "review" | "integration";
     }) {
       yield* receipts.publish({
         type: "workflow.ticket-implementation.progress",
@@ -322,6 +402,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
   )(function* (input: {
     readonly implementationId: string;
     readonly patch: Partial<WorkflowTicketImplementation>;
+    readonly trackerProjection?: WorkflowTrackerProjection;
   }) {
     const snapshot = yield* snapshots.getSnapshot();
     const originThread = snapshot.threads.find((thread) =>
@@ -350,6 +431,9 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       threadId: originThread.id,
       implementationId: current.id,
       implementation: next,
+      ...(input.trackerProjection !== undefined
+        ? { trackerProjection: input.trackerProjection }
+        : {}),
       expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
       createdAt: next.updatedAt,
     });
@@ -782,6 +866,325 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     },
   );
 
+  const failIntegration = Effect.fn("WorkflowTicketImplementationReactor.failIntegration")(
+    function* (input: {
+      readonly originThread: OrchestrationThread;
+      readonly implementation: WorkflowTicketImplementation;
+      readonly phase: "merge" | "validation" | "tracker";
+      readonly failure: string;
+      readonly updatedAt: string;
+    }) {
+      const integration = input.implementation.integration;
+      if (integration === undefined) return null;
+      const failed = yield* updateImplementation({
+        implementationId: input.implementation.id,
+        patch: {
+          status: "integration-failed",
+          integration: {
+            ...integration,
+            status: "failed",
+            failurePhase: input.phase,
+            failure: input.failure,
+            updatedAt: input.updatedAt,
+          },
+          failure: input.failure,
+          updatedAt: input.updatedAt,
+        },
+      });
+      return failed;
+    },
+  );
+
+  const processIntegration = Effect.fn("WorkflowTicketImplementationReactor.processIntegration")(
+    function* (input: {
+      readonly originThread: OrchestrationThread;
+      readonly implementation: WorkflowTicketImplementation;
+    }) {
+      const attachment = input.originThread.workflowAttachment;
+      const integration = input.implementation.integration;
+      if (
+        attachment === undefined ||
+        integration === undefined ||
+        input.implementation.status !== "integrating"
+      ) {
+        return;
+      }
+      const workflowRun = attachment.workflowRun;
+      if (workflowRun?.configuration.authority.mutateTracker !== true) {
+        return;
+      }
+      const snapshot = yield* snapshots.getSnapshot();
+      const cwd = resolveThreadWorkspaceCwd({
+        thread: input.originThread,
+        projects: snapshot.projects,
+      });
+      if (cwd === undefined) {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "merge",
+          failure: "The Origin Thread has no resolvable project workspace for integration.",
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+      const integrationCwd = yield* resolveIntegrationWorkspace({
+        cwd,
+        baselineBranch: integration.baselineBranch,
+      });
+      if (integrationCwd === null) {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "merge",
+          failure: `The Workstream Baseline ${integration.baselineBranch} has no dedicated integration workspace.`,
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+
+      let baselineCommit = integration.baselineCommit;
+      if (
+        integration.status === "integrating" &&
+        baselineCommit === null &&
+        input.implementation.branch === null
+      ) {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "merge",
+          failure: "The reviewed Ticket Implementation has no branch to integrate.",
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+      if (integration.status === "integrating") {
+        if (baselineCommit === null) {
+          const mergeResult = yield* git
+            .integrateBranch({
+              cwd: integrationCwd,
+              targetBranch: integration.baselineBranch,
+              sourceBranch: input.implementation.branch!,
+            })
+            .pipe(Effect.result);
+          if (Result.isFailure(mergeResult)) {
+            yield* failIntegration({
+              originThread: input.originThread,
+              implementation: input.implementation,
+              phase: "merge",
+              failure: failureMessage(mergeResult.failure),
+              updatedAt: input.implementation.updatedAt,
+            });
+            return;
+          }
+          baselineCommit = mergeResult.success.commitSha;
+          const mergeRecorded = yield* updateImplementation({
+            implementationId: input.implementation.id,
+            patch: {
+              status: "integrating",
+              integration: {
+                ...integration,
+                baselineCommit,
+                failurePhase: null,
+                failure: null,
+                updatedAt: input.implementation.updatedAt,
+              },
+              failure: null,
+              updatedAt: input.implementation.updatedAt,
+            },
+          });
+          if (mergeRecorded === null) return;
+        }
+        const validationResult = yield* git
+          .validateIntegration({
+            cwd: integrationCwd,
+            fixedPoint: input.implementation.fixedPoint,
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(validationResult)) {
+          yield* failIntegration({
+            originThread: input.originThread,
+            implementation: {
+              ...input.implementation,
+              integration: { ...integration, baselineCommit },
+            },
+            phase: "validation",
+            failure: failureMessage(validationResult.failure),
+            updatedAt: input.implementation.updatedAt,
+          });
+          return;
+        }
+        const integrationValidation: WorkflowValidationEvidence = {
+          name: "integration-diff-check",
+          status: "passed",
+          command: `git diff --check ${input.implementation.fixedPoint}..HEAD`,
+          detail: `Validated ${integration.baselineBranch} at ${baselineCommit}.`,
+          recordedAt: input.implementation.updatedAt,
+        };
+        const validation = [
+          ...input.implementation.validation.filter(
+            (evidence) => evidence.name !== integrationValidation.name,
+          ),
+          integrationValidation,
+        ];
+        const trackerClosing = yield* updateImplementation({
+          implementationId: input.implementation.id,
+          patch: {
+            status: "integrating",
+            integration: {
+              ...integration,
+              status: "tracker-closing",
+              baselineCommit,
+              failurePhase: null,
+              failure: null,
+              updatedAt: input.implementation.updatedAt,
+            },
+            validation,
+            failure: null,
+            updatedAt: input.implementation.updatedAt,
+          },
+        });
+        if (trackerClosing !== null) {
+          yield* publishProgress({
+            implementation: trackerClosing,
+            phase: "integration",
+            message:
+              "Baseline integration and fixed-point validation passed; synchronizing the tracker.",
+          });
+        }
+        return;
+      }
+
+      if (integration.status !== "tracker-closing") return;
+      const previousProjection =
+        attachment.trackerProjection ?? attachment.ticketingStage?.trackerProjection;
+      const repositoryResult = yield* tracker
+        .resolveProjectRepository(integrationCwd)
+        .pipe(Effect.result);
+      if (Result.isFailure(repositoryResult) || repositoryResult.success === null) {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "tracker",
+          failure: "The Workstream Baseline is not linked to a writable issue tracker.",
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+      if (previousProjection === undefined) {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "tracker",
+          failure: "Tracker closure requires the prior healthy Workflow Tracker Projection.",
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+      const repository = repositoryResult.success;
+      const currentMap = yield* tracker.loadWayfinderMap({
+        cwd: integrationCwd,
+        repository,
+        issueNumber: previousProjection.canonicalReference.number,
+        synchronizedAt: input.implementation.updatedAt,
+      });
+      const currentTicket =
+        currentMap.kind === "loaded"
+          ? currentMap.map.tickets.find(
+              (ticket) => ticket.number === input.implementation.ticketNumber,
+            )
+          : undefined;
+      if (currentTicket?.state !== "closed") {
+        const closeResult = yield* tracker
+          .setIssueState({
+            cwd: integrationCwd,
+            repository,
+            issueNumber: input.implementation.ticketNumber,
+            state: "closed",
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(closeResult)) {
+          yield* failIntegration({
+            originThread: input.originThread,
+            implementation: input.implementation,
+            phase: "tracker",
+            failure: failureMessage(closeResult.failure),
+            updatedAt: input.implementation.updatedAt,
+          });
+          return;
+        }
+      }
+      const reconciliationResult = yield* tracker
+        .reconcileWayfinderMap({
+          cwd: integrationCwd,
+          repository,
+          issueNumber: previousProjection.canonicalReference.number,
+          synchronizedAt: input.implementation.updatedAt,
+          ...(previousProjection.revision !== undefined
+            ? { currentRevision: previousProjection.revision }
+            : {}),
+        })
+        .pipe(Effect.result);
+      let map: WayfinderMapProjection | null = null;
+      if (
+        Result.isSuccess(reconciliationResult) &&
+        reconciliationResult.success.kind === "loaded"
+      ) {
+        map = reconciliationResult.success.map;
+      } else if (
+        Result.isSuccess(reconciliationResult) &&
+        reconciliationResult.success.kind === "unchanged"
+      ) {
+        const loadedResult = yield* tracker
+          .loadWayfinderMap({
+            cwd: integrationCwd,
+            repository,
+            issueNumber: previousProjection.canonicalReference.number,
+            synchronizedAt: input.implementation.updatedAt,
+          })
+          .pipe(Effect.result);
+        if (Result.isSuccess(loadedResult) && loadedResult.success.kind === "loaded") {
+          map = loadedResult.success.map;
+        }
+      }
+      const trackerTicket = map?.tickets.find(
+        (ticket) => ticket.number === input.implementation.ticketNumber,
+      );
+      if (map === null || trackerTicket?.state !== "closed") {
+        yield* failIntegration({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "tracker",
+          failure:
+            "Tracker closure did not synchronize a healthy projection with the integrated ticket closed.",
+          updatedAt: input.implementation.updatedAt,
+        });
+        return;
+      }
+      const projection = trackerProjectionFromMap({
+        map,
+        previous: previousProjection,
+        synchronizedAt: input.implementation.updatedAt,
+      });
+      yield* updateImplementation({
+        implementationId: input.implementation.id,
+        patch: {
+          status: "integrated",
+          integration: {
+            ...integration,
+            status: "integrated",
+            failurePhase: null,
+            failure: null,
+            updatedAt: input.implementation.updatedAt,
+          },
+          failure: null,
+          updatedAt: input.implementation.updatedAt,
+        },
+        trackerProjection: projection,
+      });
+    },
+  );
+
   const processUpdated = Effect.fn("WorkflowTicketImplementationReactor.processUpdated")(function* (
     event: TicketImplementationUpdatedEvent | TicketImplementationCheckpointedEvent,
   ) {
@@ -798,6 +1201,45 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     const originThread =
       located?.thread ??
       snapshot.threads.find((thread) => thread.id === implementation.originThreadId);
+    const currentImplementation = located?.implementation ?? implementation;
+
+    if (originThread !== undefined && currentImplementation.status === "integrating") {
+      yield* processIntegration({
+        originThread,
+        implementation: currentImplementation,
+      });
+      return;
+    }
+
+    if (
+      originThread?.workflowAttachment?.workflowRun?.configuration.authority.mutateTracker ===
+        true &&
+      currentImplementation.status === "reviewed" &&
+      currentImplementation.review?.status === "passed" &&
+      currentImplementation.validation.every((evidence) => evidence.status === "passed") &&
+      currentImplementation.review.findings.filter(isBlockingWorkflowCodeReviewFinding).length === 0
+    ) {
+      const attachment = originThread.workflowAttachment;
+      const integration = yield* updateImplementation({
+        implementationId: currentImplementation.id,
+        patch: {
+          status: "integrating",
+          integration: {
+            status: "integrating",
+            baselineBranch: attachment.workflowRun!.configuration.workstreamBaseline,
+            baselineCommit: null,
+            failurePhase: null,
+            failure: null,
+            startedAt: currentImplementation.updatedAt,
+            updatedAt: currentImplementation.updatedAt,
+          },
+          failure: null,
+          updatedAt: currentImplementation.updatedAt,
+        },
+      });
+      if (integration === null) return;
+      return;
+    }
 
     if (
       implementation.status === "needs-correction" &&
@@ -837,15 +1279,20 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     }
 
     yield* publishProgress({
-      implementation,
+      implementation: currentImplementation,
       message:
-        implementation.status === "checkpointed"
+        currentImplementation.status === "checkpointed"
           ? "Ticket Implementation reached a Workflow Checkpoint; automatic dispatch remains paused."
-          : implementation.status === "reviewed"
+          : currentImplementation.status === "reviewed"
             ? "Structured Code Review evidence recorded; integration remains a downstream milestone."
-            : implementation.status === "needs-decision"
-              ? "Automatic Correction Cycles are exhausted; Needs Decision preserves the final Must-Fix evidence."
-              : null,
+            : currentImplementation.status === "integration-failed"
+              ? `Integration failed during ${currentImplementation.integration?.failurePhase ?? "an unknown phase"}; retry is available without replaying a successful integration.`
+              : currentImplementation.status === "integrated"
+                ? "Baseline integration and tracker synchronization completed; the Ticket is now Integrated."
+                : currentImplementation.status === "needs-decision"
+                  ? "Automatic Correction Cycles are exhausted; Needs Decision preserves the final Must-Fix evidence."
+                  : null,
+      phase: implementationPhase(currentImplementation),
     });
   });
 

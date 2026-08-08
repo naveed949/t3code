@@ -1258,6 +1258,10 @@ function ChatViewContent(props: ChatViewProps) {
     threadEnvironment.startTicketImplementation,
     { reportFailure: false },
   );
+  const retryWorkflowTicketIntegrationCommand = useAtomCommand(
+    threadEnvironment.retryTicketIntegration,
+    { reportFailure: false },
+  );
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
     reportFailure: false,
   });
@@ -1805,6 +1809,22 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, activeWayfinderWorkstream, startWorkflowTicketImplementationCommand],
+  );
+  const retryWorkflowTicketIntegration = useCallback(
+    (implementationId: string) => {
+      const attachment = activeWayfinderWorkstream?.workflowAttachment;
+      if (!activeThread || attachment === null || attachment === undefined) return;
+      void retryWorkflowTicketIntegrationCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          implementationId,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          confirmed: true,
+        },
+      });
+    },
+    [activeThread, activeWayfinderWorkstream, retryWorkflowTicketIntegrationCommand],
   );
   const viewWorkflowArtifacts = useCallback(() => {
     if (!activeThread) return;
@@ -6212,6 +6232,7 @@ function ChatViewContent(props: ChatViewProps) {
         onStartToSpec={onStartWayfinderToSpec}
         workflowAttachment={activeWayfinderWorkstream?.workflowAttachment ?? null}
         onStartTicketImplementation={startWorkflowTicketImplementation}
+        onRetryTicketIntegration={retryWorkflowTicketIntegration}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
       />

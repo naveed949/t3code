@@ -24,10 +24,14 @@ function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
   readonly onOpenThread?: (threadId: ThreadId) => void;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onRetryTicketIntegration?: (implementationId: string) => void;
 }) {
   const implementation = props.node.ticketImplementation ?? null;
   const implementationAction = props.node.allowedActions.find(
     (action) => action.id === "start-ticket-implementation" && action.enabled,
+  );
+  const integrationRetryAction = props.node.allowedActions.find(
+    (action) => action.id === "retry-ticket-integration" && action.enabled,
   );
   return (
     <aside
@@ -181,6 +185,17 @@ function WorkflowNodeInspector(props: {
             Open implementation thread
           </button>
         ) : null}
+        {integrationRetryAction &&
+        implementation?.status === "integration-failed" &&
+        props.onRetryTicketIntegration ? (
+          <button
+            type="button"
+            className="mt-2 rounded-md border border-border px-2 py-1 text-xs font-medium text-foreground"
+            onClick={() => props.onRetryTicketIntegration?.(implementation.id)}
+          >
+            {integrationRetryAction.label}
+          </button>
+        ) : null}
         {implementationAction && props.onStartTicketImplementation ? (
           <button
             type="button"
@@ -220,6 +235,7 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
   readonly model: WayfinderWorkflowViewModel;
   readonly onOpenThread?: (threadId: ThreadId) => void;
   readonly onStartTicketImplementation?: (nodeId: string) => void;
+  readonly onRetryTicketIntegration?: (implementationId: string) => void;
   readonly initialSelectedNodeId?: string | null;
   readonly selectedNodeId?: string | null;
   readonly onSelectNode?: (nodeId: string | null) => void;
@@ -462,6 +478,9 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
           {...(props.onOpenThread ? { onOpenThread: props.onOpenThread } : {})}
           {...(props.onStartTicketImplementation
             ? { onStartTicketImplementation: props.onStartTicketImplementation }
+            : {})}
+          {...(props.onRetryTicketIntegration
+            ? { onRetryTicketIntegration: props.onRetryTicketIntegration }
             : {})}
         />
       ) : (

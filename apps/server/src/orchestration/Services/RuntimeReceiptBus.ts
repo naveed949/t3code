@@ -119,7 +119,7 @@ export const WorkflowTicketImplementationProgressReceipt = Schema.Struct({
   ticketNodeId: Schema.String,
   implementationId: Schema.String,
   actionIdentity: Schema.String,
-  phase: Schema.Literals(["worktree", "implementation", "review"]),
+  phase: Schema.Literals(["worktree", "implementation", "review", "integration"]),
   status: WorkflowTicketImplementationStatus,
   createdAt: IsoDateTime,
   message: Schema.NullOr(Schema.String),

@@ -436,7 +436,7 @@ function WorkflowRunControls(props: {
     authority: {
       createWorktree: true,
       runProvider: true,
-      mutateTracker: false,
+      mutateTracker: true,
       pushBaseline: false,
       createDraftPullRequest: false,
     },
@@ -449,7 +449,8 @@ function WorkflowRunControls(props: {
         Prepare Workflow Run
       </Text>
       <Text className="font-sans text-xs text-neutral-600 dark:text-neutral-300">
-        Exact scope: Workstream. Capacity: 2. Authority: create worktree and run provider.
+        Exact scope: Workstream. Capacity: 2. Authority: create worktree, run provider, and
+        synchronize the tracker; push and draft pull-request creation remain ungranted.
       </Text>
       <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
         Default Provider
