@@ -84,7 +84,10 @@ import * as GitManager from "./git/GitManager.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
-import { OrchestrationListenerCallbackError } from "./orchestration/Errors.ts";
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationListenerCallbackError,
+} from "./orchestration/Errors.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
@@ -5850,6 +5853,55 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           messageCreatedAt: now,
         },
       ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("returns the current projection for a stale workflow recovery command", () =>
+    Effect.gen(function* () {
+      const now = "2026-01-01T00:00:00.000Z";
+      const currentProjection = {
+        snapshotSequence: 8,
+        projects: [],
+        threads: [],
+        updatedAt: now,
+      };
+      const invariantError = new OrchestrationCommandInvariantError({
+        commandType: "thread.workflow.ticket-implementation.recover",
+        detail: "The workstream version is stale.",
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getShellSnapshot: () => Effect.succeed(currentProjection),
+          },
+          orchestrationEngine: {
+            dispatch: () => Effect.fail(invariantError),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.workflow.ticket-implementation.recover",
+            commandId: CommandId.make("cmd-workflow-recovery-stale"),
+            threadId: ThreadId.make("thread-workflow-recovery-stale"),
+            implementationId: "implementation-stale",
+            actionIdentity: "action-stale",
+            action: "resume",
+            expectedWorkstreamVersion: 4,
+            confirmed: true,
+            createdAt: now,
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
+      assert.deepEqual(result.failure.currentProjection, currentProjection);
+      assert.equal(result.failure.message, invariantError.message);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

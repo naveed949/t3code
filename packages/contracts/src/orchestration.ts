@@ -2937,6 +2937,7 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   {
     message: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
+    currentProjection: Schema.optional(OrchestrationShellSnapshot),
     preflightBlockers: Schema.optional(
       Schema.Array(
         Schema.Struct({

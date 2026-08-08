@@ -77,6 +77,10 @@ import {
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import {
+  OrchestrationCommandInvariantError,
+  OrchestrationCommandPreviouslyRejectedError,
+} from "./orchestration/Errors.ts";
+import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
   observeRpcStreamEffect as instrumentRpcStreamEffect,
@@ -129,6 +133,10 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError);
+const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
+  OrchestrationCommandPreviouslyRejectedError,
+);
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -1020,16 +1028,37 @@ const makeWsRpcLayer = (
       const dispatchNormalizedCommand = (
         normalizedCommand: OrchestrationCommand,
       ): Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError> => {
+        const isWorkflowImplementationRecoveryCommand =
+          normalizedCommand.type === "thread.workflow.ticket-implementation.stop" ||
+          normalizedCommand.type === "thread.workflow.ticket-implementation.recover";
+        const dispatchOrchestrationCommand = orchestrationEngine.dispatch(normalizedCommand).pipe(
+          Effect.catchIf(
+            (cause) =>
+              isWorkflowImplementationRecoveryCommand &&
+              (isOrchestrationCommandInvariantError(cause) ||
+                isOrchestrationCommandPreviouslyRejectedError(cause)),
+            (cause) =>
+              projectionSnapshotQuery.getShellSnapshot().pipe(
+                Effect.mapError(() => cause),
+                Effect.flatMap((currentProjection) =>
+                  Effect.fail(
+                    new OrchestrationDispatchCommandError({
+                      message: cause.message,
+                      cause,
+                      currentProjection,
+                    }),
+                  ),
+                ),
+              ),
+          ),
+          Effect.mapError((cause) =>
+            toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
+          ),
+        );
         const dispatchEffect =
           normalizedCommand.type === "thread.turn.start" && normalizedCommand.bootstrap
             ? dispatchBootstrapTurnStart(normalizedCommand)
-            : orchestrationEngine
-                .dispatch(normalizedCommand)
-                .pipe(
-                  Effect.mapError((cause) =>
-                    toDispatchCommandError(cause, "Failed to dispatch orchestration command"),
-                  ),
-                );
+            : dispatchOrchestrationCommand;
 
         return startup
           .enqueueCommand(dispatchEffect)
