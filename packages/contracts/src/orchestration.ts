@@ -801,6 +801,7 @@ const WorkflowTicketImplementationValidationList = Schema.Array(WorkflowValidati
 
 export const WorkflowTicketIntegrationFailurePhase = Schema.Literals([
   "merge",
+  "repair",
   "validation",
   "tracker",
 ]);
@@ -815,16 +816,114 @@ export const WorkflowTicketIntegrationStatus = Schema.Literals([
 ]);
 export type WorkflowTicketIntegrationStatus = typeof WorkflowTicketIntegrationStatus.Type;
 
+export const WorkflowTicketIntegrationRepairStatus = Schema.Literals([
+  "pending",
+  "running",
+  "reviewing",
+  "ready",
+  "failed",
+]);
+export type WorkflowTicketIntegrationRepairStatus =
+  typeof WorkflowTicketIntegrationRepairStatus.Type;
+
+export const WorkflowTicketIntegrationRepair = Schema.Struct({
+  attempt: PositiveInt,
+  status: WorkflowTicketIntegrationRepairStatus,
+  skillRunId: Schema.NullOr(SkillRunId),
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  startedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowTicketIntegrationRepair = typeof WorkflowTicketIntegrationRepair.Type;
+
 export const WorkflowTicketIntegration = Schema.Struct({
   status: WorkflowTicketIntegrationStatus,
   baselineBranch: TrimmedNonEmptyString,
   baselineCommit: Schema.NullOr(TrimmedNonEmptyString),
   failurePhase: Schema.NullOr(WorkflowTicketIntegrationFailurePhase),
   failure: Schema.NullOr(TrimmedNonEmptyString),
+  repair: Schema.optional(WorkflowTicketIntegrationRepair),
   startedAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type WorkflowTicketIntegration = typeof WorkflowTicketIntegration.Type;
+
+export const WorkflowBaselineRefreshStatus = Schema.Literals([
+  "previewing",
+  "ready",
+  "draining",
+  "refreshing",
+  "needs-recovery",
+  "completed",
+]);
+export type WorkflowBaselineRefreshStatus = typeof WorkflowBaselineRefreshStatus.Type;
+
+export const WorkflowBaselineRefreshAction = Schema.Struct({
+  id: Schema.Literals(["preflight", "confirm"]),
+  label: TrimmedNonEmptyString,
+  enabled: Schema.Boolean,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type WorkflowBaselineRefreshAction = typeof WorkflowBaselineRefreshAction.Type;
+
+export const WorkflowBaselineRefreshCommit = Schema.Struct({
+  sha: TrimmedNonEmptyString,
+  title: TrimmedString,
+});
+export type WorkflowBaselineRefreshCommit = typeof WorkflowBaselineRefreshCommit.Type;
+
+export const WorkflowBaselineRefreshFile = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  additions: NonNegativeInt,
+  deletions: NonNegativeInt,
+});
+export type WorkflowBaselineRefreshFile = typeof WorkflowBaselineRefreshFile.Type;
+
+export const WorkflowBaselineRefreshImpact = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  ticketNumber: PositiveInt,
+  state: Schema.Literals(["integrated", "stale"]),
+  reason: TrimmedNonEmptyString,
+});
+export type WorkflowBaselineRefreshImpact = typeof WorkflowBaselineRefreshImpact.Type;
+
+export const WorkflowBaselineRefreshValidation = Schema.Struct({
+  nodeId: TrimmedNonEmptyString,
+  status: Schema.Literals(["passed", "failed"]),
+  detail: TrimmedNonEmptyString,
+  recordedAt: IsoDateTime,
+});
+export type WorkflowBaselineRefreshValidation = typeof WorkflowBaselineRefreshValidation.Type;
+
+const WorkflowBaselineRefreshCommits = Schema.Array(WorkflowBaselineRefreshCommit).check(
+  Schema.isMaxLength(256),
+);
+const WorkflowBaselineRefreshFiles = Schema.Array(WorkflowBaselineRefreshFile).check(
+  Schema.isMaxLength(512),
+);
+const WorkflowBaselineRefreshImpacts = Schema.Array(WorkflowBaselineRefreshImpact).check(
+  Schema.isMaxLength(128),
+);
+const WorkflowBaselineRefreshValidations = Schema.Array(WorkflowBaselineRefreshValidation).check(
+  Schema.isMaxLength(128),
+);
+
+export const WorkflowBaselineRefresh = Schema.Struct({
+  status: WorkflowBaselineRefreshStatus,
+  baselineBranch: TrimmedNonEmptyString,
+  remoteTarget: TrimmedNonEmptyString,
+  currentCommit: Schema.NullOr(TrimmedNonEmptyString),
+  sourceCommit: Schema.NullOr(TrimmedNonEmptyString),
+  incomingCommits: WorkflowBaselineRefreshCommits,
+  incomingFiles: WorkflowBaselineRefreshFiles,
+  affectedTickets: WorkflowBaselineRefreshImpacts,
+  validations: WorkflowBaselineRefreshValidations,
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  allowedActions: Schema.optional(Schema.Array(WorkflowBaselineRefreshAction)),
+  requestedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowBaselineRefresh = typeof WorkflowBaselineRefresh.Type;
 
 export const WorkflowDiffEvidenceFile = Schema.Struct({
   path: TrimmedNonEmptyString,
@@ -917,7 +1016,7 @@ export const WorkflowTicketImplementation = Schema.Struct({
   validation: WorkflowTicketImplementationValidationList,
   diff: Schema.NullOr(WorkflowDiffEvidence),
   review: Schema.NullOr(WorkflowCodeReviewEvidence),
-  recoveryPhase: Schema.optional(Schema.Literals(["implementation", "review"])),
+  recoveryPhase: Schema.optional(Schema.Literals(["implementation", "review", "integration"])),
   recoveryAttempt: Schema.optional(NonNegativeInt),
   recoveryCheckpointTurnCount: Schema.optional(NonNegativeInt),
   integration: Schema.optional(WorkflowTicketIntegration),
@@ -1039,6 +1138,7 @@ export const WorkflowAttachment = Schema.Struct({
   ticketingStage: Schema.optional(WorkflowTicketingStage),
   trackerProjection: Schema.optional(WorkflowTrackerProjection),
   ticketImplementations: Schema.optional(Schema.Array(WorkflowTicketImplementation)),
+  baselineRefresh: Schema.optional(WorkflowBaselineRefresh),
   // The optimistic command version is optional for attachments written before
   // the Specification stage existed; those attachments start at version 0.
   workflowVersion: Schema.optional(NonNegativeInt),
@@ -1740,6 +1840,25 @@ const ThreadWorkflowRunResumeCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowBaselineRefreshPreflightCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.baseline-refresh.preflight"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowBaselineRefreshConfirmCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.baseline-refresh.confirm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  currentCommit: TrimmedNonEmptyString,
+  sourceCommit: TrimmedNonEmptyString,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowNodeHoldCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.node.hold"),
   commandId: CommandId,
@@ -1913,6 +2032,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowRunStartCommand,
   ThreadWorkflowRunPauseCommand,
   ThreadWorkflowRunResumeCommand,
+  ThreadWorkflowBaselineRefreshPreflightCommand,
+  ThreadWorkflowBaselineRefreshConfirmCommand,
   ThreadWorkflowNodeHoldCommand,
   ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
@@ -1960,6 +2081,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowRunStartCommand,
   ThreadWorkflowRunPauseCommand,
   ThreadWorkflowRunResumeCommand,
+  ThreadWorkflowBaselineRefreshPreflightCommand,
+  ThreadWorkflowBaselineRefreshConfirmCommand,
   ThreadWorkflowNodeHoldCommand,
   ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
@@ -2090,6 +2213,16 @@ const ThreadWorkflowRunDrainCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowBaselineRefreshUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.baseline-refresh.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  baselineRefresh: WorkflowBaselineRefresh,
+  staleNodeIds: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.ticket-implementation.review.record"),
   commandId: CommandId,
@@ -2160,6 +2293,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadWayfinderPublicationUpdateCommand,
   ThreadWorkflowTicketingPublicationUpdateCommand,
   ThreadWorkflowRunDrainCompleteCommand,
+  ThreadWorkflowBaselineRefreshUpdateCommand,
   ThreadWorkflowTicketImplementationUpdateCommand,
   ThreadWorkflowTicketImplementationCheckpointCommand,
   ThreadWorkflowTicketImplementationReviewRecordCommand,
@@ -2214,6 +2348,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-run-draining",
   "thread.workflow-run-paused",
   "thread.workflow-run-resumed",
+  "thread.workflow-baseline-refresh-requested",
+  "thread.workflow-baseline-refresh-updated",
   "thread.workflow-node-held",
   "thread.workflow-node-released",
   "thread.workflow-synchronized",
@@ -2499,6 +2635,16 @@ export const ThreadWorkflowRunConfirmedPayload = Schema.Struct({
 });
 
 export const ThreadWorkflowRunAutomationUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowBaselineRefreshRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowBaselineRefreshUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   attachment: WorkflowAttachment,
 });
@@ -2855,6 +3001,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-run-resumed"),
     payload: ThreadWorkflowRunAutomationUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-baseline-refresh-requested"),
+    payload: ThreadWorkflowBaselineRefreshRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-baseline-refresh-updated"),
+    payload: ThreadWorkflowBaselineRefreshUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

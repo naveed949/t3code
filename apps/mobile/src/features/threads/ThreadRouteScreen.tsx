@@ -239,6 +239,14 @@ function ThreadRouteContent(
     threadEnvironment.confirmWorkflowRun,
     "confirm Development Workflow Run",
   );
+  const preflightBaselineRefreshCommand = useAtomCommand(
+    threadEnvironment.preflightBaselineRefresh,
+    "preflight Baseline Refresh",
+  );
+  const confirmBaselineRefreshCommand = useAtomCommand(
+    threadEnvironment.confirmBaselineRefresh,
+    "confirm Baseline Refresh",
+  );
   const completeWorkflowSpecificationCommand = useAtomCommand(
     threadEnvironment.completeWorkflowSpecification,
     "complete Workflow Specification",
@@ -746,6 +754,34 @@ function ThreadRouteContent(
     },
     [confirmWorkflowRunCommand, selectedThread],
   );
+  const preflightBaselineRefresh = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void preflightBaselineRefreshCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightBaselineRefreshCommand, selectedThread]);
+  const confirmBaselineRefresh = useCallback(
+    (currentCommit: string, sourceCommit: string) => {
+      const attachment = selectedThread?.workflowAttachment;
+      if (!selectedThread || attachment === undefined) return;
+      void confirmBaselineRefreshCommand({
+        environmentId: selectedThread.environmentId,
+        input: {
+          threadId: selectedThread.id,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          currentCommit,
+          sourceCommit,
+          confirmed: true,
+        },
+      });
+    },
+    [confirmBaselineRefreshCommand, selectedThread],
+  );
   const completeWorkflowSpecification = useCallback(
     (prd: WorkflowPrdDocument) => {
       if (!selectedThread) return;
@@ -1078,6 +1114,8 @@ function ThreadRouteContent(
           workflowRunRequiredSkillsByProvider={workflowRunRequiredSkillsByProvider}
           onPreflightWorkflowRun={preflightWorkflowRun}
           onConfirmWorkflowRun={confirmWorkflowRun}
+          onPreflightBaselineRefresh={preflightBaselineRefresh}
+          onConfirmBaselineRefresh={confirmBaselineRefresh}
           {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}
         />
       </View>

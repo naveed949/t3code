@@ -20,6 +20,8 @@ import {
   type StartWorkflowRunInput,
   type PauseWorkflowRunInput,
   type ResumeWorkflowRunInput,
+  type PreflightWorkflowBaselineRefreshInput,
+  type ConfirmWorkflowBaselineRefreshInput,
   type HoldWorkflowNodeInput,
   type ReleaseWorkflowNodeInput,
   type ViewWorkflowArtifactsInput,
@@ -58,6 +60,8 @@ import {
   startWorkflowRun,
   pauseWorkflowRun,
   resumeWorkflowRun,
+  preflightWorkflowBaselineRefresh,
+  confirmWorkflowBaselineRefresh,
   holdWorkflowNode,
   releaseWorkflowNode,
   viewWorkflowArtifacts,
@@ -100,6 +104,8 @@ export type {
   StartWorkflowRunInput,
   PauseWorkflowRunInput,
   ResumeWorkflowRunInput,
+  PreflightWorkflowBaselineRefreshInput,
+  ConfirmWorkflowBaselineRefreshInput,
   HoldWorkflowNodeInput,
   ReleaseWorkflowNodeInput,
   ViewWorkflowArtifactsInput,
@@ -286,6 +292,20 @@ export function createThreadEnvironmentAtoms<R, E>(
     resumeWorkflowRun: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:resume-workflow-run",
       execute: (input: ResumeWorkflowRunInput) => resumeWorkflowRun(input),
+      scheduler,
+      concurrency,
+    }),
+    preflightBaselineRefresh: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:preflight-baseline-refresh",
+      execute: (input: PreflightWorkflowBaselineRefreshInput) =>
+        preflightWorkflowBaselineRefresh(input),
+      scheduler,
+      concurrency,
+    }),
+    confirmBaselineRefresh: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:confirm-baseline-refresh",
+      execute: (input: ConfirmWorkflowBaselineRefreshInput) =>
+        confirmWorkflowBaselineRefresh(input),
       scheduler,
       concurrency,
     }),

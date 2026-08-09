@@ -34,3 +34,7 @@ dispatch until each active implementation finishes or reaches a Workflow
 Checkpoint. A per-node **Hold** blocks future dispatch; releasing the Hold makes
 the node eligible again but does not start it. **Resume workflow** rechecks
 scope, blockers, capabilities, holds, and capacity before dispatching anything.
+
+See [Refreshing a Development Workflow Baseline](workflow-baseline-refresh.md)
+when the Workstream Baseline has incoming commits that need an explicit
+preview, drain, and revalidation pass.

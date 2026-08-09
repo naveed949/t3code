@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   ApprovalRequestId,
+  CommandId,
   ProviderInstanceId,
   SkillRunId,
   ThreadId,
@@ -158,6 +159,101 @@ it("renders exact Workflow Run provider controls and preflight action", () => {
   expect(markup).toContain("Default Provider");
   expect(markup).toContain("Workstream override");
   expect(markup).toContain("Run read-only preflight");
+});
+
+it("renders the server-projected Baseline Refresh preview and confirmation", () => {
+  const provider = ProviderInstanceId.make("codex");
+  const originThreadId = ThreadId.make("thread-origin");
+  const workstreamId = WorkstreamId.make("workstream:origin");
+  const markup = renderToStaticMarkup(
+    <WorkflowAttachmentCard
+      originThreadId={originThreadId}
+      hint={null}
+      attachment={{
+        originThreadId,
+        workstreamId,
+        sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+        workflowGoal: "Ship the workflow.",
+        backfilledWayfinderData: {},
+        observationCursor: {
+          sourceSkillRunId: SkillRunId.make("skill-run:origin"),
+          observedAt: "2026-08-03T12:00:00.000Z",
+        },
+        workflowRun: {
+          configuration: {
+            workflowGoal: "Ship the workflow.",
+            runScope: [{ nodeId: "ticket:43", label: "Repair workflow" }],
+            defaultProviderInstanceId: provider,
+            providerOverrides: [],
+            requiredSkills: [],
+            fixedPoint: "fixed-point",
+            workstreamBaseline: "feature/development-workflow",
+            remoteTarget: "origin/main",
+            targetVerification: {
+              fixedPoint: "verified",
+              workstreamBaseline: "verified",
+              remoteTarget: "verified",
+            },
+            environmentAutomationCapacity: 2,
+            executionLimit: 1,
+            authority: {
+              createWorktree: true,
+              runProvider: true,
+              mutateTracker: true,
+              pushBaseline: false,
+              createDraftPullRequest: false,
+            },
+          },
+          status: "confirmed",
+          authorityGranted: true,
+          confirmedAt: "2026-08-03T12:00:00.000Z",
+          dispatchIdentity: CommandId.make("workflow-run:origin"),
+          immutableAtDispatch: "2026-08-03T12:00:00.000Z",
+        },
+        baselineRefresh: {
+          status: "ready",
+          baselineBranch: "feature/development-workflow",
+          remoteTarget: "origin/main",
+          currentCommit: "current-sha",
+          sourceCommit: "source-sha",
+          incomingCommits: [{ sha: "source-sha", title: "Refresh the baseline" }],
+          incomingFiles: [{ path: "src/workflow.ts", additions: 3, deletions: 1 }],
+          affectedTickets: [
+            {
+              nodeId: "ticket:43",
+              ticketNumber: 43,
+              state: "integrated",
+              reason: "Incoming baseline commits overlap the integrated Ticket diff.",
+            },
+          ],
+          validations: [],
+          failure: null,
+          allowedActions: [
+            { id: "preflight", label: "Refresh preview", enabled: true, reason: null },
+            {
+              id: "confirm",
+              label: "Confirm baseline refresh",
+              enabled: true,
+              reason: null,
+            },
+          ],
+          requestedAt: "2026-08-03T12:00:00.000Z",
+          updatedAt: "2026-08-03T12:00:00.000Z",
+        },
+        attachedAt: "2026-08-03T12:00:00.000Z",
+      }}
+      onDismiss={() => undefined}
+      onAttach={() => undefined}
+      onPreflightBaselineRefresh={() => undefined}
+      onConfirmBaselineRefresh={() => undefined}
+    />,
+  );
+
+  expect(markup).toContain("Baseline Refresh");
+  expect(markup).toContain("Refresh the baseline");
+  expect(markup).toContain("src/workflow.ts");
+  expect(markup).toContain("Ticket #43");
+  expect(markup).toContain("Confirm baseline refresh");
 });
 
 it("surfaces the durable Specification checkpoint", () => {

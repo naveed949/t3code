@@ -58,6 +58,10 @@ export type ConfirmWorkflowRunInput = CommandInput<"thread.workflow.run.confirm"
 export type StartWorkflowRunInput = CommandInput<"thread.workflow.run.start">;
 export type PauseWorkflowRunInput = CommandInput<"thread.workflow.run.pause">;
 export type ResumeWorkflowRunInput = CommandInput<"thread.workflow.run.resume">;
+export type PreflightWorkflowBaselineRefreshInput =
+  CommandInput<"thread.workflow.baseline-refresh.preflight">;
+export type ConfirmWorkflowBaselineRefreshInput =
+  CommandInput<"thread.workflow.baseline-refresh.confirm">;
 export type HoldWorkflowNodeInput = CommandInput<"thread.workflow.node.hold">;
 export type ReleaseWorkflowNodeInput = CommandInput<"thread.workflow.node.release">;
 export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
@@ -505,6 +509,34 @@ export const completeWorkflowSpecification: (
     return yield* dispatch({
       ...input,
       type: "thread.workflow.specification.complete",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const preflightWorkflowBaselineRefresh: (
+  input: PreflightWorkflowBaselineRefreshInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.preflightWorkflowBaselineRefresh")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.baseline-refresh.preflight",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const confirmWorkflowBaselineRefresh: (
+  input: ConfirmWorkflowBaselineRefreshInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.confirmWorkflowBaselineRefresh")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.baseline-refresh.confirm",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

@@ -406,6 +406,22 @@ const make = Effect.gen(function* () {
       recoveryPhase: implementation.recoveryPhase ?? "implementation",
       failure: `Provider interruption failed before a typed terminal outcome: ${Cause.pretty(input.cause)}`,
       updatedAt: input.event.payload.createdAt,
+      ...(implementation.recoveryPhase === "integration" && implementation.integration?.repair
+        ? {
+            integration: {
+              ...implementation.integration,
+              status: "failed" as const,
+              failurePhase: "repair" as const,
+              failure: `Provider interruption failed before a typed terminal outcome: ${Cause.pretty(input.cause)}`,
+              repair: {
+                ...implementation.integration.repair,
+                status: "failed" as const,
+                failure: `Provider interruption failed before a typed terminal outcome: ${Cause.pretty(input.cause)}`,
+                updatedAt: input.event.payload.createdAt,
+              },
+            },
+          }
+        : {}),
     };
     yield* orchestrationEngine.dispatch({
       type: "thread.workflow.ticket-implementation.update",

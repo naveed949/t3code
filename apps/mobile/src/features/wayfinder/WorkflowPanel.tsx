@@ -2,12 +2,17 @@ import type {
   WayfinderWorkflowOutlineNode,
   WayfinderWorkflowViewModel,
 } from "@t3tools/client-runtime/state/wayfinder-workflow";
-import type { ThreadId, WorkflowTicketImplementationRecoveryAction } from "@t3tools/contracts";
+import type {
+  ThreadId,
+  WorkflowAttachment,
+  WorkflowTicketImplementationRecoveryAction,
+} from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { BaselineRefreshControls } from "../threads/WorkflowAttachmentCard";
 
 function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
@@ -304,6 +309,9 @@ export function WorkflowPanel(props: {
     action: WorkflowTicketImplementationRecoveryAction,
   ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
+  readonly workflowAttachment?: WorkflowAttachment | null;
+  readonly onPreflightBaselineRefresh?: () => void;
+  readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = props.model.outline.find((node) => node.id === selectedNodeId) ?? null;
@@ -330,6 +338,14 @@ export function WorkflowPanel(props: {
           separate.
         </Text>
       </View>
+
+      {props.workflowAttachment?.workflowRun && props.onPreflightBaselineRefresh ? (
+        <BaselineRefreshControls
+          attachment={props.workflowAttachment}
+          onPreflight={props.onPreflightBaselineRefresh}
+          {...(props.onConfirmBaselineRefresh ? { onConfirm: props.onConfirmBaselineRefresh } : {})}
+        />
+      ) : null}
 
       <View className="gap-2">
         <Text accessibilityRole="header" className="text-xs font-semibold text-foreground">

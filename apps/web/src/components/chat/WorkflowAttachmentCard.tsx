@@ -29,6 +29,8 @@ export function WorkflowAttachmentCard(props: {
   >;
   readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
+  readonly onPreflightBaselineRefresh?: () => void;
+  readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
@@ -280,6 +282,15 @@ export function WorkflowAttachmentCard(props: {
             onExecutionLimitChange={setExecutionLimit}
             onPreflightRun={props.onPreflightRun}
             {...(props.onConfirmRun ? { onConfirmRun: props.onConfirmRun } : {})}
+          />
+        ) : null}
+        {props.attachment.workflowRun && props.onPreflightBaselineRefresh ? (
+          <BaselineRefreshControls
+            attachment={props.attachment}
+            onPreflight={props.onPreflightBaselineRefresh}
+            {...(props.onConfirmBaselineRefresh
+              ? { onConfirm: props.onConfirmBaselineRefresh }
+              : {})}
           />
         ) : null}
       </section>
@@ -538,6 +549,130 @@ function WorkflowRunControls(props: {
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+export function BaselineRefreshControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly onPreflight: () => void;
+  readonly onConfirm?: (currentCommit: string, sourceCommit: string) => void;
+}) {
+  const refresh = props.attachment.baselineRefresh;
+  const canPreflight =
+    refresh === undefined ||
+    refresh.allowedActions?.some((action) => action.id === "preflight" && action.enabled) === true;
+  const canConfirm =
+    props.onConfirm !== undefined &&
+    refresh?.allowedActions?.some((action) => action.id === "confirm" && action.enabled) === true;
+  const statusLabel = refresh?.status.replaceAll("-", " ") ?? "not requested";
+  return (
+    <div
+      className="mt-3 space-y-2 rounded-md border border-sky-500/25 bg-sky-500/5 p-2.5 text-xs"
+      aria-label="Baseline Refresh"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-foreground">Baseline Refresh</p>
+          <p className="mt-0.5 text-[11px] capitalize text-muted-foreground">
+            Status: {statusLabel}
+          </p>
+        </div>
+        {canPreflight ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground"
+            onClick={props.onPreflight}
+          >
+            {refresh === undefined ? "Preview incoming commits" : "Refresh preview"}
+          </button>
+        ) : null}
+      </div>
+      {refresh?.status === "ready" ? (
+        <>
+          <p className="text-[11px] text-muted-foreground">
+            {refresh.incomingCommits.length} incoming commit
+            {refresh.incomingCommits.length === 1 ? "" : "s"}, {refresh.incomingFiles.length}{" "}
+            changed file
+            {refresh.incomingFiles.length === 1 ? "" : "s"}, and {refresh.affectedTickets.length}{" "}
+            affected Ticket
+            {refresh.affectedTickets.length === 1 ? "" : "s"}.
+          </p>
+          {refresh.incomingCommits.length > 0 ? (
+            <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+              {refresh.incomingCommits.slice(0, 5).map((commit) => (
+                <li key={commit.sha}>
+                  <code>{commit.sha.slice(0, 8)}</code> {commit.title || "Untitled commit"}
+                </li>
+              ))}
+              {refresh.incomingCommits.length > 5 ? (
+                <li>…and {refresh.incomingCommits.length - 5} more incoming commits.</li>
+              ) : null}
+            </ul>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">No incoming commits.</p>
+          )}
+          {refresh.incomingFiles.length > 0 ? (
+            <p className="text-[11px] text-muted-foreground">
+              Files:{" "}
+              {refresh.incomingFiles
+                .slice(0, 5)
+                .map((file) => file.path)
+                .join(", ")}
+              {refresh.incomingFiles.length > 5
+                ? `, and ${refresh.incomingFiles.length - 5} more`
+                : ""}
+              .
+            </p>
+          ) : null}
+          {refresh.affectedTickets.length > 0 ? (
+            <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+              {refresh.affectedTickets.map((ticket) => (
+                <li key={`${ticket.nodeId}:${ticket.state}`}>
+                  Ticket #{ticket.ticketNumber} ({ticket.state}): {ticket.reason}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              No integrated or Stale Tickets are affected.
+            </p>
+          )}
+          <button
+            type="button"
+            disabled={!canConfirm}
+            className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => {
+              if (canConfirm && refresh) {
+                props.onConfirm?.(refresh.currentCommit!, refresh.sourceCommit!);
+              }
+            }}
+          >
+            Confirm baseline refresh
+          </button>
+        </>
+      ) : null}
+      {refresh?.status === "previewing" ? (
+        <p className="text-[11px] text-muted-foreground">
+          Building a preview from the confirmed baseline.
+        </p>
+      ) : null}
+      {refresh?.status === "draining" || refresh?.status === "refreshing" ? (
+        <p className="text-[11px] text-muted-foreground">
+          Active work is draining before the baseline changes. No new automatic Ticket work will
+          start.
+        </p>
+      ) : null}
+      {refresh?.status === "needs-recovery" ? (
+        <p role="alert" className="text-[11px] text-destructive">
+          {refresh.failure ?? "Baseline refresh needs recovery."}
+        </p>
+      ) : null}
+      {refresh?.status === "completed" ? (
+        <p className="text-[11px] text-muted-foreground">
+          Baseline refreshed at {refresh.currentCommit ?? "the confirmed source"}.
+        </p>
+      ) : null}
     </div>
   );
 }

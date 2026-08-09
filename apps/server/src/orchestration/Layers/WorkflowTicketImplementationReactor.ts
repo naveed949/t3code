@@ -24,6 +24,9 @@ type WorkflowTicketImplementationEvent = Extract<
       | "thread.workflow-run-started"
       | "thread.workflow-run-resumed"
       | "thread.workflow-run-draining"
+      | "thread.workflow-run-paused"
+      | "thread.workflow-baseline-refresh-requested"
+      | "thread.workflow-baseline-refresh-updated"
       | "thread.session-set"
       | "thread.reverted"
       | "thread.turn-start-requested";
@@ -63,6 +66,9 @@ export const makeWorkflowTicketImplementationReactor = Effect.gen(function* () {
             event.type === "thread.workflow-run-started" ||
             event.type === "thread.workflow-run-resumed" ||
             event.type === "thread.workflow-run-draining" ||
+            event.type === "thread.workflow-run-paused" ||
+            event.type === "thread.workflow-baseline-refresh-requested" ||
+            event.type === "thread.workflow-baseline-refresh-updated" ||
             event.type === "thread.session-set" ||
             event.type === "thread.reverted" ||
             event.type === "thread.turn-start-requested"

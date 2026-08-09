@@ -670,3 +670,33 @@ export function resolveWorkflowStaleness(
     },
   };
 }
+
+/** Preserve a truthful dispatch checkpoint when baseline revalidation invalidates work. */
+export function markWorkflowBaselineRefreshStale(
+  attachment: WorkflowAttachment,
+  nodeIds: ReadonlySet<string>,
+  staleAt: string,
+): WorkflowAttachment {
+  const graph = attachment.workflowGraph;
+  if (graph === undefined || nodeIds.size === 0) return attachment;
+  return {
+    ...attachment,
+    workflowGraph: {
+      ...graph,
+      nodes: graph.nodes.map((node) =>
+        node.kind === "ticket" && nodeIds.has(node.id) && node.state === "current"
+          ? {
+              ...node,
+              state: "stale" as const,
+              resolution: {
+                status: "required" as const,
+                allowed: ["accept-upstream" as const],
+              },
+              staleAt,
+            }
+          : node,
+      ),
+      updatedAt: staleAt,
+    },
+  };
+}

@@ -7,6 +7,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationThread,
   type WorkflowDiffEvidence,
+  type WorkflowBaselineRefresh,
   type WorkflowValidationEvidence,
   type WorkflowTrackerProjection,
   type WorkflowTicketImplementation,
@@ -18,7 +19,10 @@ import {
   workflowTicketImplementationThreadId,
 } from "@t3tools/shared/workflowTicketImplementation";
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
-import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import {
+  GitWorkflowService,
+  type GitBaselineRefreshPreview,
+} from "../../git/GitWorkflowService.ts";
 import { IssueTracker } from "../../nativeSkills/IssueTracker.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -63,6 +67,15 @@ type WorkflowRunAutomationEvent = Extract<
       | "thread.workflow-run-draining";
   }
 >;
+type WorkflowBaselineRefreshRequestedEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.workflow-baseline-refresh-requested" }
+>;
+type WorkflowBaselineRefreshUpdatedEvent = Extract<
+  OrchestrationEvent,
+  { type: "thread.workflow-baseline-refresh-updated" }
+>;
+type WorkflowRunPausedEvent = Extract<OrchestrationEvent, { type: "thread.workflow-run-paused" }>;
 type WorkflowTicketImplementationEvent =
   | TicketImplementationRequestedEvent
   | TicketImplementationUpdatedEvent
@@ -71,7 +84,10 @@ type WorkflowTicketImplementationEvent =
   | RevertedEvent
   | TicketImplementationCheckpointedEvent
   | TurnStartRequestedEvent
-  | WorkflowRunAutomationEvent;
+  | WorkflowRunAutomationEvent
+  | WorkflowRunPausedEvent
+  | WorkflowBaselineRefreshRequestedEvent
+  | WorkflowBaselineRefreshUpdatedEvent;
 
 function implementationById(
   thread: OrchestrationThread,
@@ -103,15 +119,61 @@ function implementationPhase(
     implementation.status === "reviewed" ||
     implementation.status === "needs-correction" ||
     (implementation.status === "needs-recovery" && implementation.recoveryPhase === "review") ||
+    (implementation.status === "needs-recovery" &&
+      implementation.recoveryPhase === "integration") ||
     implementation.status === "needs-decision"
   ) {
-    return "review";
+    return implementation.status === "needs-recovery" &&
+      implementation.recoveryPhase === "integration"
+      ? "integration"
+      : "review";
   }
   return fallback;
 }
 
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isIntegrationMergeConflict(error: unknown): boolean {
+  return /conflict|automatic merge failed|merge failed/i.test(failureMessage(error));
+}
+
+export function baselineRefreshImpacts(
+  attachment:
+    | Pick<
+        NonNullable<OrchestrationThread["workflowAttachment"]>,
+        "ticketImplementations" | "workflowGraph"
+      >
+    | null
+    | undefined,
+  preview: GitBaselineRefreshPreview,
+): WorkflowBaselineRefresh["affectedTickets"] {
+  if (attachment === undefined || attachment === null) return [];
+  const incomingPaths = new Set(preview.incomingFiles.map((file) => file.path));
+  const impacts = new Map<string, WorkflowBaselineRefresh["affectedTickets"][number]>();
+  for (const implementation of attachment.ticketImplementations ?? []) {
+    if (implementation.status !== "integrated") continue;
+    const changed =
+      implementation.diff?.files.some((file) => incomingPaths.has(file.path)) ?? false;
+    if (!changed) continue;
+    impacts.set(implementation.nodeId, {
+      nodeId: implementation.nodeId,
+      ticketNumber: implementation.ticketNumber,
+      state: "integrated",
+      reason: "Incoming baseline commits overlap the integrated Ticket diff.",
+    });
+  }
+  for (const node of attachment.workflowGraph?.nodes ?? []) {
+    if (node.kind !== "ticket" || node.state !== "stale") continue;
+    impacts.set(node.id, {
+      nodeId: node.id,
+      ticketNumber: node.ticketNumber,
+      state: "stale",
+      reason: "The Ticket is already stale and must remain visible during refresh.",
+    });
+  }
+  return [...impacts.values()].toSorted((left, right) => left.ticketNumber - right.ticketNumber);
 }
 
 function trackerProjectionFromMap(input: {
@@ -162,8 +224,17 @@ function correctionCycleNumber(implementation: WorkflowTicketImplementation): nu
 
 function implementationMessage(
   implementation: WorkflowTicketImplementation,
-  phase: "implementation" | "review",
+  phase: "implementation" | "review" | "repair",
 ): string {
+  if (phase === "repair") {
+    const baselineBranch = implementation.integration?.baselineBranch ?? "the Workstream Baseline";
+    return [
+      `Run the pinned /implement child as the single automatic Integration Repair Run for ticket #${implementation.ticketNumber}.`,
+      `The Workstream Baseline merge conflicted. In the existing ticket worktree, merge ${baselineBranch} into the ticket branch, resolve only the conflicts caused by the current baseline drift, preserve the original ticket scope, and commit the repaired result.`,
+      "Do not start a second repair run or rewrite the Workstream Baseline. The repaired combined diff must pass focused validation and the pinned /code-review child before integration continues.",
+      implementation.acceptanceCriteria,
+    ].join("\n\n");
+  }
   if (phase === "review") {
     return [
       `Run the pinned /code-review child for ticket #${implementation.ticketNumber}.`,
@@ -269,6 +340,22 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     },
   );
 
+  const publishBaselineRefreshProgress = Effect.fn(
+    "WorkflowTicketImplementationReactor.publishBaselineRefreshProgress",
+  )(function* (input: {
+    readonly threadId: ThreadId;
+    readonly baselineRefresh: WorkflowBaselineRefresh;
+    readonly message: string | null;
+  }) {
+    yield* receipts.publish({
+      type: "workflow.baseline-refresh.progress",
+      threadId: input.threadId,
+      status: input.baselineRefresh.status,
+      createdAt: input.baselineRefresh.updatedAt,
+      message: input.message,
+    });
+  });
+
   const scheduleFrontier = Effect.fn("WorkflowTicketImplementationReactor.scheduleFrontier")(
     function* (input: { readonly createdAt: string }) {
       const snapshot = yield* snapshots.getSnapshot();
@@ -311,6 +398,9 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
             implementations: (attachment.ticketImplementations ?? []).map((implementation) => ({
               nodeId: implementation.nodeId,
               status: implementation.status,
+              ...(implementation.recoveryPhase === undefined
+                ? {}
+                : { recoveryPhase: implementation.recoveryPhase }),
               ...(implementation.dispatchMode === undefined
                 ? {}
                 : { dispatchMode: implementation.dispatchMode }),
@@ -326,8 +416,13 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       for (const workstream of workstreams) {
         if (
           workstream.workflowRun.automationStatus === "draining" &&
-          !workstream.implementations.some((implementation) =>
-            ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+          !workstream.implementations.some(
+            (implementation) =>
+              ["dispatching", "implementing", "reviewing", "stopping", "integrating"].includes(
+                implementation.status,
+              ) ||
+              (implementation.status === "needs-recovery" &&
+                implementation.recoveryPhase === "integration"),
           )
         ) {
           yield* orchestrationEngine.dispatch({
@@ -449,6 +544,291 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     return next;
   });
 
+  const updateBaselineRefresh = Effect.fn(
+    "WorkflowTicketImplementationReactor.updateBaselineRefresh",
+  )(function* (input: {
+    readonly threadId: ThreadId;
+    readonly baselineRefresh: WorkflowBaselineRefresh;
+    readonly staleNodeIds?: ReadonlyArray<string>;
+  }) {
+    const snapshot = yield* snapshots.getSnapshot();
+    const thread = snapshot.threads.find((candidate) => candidate.id === input.threadId);
+    const attachment = thread?.workflowAttachment;
+    if (thread === undefined || attachment === undefined) return;
+    yield* orchestrationEngine.dispatch({
+      type: "thread.workflow.baseline-refresh.update",
+      commandId: yield* serverCommandId("baseline-refresh-update"),
+      threadId: input.threadId,
+      baselineRefresh: input.baselineRefresh,
+      ...(input.staleNodeIds === undefined ? {} : { staleNodeIds: input.staleNodeIds }),
+      expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      createdAt: input.baselineRefresh.updatedAt,
+    });
+  });
+
+  const processBaselineRefreshRequested = Effect.fn(
+    "WorkflowTicketImplementationReactor.processBaselineRefreshRequested",
+  )(function* (event: WorkflowBaselineRefreshRequestedEvent) {
+    const requested = event.payload.attachment.baselineRefresh;
+    if (requested === undefined || requested.status !== "previewing") return;
+    const snapshot = yield* snapshots.getSnapshot();
+    const originThread = snapshot.threads.find((thread) => thread.id === event.payload.threadId);
+    if (originThread === undefined) return;
+    yield* publishBaselineRefreshProgress({
+      threadId: originThread.id,
+      baselineRefresh: requested,
+      message: "Previewing incoming baseline commits and affected integrated tickets.",
+    });
+    const failed = (failure: string): WorkflowBaselineRefresh => ({
+      ...requested,
+      status: "needs-recovery",
+      failure,
+      updatedAt: event.occurredAt,
+    });
+    const cwd = resolveThreadWorkspaceCwd({
+      thread: originThread,
+      projects: snapshot.projects,
+    });
+    if (cwd === undefined) {
+      const baselineRefresh = failed("The Origin Thread has no resolvable project workspace.");
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    const integrationCwd = yield* resolveIntegrationWorkspace({
+      cwd,
+      baselineBranch: requested.baselineBranch,
+    });
+    if (integrationCwd === null) {
+      const baselineRefresh = failed(
+        `The Workstream Baseline ${requested.baselineBranch} has no dedicated integration workspace.`,
+      );
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    const previewResult = yield* git
+      .previewBaselineRefresh({
+        cwd: integrationCwd,
+        baselineBranch: requested.baselineBranch,
+        remoteTarget: requested.remoteTarget,
+      })
+      .pipe(Effect.result);
+    if (Result.isFailure(previewResult)) {
+      const baselineRefresh = failed(failureMessage(previewResult.failure));
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    const preview = previewResult.success;
+    const baselineRefresh: WorkflowBaselineRefresh = {
+      ...requested,
+      status: "ready",
+      currentCommit: preview.currentCommit,
+      sourceCommit: preview.sourceCommit,
+      incomingCommits: preview.incomingCommits,
+      incomingFiles: preview.incomingFiles,
+      affectedTickets: baselineRefreshImpacts(originThread.workflowAttachment, preview),
+      validations: [],
+      failure: null,
+      updatedAt: event.occurredAt,
+    };
+    yield* updateBaselineRefresh({
+      threadId: originThread.id,
+      baselineRefresh,
+    });
+    yield* publishBaselineRefreshProgress({
+      threadId: originThread.id,
+      baselineRefresh,
+      message: `Preview ready: ${preview.incomingCommits.length} incoming commit${preview.incomingCommits.length === 1 ? "" : "s"}.`,
+    });
+  });
+
+  const processBaselineRefresh = Effect.fn(
+    "WorkflowTicketImplementationReactor.processBaselineRefresh",
+  )(function* (event: WorkflowRunPausedEvent) {
+    const requested = event.payload.attachment.baselineRefresh;
+    if (requested === undefined || requested.status !== "refreshing") return;
+    const snapshot = yield* snapshots.getSnapshot();
+    const originThread = snapshot.threads.find((thread) => thread.id === event.payload.threadId);
+    if (originThread === undefined) return;
+    yield* publishBaselineRefreshProgress({
+      threadId: originThread.id,
+      baselineRefresh: requested,
+      message: "Drained active work; refreshing the confirmed baseline.",
+    });
+    const failed = (
+      failure: string,
+      validations = requested.validations,
+    ): WorkflowBaselineRefresh => ({
+      ...requested,
+      status: "needs-recovery",
+      validations,
+      failure,
+      updatedAt: event.occurredAt,
+    });
+    const cwd = resolveThreadWorkspaceCwd({
+      thread: originThread,
+      projects: snapshot.projects,
+    });
+    if (cwd === undefined) {
+      const baselineRefresh = failed("The Origin Thread has no resolvable project workspace.");
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    const integrationCwd = yield* resolveIntegrationWorkspace({
+      cwd,
+      baselineBranch: requested.baselineBranch,
+    });
+    if (integrationCwd === null) {
+      const baselineRefresh = failed(
+        `The Workstream Baseline ${requested.baselineBranch} has no dedicated integration workspace.`,
+      );
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    if (requested.sourceCommit === null) {
+      const baselineRefresh = failed(
+        "The Baseline Refresh has no confirmed source commit; no baseline update was attempted.",
+      );
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+    const refreshResult = yield* git
+      .refreshBaseline({
+        cwd: integrationCwd,
+        baselineBranch: requested.baselineBranch,
+        remoteTarget: requested.remoteTarget,
+        expectedSourceCommit: requested.sourceCommit,
+      })
+      .pipe(Effect.result);
+    if (Result.isFailure(refreshResult)) {
+      const baselineRefresh = failed(failureMessage(refreshResult.failure));
+      yield* updateBaselineRefresh({
+        threadId: originThread.id,
+        baselineRefresh,
+      });
+      yield* publishBaselineRefreshProgress({
+        threadId: originThread.id,
+        baselineRefresh,
+        message: baselineRefresh.failure,
+      });
+      return;
+    }
+
+    const validations: Array<WorkflowBaselineRefresh["validations"][number]> = [];
+    const staleNodeIds: string[] = [];
+    let validationFailure: string | null = null;
+    for (const impact of requested.affectedTickets) {
+      if (impact.state !== "integrated") continue;
+      const implementation = (originThread.workflowAttachment?.ticketImplementations ?? []).find(
+        (candidate) => candidate.nodeId === impact.nodeId && candidate.status === "integrated",
+      );
+      if (implementation === undefined) {
+        const detail = `Integrated Ticket #${impact.ticketNumber} has no retained implementation evidence.`;
+        validations.push({
+          nodeId: impact.nodeId,
+          status: "failed",
+          detail,
+          recordedAt: event.occurredAt,
+        });
+        staleNodeIds.push(impact.nodeId);
+        validationFailure ??= detail;
+        continue;
+      }
+      const validationResult = yield* git
+        .validateIntegration({
+          cwd: integrationCwd,
+          fixedPoint: implementation.fixedPoint,
+        })
+        .pipe(Effect.result);
+      if (Result.isFailure(validationResult)) {
+        const detail = failureMessage(validationResult.failure);
+        validations.push({
+          nodeId: impact.nodeId,
+          status: "failed",
+          detail,
+          recordedAt: event.occurredAt,
+        });
+        staleNodeIds.push(impact.nodeId);
+        validationFailure ??= detail;
+      } else {
+        validations.push({
+          nodeId: impact.nodeId,
+          status: "passed",
+          detail: `Revalidated the integrated Ticket against ${requested.baselineBranch} at ${refreshResult.success.commitSha}.`,
+          recordedAt: event.occurredAt,
+        });
+      }
+    }
+    const baselineRefresh: WorkflowBaselineRefresh = {
+      ...requested,
+      status: validationFailure === null ? "completed" : "needs-recovery",
+      currentCommit: refreshResult.success.commitSha,
+      validations,
+      failure: validationFailure,
+      updatedAt: event.occurredAt,
+    };
+    yield* updateBaselineRefresh({
+      threadId: originThread.id,
+      baselineRefresh,
+      ...(staleNodeIds.length === 0 ? {} : { staleNodeIds }),
+    });
+    yield* publishBaselineRefreshProgress({
+      threadId: originThread.id,
+      baselineRefresh,
+      message:
+        baselineRefresh.status === "completed"
+          ? `Baseline refreshed at ${refreshResult.success.commitSha}; ${validations.length} affected Ticket validation${validations.length === 1 ? "" : "s"} recorded.`
+          : baselineRefresh.failure,
+    });
+  });
+
   const worktreeForImplementation = Effect.fn(
     "WorkflowTicketImplementationReactor.worktreeForImplementation",
   )(function* (input: {
@@ -539,7 +919,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     function* (input: {
       readonly originThread: OrchestrationThread;
       readonly implementation: WorkflowTicketImplementation;
-      readonly phase: "implementation" | "review";
+      readonly phase: "implementation" | "review" | "repair";
     }) {
       const threadId = input.implementation.implementationThreadId;
       if (threadId === null) return null;
@@ -549,15 +929,18 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       const recordedSkillRunId =
         input.phase === "implementation"
           ? input.implementation.implementationSkillRunId
-          : input.implementation.reviewSkillRunId;
+          : input.phase === "repair"
+            ? (input.implementation.integration?.repair?.skillRunId ?? null)
+            : input.implementation.reviewSkillRunId;
       if (recordedSkillRunId !== null) return recordedSkillRunId;
       const expectedSkill =
-        input.phase === "implementation"
+        input.phase === "implementation" || input.phase === "repair"
           ? input.implementation.implementSkill
           : input.implementation.reviewSkill;
       const latestTurn = thread?.latestTurn;
       if (
         cycle === 0 &&
+        input.phase !== "repair" &&
         latestTurn !== null &&
         latestTurn !== undefined &&
         latestTurn.skillInvocation?.skill.name === expectedSkill.name &&
@@ -748,11 +1131,13 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         return;
       }
       const terminal = ["error", "stopped", "interrupted"].includes(event.payload.session.status);
+      const integrationRepairRunning = implementation.integration?.repair?.status === "running";
       if (
         terminal &&
         (implementation.status === "implementing" ||
           implementation.status === "reviewing" ||
-          implementation.status === "stopping")
+          implementation.status === "stopping" ||
+          integrationRepairRunning)
       ) {
         const readyCheckpoints = implementationThread.checkpoints.filter(
           (checkpoint) => checkpoint.status === "ready",
@@ -761,14 +1146,36 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
           (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
           0,
         );
-        const recoveryPhase =
-          implementation.recoveryPhase ??
-          (implementation.status === "reviewing" ? "review" : "implementation");
+        const recoveryPhase = integrationRepairRunning
+          ? "integration"
+          : (implementation.recoveryPhase ??
+            (implementation.status === "reviewing" ? "review" : "implementation"));
         const failed = yield* updateImplementation({
           implementationId: implementation.id,
           patch: {
             status: "needs-recovery",
             recoveryPhase,
+            ...(integrationRepairRunning && implementation.integration?.repair !== undefined
+              ? {
+                  integration: {
+                    ...implementation.integration,
+                    status: "failed" as const,
+                    failurePhase: "repair" as const,
+                    failure:
+                      event.payload.session.lastError ??
+                      "The Integration Repair Run stopped before its review milestone.",
+                    repair: {
+                      ...implementation.integration.repair,
+                      status: "failed" as const,
+                      failure:
+                        event.payload.session.lastError ??
+                        "The Integration Repair Run stopped before its review milestone.",
+                      updatedAt: event.payload.session.updatedAt,
+                    },
+                    updatedAt: event.payload.session.updatedAt,
+                  },
+                }
+              : {}),
             ...(readyCheckpoints.length > 0
               ? { recoveryCheckpointTurnCount: latestCheckpointTurnCount }
               : {}),
@@ -779,6 +1186,150 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
           },
         });
         if (failed) yield* publishProgress({ implementation: failed, message: failed.failure });
+        return;
+      }
+      if (
+        implementation.status === "integrating" &&
+        implementation.integration?.repair?.status === "running" &&
+        event.payload.session.status === "ready" &&
+        implementationThread.latestTurn?.state === "completed"
+      ) {
+        if (implementation.worktreePath === null) {
+          const failed = yield* failIntegrationRepair({
+            implementation,
+            failure: "The Integration Repair Run completed without a retained ticket worktree.",
+            updatedAt: event.payload.session.updatedAt,
+          });
+          if (failed !== null)
+            yield* publishProgress({
+              implementation: failed,
+              phase: "integration",
+              message: failed.failure,
+            });
+          return;
+        }
+        const localStatus = yield* git.localStatus({ cwd: implementation.worktreePath });
+        if (localStatus.workingTree.files.length > 0) {
+          const failed = yield* failIntegrationRepair({
+            implementation,
+            failure:
+              "The Integration Repair Run must commit its repaired combined diff before review.",
+            updatedAt: event.payload.session.updatedAt,
+          });
+          if (failed !== null)
+            yield* publishProgress({
+              implementation: failed,
+              phase: "integration",
+              message: failed.failure,
+            });
+          return;
+        }
+        const focusedValidation = yield* git
+          .validateIntegration({
+            cwd: implementation.worktreePath,
+            fixedPoint: implementation.fixedPoint,
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(focusedValidation)) {
+          const failed = yield* failIntegrationRepair({
+            implementation,
+            failure: `Focused validation of the repaired combined diff failed: ${failureMessage(focusedValidation.failure)}`,
+            updatedAt: event.payload.session.updatedAt,
+          });
+          if (failed !== null)
+            yield* publishProgress({
+              implementation: failed,
+              phase: "integration",
+              message: failed.failure,
+            });
+          return;
+        }
+        const diffSummary = yield* git
+          .diffFromFixedPoint({
+            cwd: implementation.worktreePath,
+            fixedPoint: implementation.fixedPoint,
+          })
+          .pipe(Effect.result);
+        if (Result.isFailure(diffSummary)) {
+          const failed = yield* failIntegrationRepair({
+            implementation,
+            failure: `The repaired combined diff could not be captured: ${failureMessage(diffSummary.failure)}`,
+            updatedAt: event.payload.session.updatedAt,
+          });
+          if (failed !== null)
+            yield* publishProgress({
+              implementation: failed,
+              phase: "integration",
+              message: failed.failure,
+            });
+          return;
+        }
+        const diff: WorkflowDiffEvidence = {
+          fixedPoint: implementation.fixedPoint,
+          files: diffSummary.success.files,
+          additions: diffSummary.success.additions,
+          deletions: diffSummary.success.deletions,
+          capturedAt: event.payload.session.updatedAt,
+        };
+        const repairValidation: WorkflowValidationEvidence = {
+          name: "integration-repair-diff-check",
+          status: "passed",
+          command: `git diff --check ${implementation.fixedPoint}..HEAD`,
+          detail: "Validated the committed repaired combined diff before Code Review.",
+          recordedAt: event.payload.session.updatedAt,
+        };
+        const validation = [
+          ...implementation.validation.filter(
+            (evidence) => evidence.name !== repairValidation.name,
+          ),
+          repairValidation,
+        ];
+        const reviewing = yield* updateImplementation({
+          implementationId: implementation.id,
+          patch: {
+            status: "reviewing",
+            recoveryPhase: "integration",
+            reviewSkillRunId: null,
+            integration: {
+              ...implementation.integration,
+              repair: {
+                ...implementation.integration.repair,
+                status: "reviewing",
+                skillRunId: null,
+                failure: null,
+                updatedAt: event.payload.session.updatedAt,
+              },
+              failurePhase: null,
+              failure: null,
+              updatedAt: event.payload.session.updatedAt,
+            },
+            diff,
+            validation,
+            failure: null,
+            updatedAt: event.payload.session.updatedAt,
+          },
+        });
+        if (reviewing === null) return;
+        const reviewSkillRunId = yield* startSkillTurn({
+          originThread,
+          implementation: reviewing,
+          phase: "review",
+        });
+        const updated = yield* updateImplementation({
+          implementationId: reviewing.id,
+          patch: {
+            status: "reviewing",
+            ...(reviewSkillRunId !== null ? { reviewSkillRunId } : {}),
+            updatedAt: event.payload.session.updatedAt,
+          },
+        });
+        if (updated !== null) {
+          yield* publishProgress({
+            implementation: updated,
+            message: "Pinned /code-review dispatched against the repaired combined diff.",
+            phase: "review",
+          });
+        }
         return;
       }
       if (implementation.status === "reviewing") {
@@ -812,6 +1363,16 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         }
         const attachment = originThread.workflowAttachment;
         if (attachment === undefined) return;
+        const reviewValidation = result.validation.map((evidence) => ({
+          ...evidence,
+          recordedAt: event.payload.session.updatedAt,
+        }));
+        const repairValidation =
+          implementation.integration?.repair?.status === "reviewing"
+            ? implementation.validation.filter(
+                (evidence) => evidence.name === "integration-repair-diff-check",
+              )
+            : [];
         yield* orchestrationEngine.dispatch({
           type: "thread.workflow.ticket-implementation.review.record",
           commandId: CommandId.make(
@@ -828,10 +1389,7 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
             findings: result.findings,
             completedAt: event.payload.session.updatedAt,
           },
-          validation: result.validation.map((evidence) => ({
-            ...evidence,
-            recordedAt: event.payload.session.updatedAt,
-          })),
+          validation: [...repairValidation, ...reviewValidation],
           createdAt: event.payload.session.updatedAt,
         });
         return;
@@ -909,18 +1467,41 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       const skillRunId = yield* startSkillTurn({
         originThread,
         implementation,
-        phase,
+        phase: phase === "integration" ? "repair" : phase,
       });
       const updated = yield* updateImplementation({
         implementationId: implementation.id,
         patch: {
-          status: phase === "review" ? "reviewing" : "implementing",
+          status:
+            phase === "review"
+              ? "reviewing"
+              : phase === "integration"
+                ? "integrating"
+                : "implementing",
           recoveryPhase: phase,
           failure: null,
           ...(phase === "implementation" && skillRunId !== null
             ? { implementationSkillRunId: skillRunId }
             : {}),
           ...(phase === "review" && skillRunId !== null ? { reviewSkillRunId: skillRunId } : {}),
+          ...(phase === "integration" && implementation.integration?.repair !== undefined
+            ? {
+                integration: {
+                  ...implementation.integration,
+                  status: "integrating" as const,
+                  failurePhase: null,
+                  failure: null,
+                  repair: {
+                    ...implementation.integration.repair,
+                    status: "running" as const,
+                    ...(skillRunId === null ? {} : { skillRunId }),
+                    failure: null,
+                    updatedAt: event.payload.createdAt,
+                  },
+                  updatedAt: event.payload.createdAt,
+                },
+              }
+            : {}),
           updatedAt: event.payload.createdAt,
         },
       });
@@ -1007,6 +1588,40 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
     },
   );
 
+  const failIntegrationRepair = Effect.fn(
+    "WorkflowTicketImplementationReactor.failIntegrationRepair",
+  )(function* (input: {
+    readonly implementation: WorkflowTicketImplementation;
+    readonly failure: string;
+    readonly updatedAt: string;
+  }) {
+    const integration = input.implementation.integration;
+    const repair = integration?.repair;
+    if (integration === undefined || repair === undefined) return null;
+    return yield* updateImplementation({
+      implementationId: input.implementation.id,
+      patch: {
+        status: "needs-recovery",
+        recoveryPhase: "integration",
+        integration: {
+          ...integration,
+          status: "failed",
+          failurePhase: "repair",
+          failure: input.failure,
+          repair: {
+            ...repair,
+            status: "failed",
+            failure: input.failure,
+            updatedAt: input.updatedAt,
+          },
+          updatedAt: input.updatedAt,
+        },
+        failure: input.failure,
+        updatedAt: input.updatedAt,
+      },
+    });
+  });
+
   const processIntegration = Effect.fn("WorkflowTicketImplementationReactor.processIntegration")(
     function* (input: {
       readonly originThread: OrchestrationThread;
@@ -1055,6 +1670,45 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         return;
       }
 
+      const repair = integration.repair;
+      if (repair?.status === "pending") {
+        const skillRunId = yield* startSkillTurn({
+          originThread: input.originThread,
+          implementation: input.implementation,
+          phase: "repair",
+        });
+        const running = yield* updateImplementation({
+          implementationId: input.implementation.id,
+          patch: {
+            status: "integrating",
+            recoveryPhase: "integration",
+            integration: {
+              ...integration,
+              repair: {
+                ...repair,
+                status: "running",
+                ...(skillRunId === null ? {} : { skillRunId }),
+                failure: null,
+                updatedAt: input.implementation.updatedAt,
+              },
+              updatedAt: input.implementation.updatedAt,
+            },
+            failure: null,
+            updatedAt: input.implementation.updatedAt,
+          },
+        });
+        if (running !== null) {
+          yield* publishProgress({
+            implementation: running,
+            phase: "integration",
+            message: `Baseline merge conflict detected; automatic Integration Repair Run ${repair.attempt} is now running under the existing ticket authority.`,
+          });
+        }
+        return;
+      }
+      if (repair?.status === "running" || repair?.status === "reviewing") return;
+      if (repair?.status === "failed") return;
+
       let baselineCommit = integration.baselineCommit;
       if (
         integration.status === "integrating" &&
@@ -1080,6 +1734,72 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
             })
             .pipe(Effect.result);
           if (Result.isFailure(mergeResult)) {
+            if (isIntegrationMergeConflict(mergeResult.failure)) {
+              const aborted = yield* git.abortIntegrationMerge(integrationCwd).pipe(Effect.result);
+              const repairFailure = Result.isFailure(aborted)
+                ? failureMessage(aborted.failure)
+                : null;
+              if (repair !== undefined) {
+                const failure =
+                  repairFailure ??
+                  "The repaired baseline merge conflicted again; no second automatic Integration Repair Run will start.";
+                const needsRecovery = yield* failIntegrationRepair({
+                  implementation: input.implementation,
+                  failure,
+                  updatedAt: input.implementation.updatedAt,
+                });
+                if (needsRecovery !== null) {
+                  yield* publishProgress({
+                    implementation: needsRecovery,
+                    phase: "integration",
+                    message: failure,
+                  });
+                }
+                return;
+              }
+              const repairRecord: NonNullable<
+                WorkflowTicketImplementation["integration"]
+              >["repair"] = {
+                attempt: 1,
+                status: repairFailure === null ? "pending" : "failed",
+                skillRunId: null,
+                failure: repairFailure,
+                startedAt: input.implementation.updatedAt,
+                updatedAt: input.implementation.updatedAt,
+              };
+              const repaired = yield* updateImplementation({
+                implementationId: input.implementation.id,
+                patch: {
+                  status: repairFailure === null ? "integrating" : "needs-recovery",
+                  recoveryPhase: repairFailure === null ? "integration" : "integration",
+                  integration: {
+                    ...integration,
+                    status: repairFailure === null ? "integrating" : "failed",
+                    failurePhase: "repair",
+                    failure:
+                      repairFailure ??
+                      "The baseline merge conflicted; the existing merge state was safely aborted.",
+                    repair: repairRecord,
+                    updatedAt: input.implementation.updatedAt,
+                  },
+                  failure:
+                    repairFailure ??
+                    "The baseline merge conflicted; the existing merge state was safely aborted.",
+                  updatedAt: input.implementation.updatedAt,
+                },
+              });
+              if (repaired !== null) {
+                yield* publishProgress({
+                  implementation: repaired,
+                  phase: "integration",
+                  message:
+                    repairFailure === null
+                      ? "The baseline merge conflict was isolated and safely aborted; one automatic Integration Repair Run is queued."
+                      : repairFailure,
+                });
+              }
+              return;
+            }
             yield* failIntegration({
               originThread: input.originThread,
               implementation: input.implementation,
@@ -1331,11 +2051,22 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       currentImplementation.review.findings.filter(isBlockingWorkflowCodeReviewFinding).length === 0
     ) {
       const attachment = originThread.workflowAttachment;
+      const repairedIntegration =
+        currentImplementation.integration?.repair?.status === "ready"
+          ? {
+              ...currentImplementation.integration,
+              status: "integrating" as const,
+              baselineCommit: null,
+              failurePhase: null,
+              failure: null,
+              updatedAt: currentImplementation.updatedAt,
+            }
+          : null;
       const integration = yield* updateImplementation({
         implementationId: currentImplementation.id,
         patch: {
           status: "integrating",
-          integration: {
+          integration: repairedIntegration ?? {
             status: "integrating",
             baselineBranch: attachment.workflowRun!.configuration.workstreamBaseline,
             baselineCommit: null,
@@ -1441,7 +2172,28 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         status: "needs-recovery",
         recoveryPhase:
           implementation.recoveryPhase ??
-          (implementation.status === "reviewing" ? "review" : "implementation"),
+          (implementation.integration?.repair?.status === "running"
+            ? "integration"
+            : implementation.status === "reviewing"
+              ? "review"
+              : "implementation"),
+        ...(implementation.integration?.repair?.status === "running"
+          ? {
+              integration: {
+                ...implementation.integration,
+                status: "failed" as const,
+                failurePhase: "repair" as const,
+                failure: `Ticket implementation effect failed before its milestone completed: ${Cause.pretty(input.cause)}`,
+                repair: {
+                  ...implementation.integration.repair,
+                  status: "failed" as const,
+                  failure: `Ticket implementation effect failed before its milestone completed: ${Cause.pretty(input.cause)}`,
+                  updatedAt: input.updatedAt,
+                },
+                updatedAt: input.updatedAt,
+              },
+            }
+          : {}),
         failure: `Ticket implementation effect failed before its milestone completed: ${Cause.pretty(input.cause)}`,
         updatedAt: input.updatedAt,
       },
@@ -1462,6 +2214,30 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       .find((candidate) => candidate.implementationThreadId === event.payload.threadId);
     if (implementation === undefined) return;
     if (skillInvocation.skill.name === implementation.implementSkill.name) {
+      if (
+        implementation.status === "integrating" &&
+        implementation.integration?.repair !== undefined &&
+        (implementation.integration.repair.status === "pending" ||
+          implementation.integration.repair.status === "running")
+      ) {
+        yield* updateImplementation({
+          implementationId: implementation.id,
+          patch: {
+            integration: {
+              ...implementation.integration,
+              repair: {
+                ...implementation.integration.repair,
+                status: "running",
+                skillRunId: skillInvocation.skillRunId,
+                updatedAt: event.payload.createdAt,
+              },
+              updatedAt: event.payload.createdAt,
+            },
+            updatedAt: event.payload.createdAt,
+          },
+        });
+        return;
+      }
       yield* updateImplementation({
         implementationId: implementation.id,
         patch: {
@@ -1531,6 +2307,16 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       case "thread.workflow-run-started":
       case "thread.workflow-run-resumed":
       case "thread.workflow-run-draining":
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
+        return;
+      case "thread.workflow-run-paused":
+        yield* processBaselineRefresh(event);
+        yield* scheduleFrontier({ createdAt: event.occurredAt });
+        return;
+      case "thread.workflow-baseline-refresh-requested":
+        yield* processBaselineRefreshRequested(event);
+        return;
+      case "thread.workflow-baseline-refresh-updated":
         yield* scheduleFrontier({ createdAt: event.occurredAt });
         return;
     }
