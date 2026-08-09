@@ -45,6 +45,8 @@ import {
   ThreadWorkflowRunPreflightedPayload,
   ThreadWorkflowRunConfirmedPayload,
   ThreadWorkflowRunAutomationUpdatedPayload,
+  ThreadWorkflowBaselineRefreshRequestedPayload,
+  ThreadWorkflowBaselineRefreshUpdatedPayload,
   ThreadWorkflowArtifactAcknowledgedPayload,
   ThreadWorkflowAttachmentHintDismissedPayload,
   ThreadWorkflowAttachmentHintedPayload,
@@ -1057,6 +1059,38 @@ export function projectEvent(
     case "thread.workflow-node-released":
       return decodeForEvent(
         ThreadWorkflowRunAutomationUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-baseline-refresh-requested":
+      return decodeForEvent(
+        ThreadWorkflowBaselineRefreshRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-baseline-refresh-updated":
+      return decodeForEvent(
+        ThreadWorkflowBaselineRefreshUpdatedPayload,
         event.payload,
         event.type,
         "payload",

@@ -2,10 +2,16 @@ import type {
   WayfinderWorkflowOutlineNode,
   WayfinderWorkflowViewModel,
 } from "@t3tools/client-runtime/state/wayfinder-workflow";
-import type { ThreadId, WorkflowTicketImplementationRecoveryAction } from "@t3tools/contracts";
+import type {
+  ThreadId,
+  WorkflowAttachment,
+  WorkflowTicketImplementationRecoveryAction,
+} from "@t3tools/contracts";
 import { memo, type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/utils";
+
+import { BaselineRefreshControls } from "./chat/WorkflowAttachmentCard.tsx";
 
 export function nextWorkflowOutlineIndex(
   key: string,
@@ -300,6 +306,9 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
     action: WorkflowTicketImplementationRecoveryAction,
   ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
+  readonly workflowAttachment?: WorkflowAttachment | null;
+  readonly onPreflightBaselineRefresh?: () => void;
+  readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
   readonly initialSelectedNodeId?: string | null;
   readonly selectedNodeId?: string | null;
   readonly onSelectNode?: (nodeId: string | null) => void;
@@ -355,6 +364,14 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
           separate.
         </p>
       </header>
+
+      {props.workflowAttachment?.workflowRun && props.onPreflightBaselineRefresh ? (
+        <BaselineRefreshControls
+          attachment={props.workflowAttachment}
+          onPreflight={props.onPreflightBaselineRefresh}
+          {...(props.onConfirmBaselineRefresh ? { onConfirm: props.onConfirmBaselineRefresh } : {})}
+        />
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-2">
         <section aria-labelledby="workflow-stage-spine">

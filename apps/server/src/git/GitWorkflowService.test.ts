@@ -85,6 +85,169 @@ describe("GitWorkflowService", () => {
     }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
   });
 
+  it.effect("returns merge conflicts with their recovery detail and leaves abort explicit", () => {
+    const commands: string[][] = [];
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => {
+        commands.push([...input.args]);
+        const isMerge = input.args[0] === "merge" && input.args[1] !== "--abort";
+        return {
+          exitCode: ChildProcessSpawner.ExitCode(isMerge ? 1 : 0),
+          stdout: input.args[0] === "symbolic-ref" ? "feature/development-workflow\n" : "",
+          stderr: isMerge ? "CONFLICT (content): Merge conflict in src/workflow.ts" : "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow
+        .integrateBranch({
+          cwd: "/repo",
+          targetBranch: "feature/development-workflow",
+          sourceBranch: "codex/ticket-43",
+        })
+        .pipe(Effect.flip);
+      yield* workflow.abortIntegrationMerge("/repo");
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        command: "merge",
+        detail: "CONFLICT (content): Merge conflict in src/workflow.ts",
+      });
+      expect(commands).toEqual([
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["merge", "--no-ff", "--no-edit", "codex/ticket-43"],
+        ["merge", "--abort"],
+      ]);
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
+  it.effect("previews and fast-forwards a clean baseline without hiding incoming scope", () => {
+    const commands: string[][] = [];
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => {
+        commands.push([...input.args]);
+        const stdout =
+          input.args[0] === "symbolic-ref"
+            ? "feature/development-workflow\n"
+            : input.args[0] === "rev-parse" && input.args[1] === "feature/development-workflow"
+              ? "baseline-sha\n"
+              : input.args[0] === "rev-parse"
+                ? "source-sha\n"
+                : input.args[0] === "log"
+                  ? "incoming-sha\tAdd workflow repair\n"
+                  : input.args[0] === "diff"
+                    ? "3\t1\tsrc/workflow.ts\n"
+                    : input.args[0] === "merge"
+                      ? ""
+                      : "";
+        return {
+          exitCode: ChildProcessSpawner.ExitCode(0),
+          stdout,
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const preview = yield* workflow.previewBaselineRefresh({
+        cwd: "/repo",
+        baselineBranch: "feature/development-workflow",
+        remoteTarget: "origin/main",
+      });
+      const refreshed = yield* workflow.refreshBaseline({
+        cwd: "/repo",
+        baselineBranch: "feature/development-workflow",
+        remoteTarget: "origin/main",
+        expectedSourceCommit: "source-sha",
+      });
+      const diff = yield* workflow.diffFromFixedPoint({
+        cwd: "/repo",
+        fixedPoint: "fixed-point-sha",
+      });
+
+      expect(preview).toEqual({
+        currentCommit: "baseline-sha",
+        sourceCommit: "source-sha",
+        incomingCommits: [{ sha: "incoming-sha", title: "Add workflow repair" }],
+        incomingFiles: [{ path: "src/workflow.ts", additions: 3, deletions: 1 }],
+      });
+      expect(refreshed).toEqual({ commitSha: "source-sha" });
+      expect(diff).toEqual({
+        files: [{ path: "src/workflow.ts", additions: 3, deletions: 1 }],
+        additions: 3,
+        deletions: 1,
+      });
+      expect(commands).toEqual([
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["fetch", "--quiet", "origin"],
+        ["rev-parse", "feature/development-workflow"],
+        ["rev-parse", "origin/main"],
+        ["log", "--format=%H%x09%s", "feature/development-workflow..origin/main"],
+        ["diff", "--numstat", "feature/development-workflow..origin/main"],
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["fetch", "--quiet", "origin"],
+        ["rev-parse", "origin/main"],
+        ["merge", "--ff-only", "origin/main"],
+        ["rev-parse", "HEAD"],
+        ["diff", "--numstat", "fixed-point-sha..HEAD"],
+      ]);
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
+  it.effect("refuses to refresh after the confirmed source moves", () => {
+    const commands: string[][] = [];
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => {
+        commands.push([...input.args]);
+        const stdout =
+          input.args[0] === "symbolic-ref"
+            ? "feature/development-workflow\n"
+            : input.args[0] === "rev-parse"
+              ? "new-source-sha\n"
+              : "";
+        return {
+          exitCode: ChildProcessSpawner.ExitCode(0),
+          stdout,
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow
+        .refreshBaseline({
+          cwd: "/repo",
+          baselineBranch: "feature/development-workflow",
+          remoteTarget: "origin/main",
+          expectedSourceCommit: "previewed-source-sha",
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        command: "rev-parse",
+        detail:
+          "The confirmed refresh source changed from previewed-source-sha to new-source-sha; the baseline was left unchanged.",
+      });
+      expect(commands).toEqual([
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["fetch", "--quiet", "origin"],
+        ["rev-parse", "origin/main"],
+      ]);
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
   it.effect("validates the integrated range at the fixed point", () => {
     const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
       Effect.sync(() => ({

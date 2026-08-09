@@ -13,6 +13,7 @@ import { isIntegratedWorkflowTrackerTicket } from "@t3tools/shared/workflowGraph
 export type WorkflowSchedulerImplementation = {
   readonly nodeId: string;
   readonly status: WorkflowTicketImplementationStatus;
+  readonly recoveryPhase?: "implementation" | "review" | "integration";
   readonly dispatchMode?: WorkflowTicketImplementationDispatchMode;
 };
 
@@ -46,6 +47,9 @@ const activeStatuses = new Set<WorkflowTicketImplementationStatus>([
   "dispatching",
   "implementing",
   "reviewing",
+  "stopping",
+  "integrating",
+  "needs-recovery",
 ]);
 
 function selectedProviderInstanceId(workstream: WorkflowSchedulerWorkstream, nodeId: string) {

@@ -127,6 +127,8 @@ export interface ThreadDetailScreenProps {
   readonly onConfirmWorkflowRun?: (
     configuration: import("@t3tools/contracts").WorkflowRunConfiguration,
   ) => void;
+  readonly onPreflightBaselineRefresh?: () => void;
+  readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
   readonly showContent?: boolean;
 }
 
@@ -444,6 +446,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                       : {})}
                     onPreflightRun={props.onPreflightWorkflowRun}
                     onConfirmRun={props.onConfirmWorkflowRun}
+                    onPreflightBaselineRefresh={props.onPreflightBaselineRefresh}
+                    onConfirmBaselineRefresh={props.onConfirmBaselineRefresh}
                   />
                 </Animated.View>
               ) : null}

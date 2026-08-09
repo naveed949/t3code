@@ -30,6 +30,7 @@ import {
   type WorkflowCodeReviewFinding,
   type WorkflowValidationEvidence,
   type WorkflowTicketImplementationStatus,
+  type WorkflowBaselineRefresh,
   type WorkflowTicketingCheckpointRequest,
   type WorkflowTicketingStage,
   isBlockingWorkflowCodeReviewFinding,
@@ -49,6 +50,7 @@ import {
   hasPendingWorkflowStaleness,
   initializeWorkflowGraph,
   isIntegratedWorkflowTrackerTicket,
+  markWorkflowBaselineRefreshStale,
   resolveWorkflowStaleness,
   synchronizeWorkflowAttachmentWayfinderData,
   viewWorkflowArtifacts,
@@ -837,6 +839,63 @@ function workflowAutomationStatus(attachment: WorkflowAttachment) {
   return attachment.workflowRun?.automationStatus ?? "idle";
 }
 
+function workflowBaselineRefreshBlocksAutomation(attachment: WorkflowAttachment): boolean {
+  return (
+    attachment.baselineRefresh?.status === "previewing" ||
+    attachment.baselineRefresh?.status === "ready" ||
+    attachment.baselineRefresh?.status === "draining" ||
+    attachment.baselineRefresh?.status === "refreshing" ||
+    attachment.baselineRefresh?.status === "needs-recovery"
+  );
+}
+
+function withWorkflowBaselineRefreshActions(
+  refresh: WorkflowBaselineRefresh,
+): WorkflowBaselineRefresh {
+  const canPreflight = ["ready", "needs-recovery", "completed"].includes(refresh.status);
+  const canConfirm =
+    refresh.status === "ready" && refresh.currentCommit !== null && refresh.sourceCommit !== null;
+  return {
+    ...refresh,
+    allowedActions: [
+      ...(canPreflight
+        ? [
+            {
+              id: "preflight" as const,
+              label: refresh.status === "needs-recovery" ? "Retry preview" : "Refresh preview",
+              enabled: true,
+              reason: null,
+            },
+          ]
+        : []),
+      ...(canConfirm
+        ? [
+            {
+              id: "confirm" as const,
+              label: "Confirm baseline refresh",
+              enabled: true,
+              reason: null,
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+function workflowIntegrationLaneBusy(
+  attachment: WorkflowAttachment,
+  exceptImplementationId?: string,
+): boolean {
+  return workflowTicketImplementations(attachment).some(
+    (implementation) =>
+      implementation.id !== exceptImplementationId &&
+      (implementation.status === "integrating" ||
+        (implementation.status === "stopping" && implementation.recoveryPhase === "integration") ||
+        (implementation.status === "needs-recovery" &&
+          implementation.recoveryPhase === "integration")),
+  );
+}
+
 function canonicalWorkflowBlockersIntegrated(
   attachment: WorkflowAttachment,
   blockedBy: ReadonlyArray<number>,
@@ -857,6 +916,7 @@ const activeTicketImplementationStatuses = new Set<WorkflowTicketImplementationS
   "dispatching",
   "implementing",
   "reviewing",
+  "stopping",
 ]);
 const workflowStageSkills = new Set(["wayfinder", "to-spec", "to-tickets"]);
 
@@ -1208,14 +1268,24 @@ function workflowTicketImplementationStatusTransitionAllowed(
     case "stopping":
       return next === "needs-recovery";
     case "needs-recovery":
-      return next === "implementing" || next === "reviewing" || next === "cancelled";
+      return (
+        next === "implementing" ||
+        next === "reviewing" ||
+        next === "integrating" ||
+        next === "cancelled"
+      );
     case "cancelled":
     case "checkpointed":
       return false;
     case "reviewed":
       return next === "integrating";
     case "integrating":
-      return next === "integrating" || next === "integration-failed" || next === "integrated";
+      return (
+        next === "integrating" ||
+        next === "integration-failed" ||
+        next === "integrated" ||
+        next === "needs-recovery"
+      );
     case "integration-failed":
       return next === "integrating";
     case "needs-correction":
@@ -3094,6 +3164,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "The Workflow Run cannot start while upstream workflow staleness is unresolved.",
         });
       }
+      if (workflowBaselineRefreshBlocksAutomation(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The Workflow Run cannot start while a Baseline Refresh preview, drain, or recovery checkpoint is unresolved.",
+        });
+      }
       const status = workflowAutomationStatus(attachment);
       if (status === "running") {
         return yield* workflowAutomationEvent({
@@ -3197,6 +3274,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "The Workflow Run cannot resume while upstream workflow staleness is unresolved.",
         });
       }
+      if (workflowBaselineRefreshBlocksAutomation(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The Workflow Run cannot resume while the Baseline Refresh checkpoint still needs recovery.",
+        });
+      }
       if (workflowAutomationStatus(attachment) === "running") {
         return yield* workflowAutomationEvent({
           command,
@@ -3225,6 +3309,117 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       });
     }
 
+    case "thread.workflow.baseline-refresh.preflight": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh preflight requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh preflight has a stale Workstream version.",
+        });
+      }
+      if (
+        attachment.baselineRefresh !== undefined &&
+        ["previewing", "draining", "refreshing"].includes(attachment.baselineRefresh.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "A Baseline Refresh is already in progress for this Workstream.",
+        });
+      }
+      const baselineRefresh = withWorkflowBaselineRefreshActions({
+        status: "previewing",
+        baselineBranch: workflowRun.configuration.workstreamBaseline,
+        remoteTarget: workflowRun.configuration.remoteTarget,
+        currentCommit: null,
+        sourceCommit: null,
+        incomingCommits: [],
+        incomingFiles: [],
+        affectedTickets: [],
+        validations: [],
+        failure: null,
+        requestedAt: command.createdAt,
+        updatedAt: command.createdAt,
+      });
+      const nextAttachment = incrementWorkflowVersion({ ...attachment, baselineRefresh });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-baseline-refresh-requested",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.baseline-refresh.confirm": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      const baselineRefresh = attachment?.baselineRefresh;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh confirmation requires a confirmed Workflow Run.",
+        });
+      }
+      if (baselineRefresh?.status !== "ready") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh confirmation requires a ready preview.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh confirmation has a stale Workstream version.",
+        });
+      }
+      if (
+        baselineRefresh.currentCommit !== command.currentCommit ||
+        baselineRefresh.sourceCommit !== command.sourceCommit
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh confirmation must match the exact previewed commits.",
+        });
+      }
+      const automationStatus = workflowAutomationStatus(attachment);
+      if (automationStatus === "draining") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The Workstream is already draining for a Baseline Refresh.",
+        });
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        baselineRefresh: withWorkflowBaselineRefreshActions({
+          ...baselineRefresh,
+          status: "draining",
+          failure: null,
+          updatedAt: command.createdAt,
+        }),
+        workflowRun: {
+          ...workflowRun,
+          automationStatus: "draining",
+        },
+      });
+      return yield* workflowAutomationEvent({
+        command,
+        attachment: nextAttachment,
+        eventType: "thread.workflow-run-draining",
+      });
+    }
+
     case "thread.workflow.run.drain.complete": {
       const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
       const attachment = thread.workflowAttachment;
@@ -3249,8 +3444,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       if (
-        workflowTicketImplementations(attachment).some((implementation) =>
-          ["dispatching", "implementing", "reviewing"].includes(implementation.status),
+        workflowTicketImplementations(attachment).some(
+          (implementation) =>
+            ["dispatching", "implementing", "reviewing", "stopping", "integrating"].includes(
+              implementation.status,
+            ) ||
+            (implementation.status === "needs-recovery" &&
+              implementation.recoveryPhase === "integration"),
         )
       ) {
         return yield* new OrchestrationCommandInvariantError({
@@ -3258,11 +3458,20 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "A Workflow Run cannot finish draining while Ticket Implementations are active.",
         });
       }
+      const baselineRefresh =
+        attachment.baselineRefresh?.status === "draining"
+          ? {
+              ...attachment.baselineRefresh,
+              status: "refreshing" as const,
+              updatedAt: command.createdAt,
+            }
+          : attachment.baselineRefresh;
       return yield* workflowAutomationEvent({
         command,
         attachment: refreshTicketImplementationAvailability(
           incrementWorkflowVersion({
             ...attachment,
+            ...(baselineRefresh === undefined ? {} : { baselineRefresh }),
             workflowRun: {
               ...workflowRun,
               automationStatus: "paused",
@@ -3271,6 +3480,63 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ),
         eventType: "thread.workflow-run-paused",
       });
+    }
+
+    case "thread.workflow.baseline-refresh.update": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.baselineRefresh;
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh update requires a prior server-owned refresh request.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Baseline Refresh update has a stale Workstream version.",
+        });
+      }
+      const nextBaselineRefresh = withWorkflowBaselineRefreshActions(command.baselineRefresh);
+      const sameRefresh = stableStringify(current) === stableStringify(nextBaselineRefresh);
+      const validTransition =
+        sameRefresh ||
+        (current.status === "previewing" &&
+          ["ready", "needs-recovery"].includes(nextBaselineRefresh.status)) ||
+        (current.status === "refreshing" &&
+          ["completed", "needs-recovery"].includes(nextBaselineRefresh.status));
+      if (!validTransition) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Baseline Refresh cannot transition from ${current.status} to ${nextBaselineRefresh.status}.`,
+        });
+      }
+      const refreshedAttachment = {
+        ...attachment,
+        baselineRefresh: nextBaselineRefresh,
+      };
+      const staleAttachment =
+        command.staleNodeIds === undefined
+          ? refreshedAttachment
+          : markWorkflowBaselineRefreshStale(
+              refreshedAttachment,
+              new Set(command.staleNodeIds),
+              nextBaselineRefresh.updatedAt,
+            );
+      const nextAttachment = refreshTicketImplementationAvailability(
+        incrementWorkflowVersion(staleAttachment),
+      );
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-baseline-refresh-updated",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
     }
 
     case "thread.workflow.node.hold":
@@ -3971,6 +4237,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "Integration retry has a stale Workstream version.",
         });
       }
+      if (workflowIntegrationLaneBusy(attachment, current.id)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The serialized Workstream Baseline integration lane is occupied by another Ticket Implementation.",
+        });
+      }
       const integration = current.integration;
       const implementation: WorkflowTicketImplementation = {
         ...current,
@@ -4097,7 +4370,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (
         current.status !== "dispatching" &&
         current.status !== "implementing" &&
-        current.status !== "reviewing"
+        current.status !== "reviewing" &&
+        !(current.status === "integrating" && current.integration?.repair?.status === "running")
       ) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -4123,7 +4397,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       const implementation: WorkflowTicketImplementation = {
         ...current,
         status: "stopping",
-        recoveryPhase: current.status === "reviewing" ? "review" : "implementation",
+        recoveryPhase:
+          current.status === "integrating"
+            ? "integration"
+            : current.status === "reviewing"
+              ? "review"
+              : "implementation",
         failure: null,
         updatedAt: command.createdAt,
       };
@@ -4215,14 +4494,47 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       switch (command.action) {
         case "resume": {
           const recoveryPhase = current.recoveryPhase ?? "implementation";
+          if (
+            recoveryPhase === "integration" &&
+            workflowIntegrationLaneBusy(attachment, current.id)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail:
+                "The serialized Workstream Baseline integration lane is occupied by another Ticket Implementation.",
+            });
+          }
           implementation = {
             ...current,
-            status: recoveryPhase === "review" ? "reviewing" : "implementing",
+            status:
+              recoveryPhase === "review"
+                ? "reviewing"
+                : recoveryPhase === "integration"
+                  ? "integrating"
+                  : "implementing",
             implementationSkillRunId:
               recoveryPhase === "implementation" ? null : current.implementationSkillRunId,
             reviewSkillRunId: recoveryPhase === "review" ? null : current.reviewSkillRunId,
             recoveryPhase,
             recoveryAttempt: (current.recoveryAttempt ?? 0) + 1,
+            ...(recoveryPhase === "integration" && current.integration?.repair !== undefined
+              ? {
+                  integration: {
+                    ...current.integration,
+                    status: "integrating" as const,
+                    failurePhase: null,
+                    failure: null,
+                    repair: {
+                      ...current.integration.repair,
+                      status: "pending" as const,
+                      skillRunId: null,
+                      failure: null,
+                      updatedAt: command.createdAt,
+                    },
+                    updatedAt: command.createdAt,
+                  },
+                }
+              : {}),
             failure: null,
             updatedAt: command.createdAt,
           };
@@ -4422,6 +4734,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       }
       if (
         command.implementation.status === "integrating" &&
+        current.status !== "integrating" &&
+        workflowIntegrationLaneBusy(attachment, current.id)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "The serialized Workstream Baseline integration lane is occupied by another Ticket Implementation.",
+        });
+      }
+      if (
+        command.implementation.status === "integrating" &&
         !attachment.workflowRun?.configuration.authority.mutateTracker
       ) {
         return yield* new OrchestrationCommandInvariantError({
@@ -4588,16 +4911,31 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         });
       }
       const correctionCycles = workflowTicketImplementationCorrectionCycles(current);
+      const reviewAccepted = command.review.status === "passed" || blockingFindings.length === 0;
+      const repairReview = current.integration?.repair?.status === "reviewing";
       const implementation: WorkflowTicketImplementation = {
         ...current,
-        status:
-          command.review.status === "passed" || blockingFindings.length === 0
-            ? "reviewed"
-            : correctionCycles.length >= WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES
-              ? "needs-decision"
-              : "needs-correction",
+        status: reviewAccepted
+          ? "reviewed"
+          : correctionCycles.length >= WORKFLOW_MAX_AUTOMATIC_CORRECTION_CYCLES
+            ? "needs-decision"
+            : "needs-correction",
         validation: command.validation,
         review: command.review,
+        ...(repairReview && current.integration?.repair !== undefined
+          ? {
+              integration: {
+                ...current.integration,
+                repair: {
+                  ...current.integration.repair,
+                  status: reviewAccepted ? ("ready" as const) : ("reviewing" as const),
+                  failure: null,
+                  updatedAt: command.createdAt,
+                },
+                updatedAt: command.createdAt,
+              },
+            }
+          : {}),
         failure: null,
         updatedAt: command.createdAt,
       };

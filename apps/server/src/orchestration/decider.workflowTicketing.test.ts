@@ -17,6 +17,7 @@ import {
   type OrchestrationThread,
   type ResolvedSkillInvocation,
   type WorkflowAttachment,
+  type WorkflowBaselineRefresh,
   type WorkflowGraphNode,
   type WorkflowPrdDocument,
   type WorkflowRun,
@@ -1860,6 +1861,243 @@ it.layer(NodeServices.layer)("Ticket Implementation boundary", (it) => {
       const needsDecision = projected.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
       expect(needsDecision).toMatchObject({ status: "needs-decision", review });
       expect(needsDecision?.correctionCycles?.map((cycle) => cycle.cycle)).toEqual([1, 2, 3, 4]);
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("Serialized integration lane", (it) => {
+  it.effect("blocks retry while another Ticket Implementation owns the lane", () =>
+    Effect.gen(function* () {
+      const model = implementationReadModel();
+      const started = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.ticket-implementation.start" as const,
+          commandId: CommandId.make("integration-lane-start"),
+          threadId: originThreadId,
+          ticketNodeId: implementationNodeId,
+          actionIdentity: "ticket-implementation:37:lane",
+          expectedWorkstreamVersion: 3,
+          confirmed: true as const,
+          createdAt: publishedAt,
+        },
+      });
+      const afterStart = yield* Effect.promise(() => applyEvents(model, normalizeEvents(started)));
+      const template = afterStart.threads[0]?.workflowAttachment?.ticketImplementations?.[0];
+      expect(template).toBeDefined();
+      const current = {
+        ...template!,
+        id: "implementation:lane-retry",
+        status: "integration-failed" as const,
+        integration: {
+          status: "failed" as const,
+          baselineBranch: "feature/development-workflow",
+          baselineCommit: null,
+          failurePhase: "merge" as const,
+          failure: "The baseline merge failed.",
+          startedAt: publishedAt,
+          updatedAt: publishedAt,
+        },
+        failure: "The baseline merge failed.",
+        updatedAt: publishedAt,
+      };
+      const other = {
+        ...current,
+        id: "implementation:lane-owner",
+        nodeId: "ticket:lane-owner",
+        ticketNumber: 38,
+        title: "Lane owner",
+        status: "integrating" as const,
+        integration: {
+          ...current.integration,
+          status: "integrating" as const,
+          failurePhase: null,
+          failure: null,
+        },
+        failure: null,
+      };
+      const laneModel: OrchestrationReadModel = {
+        ...afterStart,
+        threads: afterStart.threads.map((candidate) =>
+          candidate.id === originThreadId
+            ? {
+                ...candidate,
+                workflowAttachment: {
+                  ...candidate.workflowAttachment!,
+                  workflowVersion: 8,
+                  workflowRun: {
+                    ...candidate.workflowAttachment!.workflowRun!,
+                    configuration: {
+                      ...candidate.workflowAttachment!.workflowRun!.configuration,
+                      authority: {
+                        ...candidate.workflowAttachment!.workflowRun!.configuration.authority,
+                        mutateTracker: true,
+                      },
+                    },
+                  },
+                  ticketImplementations: [current, other],
+                },
+              }
+            : candidate,
+        ),
+      };
+      const retry = yield* decideOrchestrationCommand({
+        readModel: laneModel,
+        command: {
+          type: "thread.workflow.ticket-integration.retry" as const,
+          commandId: CommandId.make("integration-lane-retry"),
+          threadId: originThreadId,
+          implementationId: current.id,
+          expectedWorkstreamVersion: 8,
+          confirmed: true as const,
+          createdAt: publishedAt,
+        },
+      }).pipe(Effect.flip);
+      expect(retry.message).toContain("serialized Workstream Baseline integration lane");
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("Baseline Refresh checkpoint boundary", (it) => {
+  it.effect("previews, explicitly drains, refreshes, and resumes only after completion", () =>
+    Effect.gen(function* () {
+      let model = implementationReadModel();
+      const preflight = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.baseline-refresh.preflight" as const,
+          commandId: CommandId.make("baseline-refresh-preflight"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 3,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(preflight)[0]?.type).toBe(
+        "thread.workflow-baseline-refresh-requested",
+      );
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(preflight)));
+      expect(model.threads[0]?.workflowAttachment?.baselineRefresh?.status).toBe("previewing");
+
+      const preview = {
+        status: "ready" as const,
+        baselineBranch: "feature/development-workflow",
+        remoteTarget: "origin/feature/development-workflow",
+        currentCommit: "baseline-before-refresh",
+        sourceCommit: "baseline-after-refresh",
+        incomingCommits: [{ sha: "incoming-1", title: "Refresh workflow baseline" }],
+        incomingFiles: [{ path: "apps/server/src/workflow.ts", additions: 4, deletions: 1 }],
+        affectedTickets: [],
+        validations: [],
+        failure: null,
+        allowedActions: [
+          {
+            id: "preflight",
+            label: "Refresh preview",
+            enabled: true,
+            reason: null,
+          },
+          {
+            id: "confirm",
+            label: "Confirm baseline refresh",
+            enabled: true,
+            reason: null,
+          },
+        ],
+        requestedAt: publishedAt,
+        updatedAt: publishedAt,
+      } satisfies WorkflowBaselineRefresh;
+      const ready = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.baseline-refresh.update" as const,
+          commandId: CommandId.make("baseline-refresh-ready"),
+          threadId: originThreadId,
+          baselineRefresh: preview,
+          expectedWorkstreamVersion: 4,
+          createdAt: publishedAt,
+        },
+      });
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(ready)));
+      expect(model.threads[0]?.workflowAttachment?.baselineRefresh).toEqual(preview);
+
+      const blockedStart = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.run.start" as const,
+          commandId: CommandId.make("baseline-refresh-start-blocked"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 5,
+          confirmed: true,
+          createdAt: publishedAt,
+        },
+      }).pipe(Effect.flip);
+      expect(blockedStart.message).toContain("Baseline Refresh");
+
+      const confirmed = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.baseline-refresh.confirm" as const,
+          commandId: CommandId.make("baseline-refresh-confirm"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 5,
+          currentCommit: preview.currentCommit!,
+          sourceCommit: preview.sourceCommit!,
+          confirmed: true,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(confirmed)[0]?.type).toBe("thread.workflow-run-draining");
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(confirmed)));
+      expect(model.threads[0]?.workflowAttachment?.baselineRefresh?.status).toBe("draining");
+      expect(model.threads[0]?.workflowAttachment?.workflowRun?.automationStatus).toBe("draining");
+
+      const drained = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.run.drain.complete" as const,
+          commandId: CommandId.make("baseline-refresh-drain-complete"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 6,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(drained)[0]?.type).toBe("thread.workflow-run-paused");
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(drained)));
+      expect(model.threads[0]?.workflowAttachment?.baselineRefresh?.status).toBe("refreshing");
+      expect(model.threads[0]?.workflowAttachment?.workflowRun?.automationStatus).toBe("paused");
+
+      const completed = {
+        ...preview,
+        status: "completed" as const,
+        validations: [],
+        updatedAt: publishedAt,
+      } satisfies WorkflowBaselineRefresh;
+      const refreshed = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.baseline-refresh.update" as const,
+          commandId: CommandId.make("baseline-refresh-completed"),
+          threadId: originThreadId,
+          baselineRefresh: completed,
+          expectedWorkstreamVersion: 7,
+          createdAt: publishedAt,
+        },
+      });
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(refreshed)));
+      expect(model.threads[0]?.workflowAttachment?.baselineRefresh?.status).toBe("completed");
+
+      const resumed = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.run.resume" as const,
+          commandId: CommandId.make("baseline-refresh-resume"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 8,
+          confirmed: true,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(resumed)[0]?.type).toBe("thread.workflow-run-resumed");
     }),
   );
 });

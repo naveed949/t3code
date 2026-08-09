@@ -1241,6 +1241,13 @@ function ChatViewContent(props: ChatViewProps) {
   const confirmWorkflowRunCommand = useAtomCommand(threadEnvironment.confirmWorkflowRun, {
     reportFailure: false,
   });
+  const preflightBaselineRefreshCommand = useAtomCommand(
+    threadEnvironment.preflightBaselineRefresh,
+    { reportFailure: false },
+  );
+  const confirmBaselineRefreshCommand = useAtomCommand(threadEnvironment.confirmBaselineRefresh, {
+    reportFailure: false,
+  });
   const viewWorkflowArtifactsCommand = useAtomCommand(threadEnvironment.viewWorkflowArtifacts, {
     reportFailure: false,
   });
@@ -1772,6 +1779,34 @@ function ChatViewContent(props: ChatViewProps) {
       });
     },
     [activeThread, confirmWorkflowRunCommand],
+  );
+  const preflightBaselineRefresh = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void preflightBaselineRefreshCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [activeThread, preflightBaselineRefreshCommand]);
+  const confirmBaselineRefresh = useCallback(
+    (currentCommit: string, sourceCommit: string) => {
+      const attachment = activeThread?.workflowAttachment;
+      if (!activeThread || attachment === undefined) return;
+      void confirmBaselineRefreshCommand({
+        environmentId: activeThread.environmentId,
+        input: {
+          threadId: activeThread.id,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          currentCommit,
+          sourceCommit,
+          confirmed: true,
+        },
+      });
+    },
+    [activeThread, confirmBaselineRefreshCommand],
   );
   const completeWorkflowSpecification = useCallback(
     (prd: WorkflowPrdDocument) => {
@@ -6314,6 +6349,8 @@ function ChatViewContent(props: ChatViewProps) {
         onStopTicketImplementation={stopWorkflowTicketImplementation}
         onRecoverTicketImplementation={recoverWorkflowTicketImplementation}
         onRetryTicketIntegration={retryWorkflowTicketIntegration}
+        onPreflightBaselineRefresh={preflightBaselineRefresh}
+        onConfirmBaselineRefresh={confirmBaselineRefresh}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
       />
@@ -6503,6 +6540,8 @@ function ChatViewContent(props: ChatViewProps) {
                         )}
                         onPreflightRun={preflightWorkflowRun}
                         onConfirmRun={confirmWorkflowRun}
+                        onPreflightBaselineRefresh={preflightBaselineRefresh}
+                        onConfirmBaselineRefresh={confirmBaselineRefresh}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
                       />
                     </div>

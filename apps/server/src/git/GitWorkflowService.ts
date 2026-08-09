@@ -32,6 +32,30 @@ import * as GitManager from "./GitManager.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 
+export interface GitBaselineRefreshPreview {
+  readonly currentCommit: string;
+  readonly sourceCommit: string;
+  readonly incomingCommits: ReadonlyArray<{
+    readonly sha: string;
+    readonly title: string;
+  }>;
+  readonly incomingFiles: ReadonlyArray<{
+    readonly path: string;
+    readonly additions: number;
+    readonly deletions: number;
+  }>;
+}
+
+export interface GitDiffSummary {
+  readonly files: ReadonlyArray<{
+    readonly path: string;
+    readonly additions: number;
+    readonly deletions: number;
+  }>;
+  readonly additions: number;
+  readonly deletions: number;
+}
+
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
   {
@@ -91,6 +115,22 @@ export class GitWorkflowService extends Context.Service<
       readonly targetBranch: string;
       readonly sourceBranch: string;
     }) => Effect.Effect<{ readonly commitSha: string }, GitCommandError>;
+    readonly abortIntegrationMerge: (cwd: string) => Effect.Effect<void, GitCommandError>;
+    readonly previewBaselineRefresh: (input: {
+      readonly cwd: string;
+      readonly baselineBranch: string;
+      readonly remoteTarget: string;
+    }) => Effect.Effect<GitBaselineRefreshPreview, GitCommandError>;
+    readonly refreshBaseline: (input: {
+      readonly cwd: string;
+      readonly baselineBranch: string;
+      readonly remoteTarget: string;
+      readonly expectedSourceCommit: string;
+    }) => Effect.Effect<{ readonly commitSha: string }, GitCommandError>;
+    readonly diffFromFixedPoint: (input: {
+      readonly cwd: string;
+      readonly fixedPoint: string;
+    }) => Effect.Effect<GitDiffSummary, GitCommandError>;
     readonly validateIntegration: (input: {
       readonly cwd: string;
       readonly fixedPoint: string;
@@ -137,6 +177,66 @@ function nonRepositoryListRefs(): VcsListRefsResult {
     nextCursor: null,
     totalCount: 0,
   };
+}
+
+function remoteNameFromTarget(remoteTarget: string): string {
+  return remoteTarget.split("/", 1)[0] ?? remoteTarget;
+}
+
+function commandFailure(input: {
+  readonly operation: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly result: GitVcsDriver.ExecuteGitResult;
+  readonly fallback: string;
+}): GitCommandError {
+  const detail = input.result.stderr.trim() || input.result.stdout.trim() || input.fallback;
+  return new GitCommandError({
+    operation: input.operation,
+    command: input.command,
+    cwd: input.cwd,
+    ...(typeof input.result.exitCode === "number" ? { exitCode: input.result.exitCode } : {}),
+    stdoutLength: input.result.stdout.length,
+    stderrLength: input.result.stderr.length,
+    detail,
+  });
+}
+
+function parseRefreshCommits(stdout: string): ReadonlyArray<{ sha: string; title: string }> {
+  return stdout
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .slice(0, 256)
+    .map((line) => {
+      const [sha, ...title] = line.split("\t");
+      return { sha: sha ?? "", title: title.join("\t") };
+    })
+    .filter((commit) => commit.sha.length > 0);
+}
+
+function parseRefreshFiles(stdout: string): ReadonlyArray<{
+  path: string;
+  additions: number;
+  deletions: number;
+}> {
+  return stdout
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .slice(0, 512)
+    .map((line) => {
+      const [additions, deletions, ...pathParts] = line.split("\t");
+      return {
+        path: pathParts.join("\t"),
+        additions: additions === "-" ? 0 : Number.parseInt(additions ?? "0", 10),
+        deletions: deletions === "-" ? 0 : Number.parseInt(deletions ?? "0", 10),
+      };
+    })
+    .filter(
+      (file) =>
+        file.path.length > 0 && Number.isFinite(file.additions) && Number.isFinite(file.deletions),
+    );
 }
 
 export const make = Effect.gen(function* () {
@@ -292,11 +392,21 @@ export const make = Effect.gen(function* () {
       });
     }
 
-    yield* git.execute({
+    const merge = yield* git.execute({
       operation: "GitWorkflowService.integrateBranch.merge",
       cwd: input.cwd,
       args: ["merge", "--no-ff", "--no-edit", input.sourceBranch],
+      allowNonZeroExit: true,
     });
+    if (merge.exitCode !== 0) {
+      return yield* commandFailure({
+        operation: "GitWorkflowService.integrateBranch",
+        command: "merge",
+        cwd: input.cwd,
+        result: merge,
+        fallback: "The baseline merge failed; inspect the retained merge state before recovery.",
+      });
+    }
     const head = yield* git.execute({
       operation: "GitWorkflowService.integrateBranch.head",
       cwd: input.cwd,
@@ -312,6 +422,197 @@ export const make = Effect.gen(function* () {
       });
     }
     return { commitSha };
+  });
+
+  const abortIntegrationMerge = Effect.fn("GitWorkflowService.abortIntegrationMerge")(function* (
+    cwd: string,
+  ) {
+    yield* ensureGitCommand("GitWorkflowService.abortIntegrationMerge", cwd);
+    const result = yield* git.execute({
+      operation: "GitWorkflowService.abortIntegrationMerge",
+      cwd,
+      args: ["merge", "--abort"],
+      allowNonZeroExit: true,
+    });
+    if (result.exitCode !== 0) {
+      return yield* commandFailure({
+        operation: "GitWorkflowService.abortIntegrationMerge",
+        command: "merge",
+        cwd,
+        result,
+        fallback: "Git could not abort the retained integration merge.",
+      });
+    }
+  });
+
+  const previewBaselineRefresh = Effect.fn("GitWorkflowService.previewBaselineRefresh")(
+    function* (input: {
+      readonly cwd: string;
+      readonly baselineBranch: string;
+      readonly remoteTarget: string;
+    }) {
+      yield* ensureGitCommand("GitWorkflowService.previewBaselineRefresh", input.cwd);
+      const currentBranch = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.current-branch",
+        cwd: input.cwd,
+        args: ["symbolic-ref", "--quiet", "--short", "HEAD"],
+      });
+      if (currentBranch.stdout.trim() !== input.baselineBranch) {
+        return yield* new GitCommandError({
+          operation: "GitWorkflowService.previewBaselineRefresh",
+          command: "symbolic-ref",
+          cwd: input.cwd,
+          detail: `Baseline refresh requires ${input.baselineBranch} to be checked out; found ${currentBranch.stdout.trim() || "detached HEAD"}.`,
+        });
+      }
+      const status = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.clean-check",
+        cwd: input.cwd,
+        args: ["status", "--porcelain"],
+      });
+      if (status.stdout.trim().length > 0) {
+        return yield* new GitCommandError({
+          operation: "GitWorkflowService.previewBaselineRefresh",
+          command: "status",
+          cwd: input.cwd,
+          detail: "Baseline refresh requires a clean Workstream Baseline working tree.",
+        });
+      }
+      yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.fetch",
+        cwd: input.cwd,
+        args: ["fetch", "--quiet", remoteNameFromTarget(input.remoteTarget)],
+      });
+      const current = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.current-commit",
+        cwd: input.cwd,
+        args: ["rev-parse", input.baselineBranch],
+      });
+      const source = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.source-commit",
+        cwd: input.cwd,
+        args: ["rev-parse", input.remoteTarget],
+      });
+      const range = `${input.baselineBranch}..${input.remoteTarget}`;
+      const commits = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.commits",
+        cwd: input.cwd,
+        args: ["log", "--format=%H%x09%s", range],
+      });
+      const files = yield* git.execute({
+        operation: "GitWorkflowService.previewBaselineRefresh.files",
+        cwd: input.cwd,
+        args: ["diff", "--numstat", range],
+      });
+      return {
+        currentCommit: current.stdout.trim(),
+        sourceCommit: source.stdout.trim(),
+        incomingCommits: parseRefreshCommits(commits.stdout),
+        incomingFiles: parseRefreshFiles(files.stdout),
+      } satisfies GitBaselineRefreshPreview;
+    },
+  );
+
+  const refreshBaseline = Effect.fn("GitWorkflowService.refreshBaseline")(function* (input: {
+    readonly cwd: string;
+    readonly baselineBranch: string;
+    readonly remoteTarget: string;
+    readonly expectedSourceCommit: string;
+  }) {
+    yield* ensureGitCommand("GitWorkflowService.refreshBaseline", input.cwd);
+    const currentBranch = yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.current-branch",
+      cwd: input.cwd,
+      args: ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    });
+    if (currentBranch.stdout.trim() !== input.baselineBranch) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.refreshBaseline",
+        command: "symbolic-ref",
+        cwd: input.cwd,
+        detail: `Baseline refresh requires ${input.baselineBranch} to be checked out; found ${currentBranch.stdout.trim() || "detached HEAD"}.`,
+      });
+    }
+    const status = yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.clean-check",
+      cwd: input.cwd,
+      args: ["status", "--porcelain"],
+    });
+    if (status.stdout.trim().length > 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.refreshBaseline",
+        command: "status",
+        cwd: input.cwd,
+        detail: "Baseline refresh requires a clean Workstream Baseline working tree.",
+      });
+    }
+    yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.fetch",
+      cwd: input.cwd,
+      args: ["fetch", "--quiet", remoteNameFromTarget(input.remoteTarget)],
+    });
+    const source = yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.source-commit",
+      cwd: input.cwd,
+      args: ["rev-parse", input.remoteTarget],
+    });
+    const sourceCommit = source.stdout.trim();
+    if (sourceCommit !== input.expectedSourceCommit) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.refreshBaseline",
+        command: "rev-parse",
+        cwd: input.cwd,
+        detail: `The confirmed refresh source changed from ${input.expectedSourceCommit} to ${sourceCommit || "an unresolved commit"}; the baseline was left unchanged.`,
+      });
+    }
+    const merge = yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.fast-forward",
+      cwd: input.cwd,
+      args: ["merge", "--ff-only", input.remoteTarget],
+      allowNonZeroExit: true,
+    });
+    if (merge.exitCode !== 0) {
+      return yield* commandFailure({
+        operation: "GitWorkflowService.refreshBaseline",
+        command: "merge",
+        cwd: input.cwd,
+        result: merge,
+        fallback: "Baseline refresh could not fast-forward; the baseline was left unchanged.",
+      });
+    }
+    const head = yield* git.execute({
+      operation: "GitWorkflowService.refreshBaseline.head",
+      cwd: input.cwd,
+      args: ["rev-parse", "HEAD"],
+    });
+    const commitSha = head.stdout.trim();
+    if (commitSha.length === 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.refreshBaseline",
+        command: "rev-parse",
+        cwd: input.cwd,
+        detail: "The refreshed baseline did not produce a commit SHA.",
+      });
+    }
+    return { commitSha };
+  });
+
+  const diffFromFixedPoint = Effect.fn("GitWorkflowService.diffFromFixedPoint")(function* (input: {
+    readonly cwd: string;
+    readonly fixedPoint: string;
+  }) {
+    yield* ensureGitCommand("GitWorkflowService.diffFromFixedPoint", input.cwd);
+    const result = yield* git.execute({
+      operation: "GitWorkflowService.diffFromFixedPoint.numstat",
+      cwd: input.cwd,
+      args: ["diff", "--numstat", `${input.fixedPoint}..HEAD`],
+    });
+    const files = parseRefreshFiles(result.stdout);
+    return {
+      files,
+      additions: files.reduce((total, file) => total + file.additions, 0),
+      deletions: files.reduce((total, file) => total + file.deletions, 0),
+    } satisfies GitDiffSummary;
   });
 
   const validateIntegration = Effect.fn("GitWorkflowService.validateIntegration")(
@@ -396,6 +697,10 @@ export const make = Effect.gen(function* () {
         Effect.andThen(Effect.scoped(git.switchRef(input))),
       ),
     integrateBranch,
+    abortIntegrationMerge,
+    previewBaselineRefresh,
+    refreshBaseline,
+    diffFromFixedPoint,
     validateIntegration,
     renameBranch: (input) =>
       ensureGit("GitWorkflowService.renameBranch", input.cwd).pipe(

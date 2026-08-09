@@ -24,6 +24,7 @@ import {
   WayfinderReconcileReason,
   WayfinderResearchTicketStatus,
   WorkstreamId,
+  type WorkflowBaselineRefreshStatus,
   WorkflowTicketImplementationStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -127,6 +128,23 @@ export const WorkflowTicketImplementationProgressReceipt = Schema.Struct({
 export type WorkflowTicketImplementationProgressReceipt =
   typeof WorkflowTicketImplementationProgressReceipt.Type;
 
+export const WorkflowBaselineRefreshProgressReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.baseline-refresh.progress"),
+  threadId: ThreadId,
+  status: Schema.Literals([
+    "previewing",
+    "ready",
+    "draining",
+    "refreshing",
+    "needs-recovery",
+    "completed",
+  ] satisfies ReadonlyArray<WorkflowBaselineRefreshStatus>),
+  createdAt: IsoDateTime,
+  message: Schema.NullOr(Schema.String),
+});
+export type WorkflowBaselineRefreshProgressReceipt =
+  typeof WorkflowBaselineRefreshProgressReceipt.Type;
+
 export const WorkflowTicketFrontierScheduledReceipt = Schema.Struct({
   type: Schema.Literal("workflow.ticket-frontier.scheduled"),
   workstreamId: WorkstreamId,
@@ -157,6 +175,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WayfinderResearchProgressReceipt,
   WorkflowTicketBatchPublicationProgressReceipt,
   WorkflowTicketImplementationProgressReceipt,
+  WorkflowBaselineRefreshProgressReceipt,
   WorkflowTicketFrontierScheduledReceipt,
   WorkflowTicketFrontierDispatchFailedReceipt,
 ]);

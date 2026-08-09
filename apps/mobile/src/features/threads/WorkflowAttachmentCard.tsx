@@ -29,6 +29,8 @@ export function WorkflowAttachmentCard(props: {
   >;
   readonly onPreflightRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
+  readonly onPreflightBaselineRefresh?: () => void;
+  readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
@@ -254,6 +256,15 @@ export function WorkflowAttachmentCard(props: {
               authorityGranted={props.attachment.workflowRunPreview.authorityGranted}
             />
           </View>
+        ) : null}
+        {props.attachment.workflowRun && props.onPreflightBaselineRefresh ? (
+          <BaselineRefreshControls
+            attachment={props.attachment}
+            onPreflight={props.onPreflightBaselineRefresh}
+            {...(props.onConfirmBaselineRefresh
+              ? { onConfirm: props.onConfirmBaselineRefresh }
+              : {})}
+          />
         ) : null}
         {props.onOpenWorkstream ? (
           <Pressable
@@ -560,6 +571,148 @@ function WorkflowRunControls(props: {
           </Pressable>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+export function BaselineRefreshControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly onPreflight: () => void;
+  readonly onConfirm?: (currentCommit: string, sourceCommit: string) => void;
+}) {
+  const refresh = props.attachment.baselineRefresh;
+  const canPreflight =
+    refresh === undefined ||
+    refresh.allowedActions?.some((action) => action.id === "preflight" && action.enabled) === true;
+  const canConfirm =
+    props.onConfirm !== undefined &&
+    refresh?.allowedActions?.some((action) => action.id === "confirm" && action.enabled) === true;
+  const statusLabel = refresh?.status.replaceAll("-", " ") ?? "not requested";
+  return (
+    <View
+      accessibilityLabel="Baseline Refresh"
+      className="gap-2 rounded-xl border border-sky-500/25 bg-sky-50/70 p-3 dark:bg-sky-400/10"
+    >
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1 gap-1">
+          <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+            Baseline Refresh
+          </Text>
+          <Text className="font-sans text-[11px] capitalize text-neutral-600 dark:text-neutral-300">
+            Status: {statusLabel}
+          </Text>
+        </View>
+        {canPreflight ? (
+          <Pressable
+            accessibilityRole="button"
+            className="rounded-lg border border-sky-500/30 px-2 py-1"
+            onPress={props.onPreflight}
+          >
+            <Text className="font-t3-bold text-[11px] text-sky-700 dark:text-sky-300">
+              {refresh === undefined ? "Preview incoming commits" : "Refresh preview"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {refresh?.status === "ready" ? (
+        <>
+          <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+            {refresh.incomingCommits.length} incoming commit
+            {refresh.incomingCommits.length === 1 ? "" : "s"}, {refresh.incomingFiles.length}{" "}
+            changed file
+            {refresh.incomingFiles.length === 1 ? "" : "s"}, and {refresh.affectedTickets.length}{" "}
+            affected Ticket
+            {refresh.affectedTickets.length === 1 ? "" : "s"}.
+          </Text>
+          {refresh.incomingCommits.length > 0 ? (
+            <View className="gap-1">
+              {refresh.incomingCommits.slice(0, 5).map((commit) => (
+                <Text
+                  key={commit.sha}
+                  className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300"
+                >
+                  {commit.sha.slice(0, 8)} {commit.title || "Untitled commit"}
+                </Text>
+              ))}
+              {refresh.incomingCommits.length > 5 ? (
+                <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+                  …and {refresh.incomingCommits.length - 5} more incoming commits.
+                </Text>
+              ) : null}
+            </View>
+          ) : (
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              No incoming commits.
+            </Text>
+          )}
+          {refresh.incomingFiles.length > 0 ? (
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              Files:{" "}
+              {refresh.incomingFiles
+                .slice(0, 5)
+                .map((file) => file.path)
+                .join(", ")}
+              {refresh.incomingFiles.length > 5
+                ? `, and ${refresh.incomingFiles.length - 5} more`
+                : ""}
+              .
+            </Text>
+          ) : null}
+          {refresh.affectedTickets.length > 0 ? (
+            <View className="gap-1">
+              {refresh.affectedTickets.map((ticket) => (
+                <Text
+                  key={`${ticket.nodeId}:${ticket.state}`}
+                  className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300"
+                >
+                  Ticket #{ticket.ticketNumber} ({ticket.state}): {ticket.reason}
+                </Text>
+              ))}
+            </View>
+          ) : (
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              No integrated or Stale Tickets are affected.
+            </Text>
+          )}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canConfirm }}
+            disabled={!canConfirm}
+            className="self-start rounded-lg bg-sky-500 px-3 py-2 disabled:bg-neutral-300 dark:disabled:bg-neutral-700"
+            onPress={() => {
+              if (canConfirm && refresh) {
+                props.onConfirm?.(refresh.currentCommit!, refresh.sourceCommit!);
+              }
+            }}
+          >
+            <Text className="font-t3-bold text-xs text-white">Confirm baseline refresh</Text>
+          </Pressable>
+        </>
+      ) : null}
+      {refresh?.status === "previewing" ? (
+        <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+          Building a preview from the confirmed baseline.
+        </Text>
+      ) : null}
+      {refresh?.status === "draining" || refresh?.status === "refreshing" ? (
+        <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+          Active work is draining before the baseline changes. No new automatic Ticket work will
+          start.
+        </Text>
+      ) : null}
+      {refresh?.status === "needs-recovery" ? (
+        <Text
+          accessibilityRole="alert"
+          className="font-sans text-[11px] text-red-700 dark:text-red-300"
+        >
+          {refresh.failure ?? "Baseline refresh needs recovery."}
+        </Text>
+      ) : null}
+      {refresh?.status === "completed" ? (
+        <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+          Baseline refreshed at {refresh.currentCommit ?? "the confirmed source"}.
+        </Text>
+      ) : null}
     </View>
   );
 }

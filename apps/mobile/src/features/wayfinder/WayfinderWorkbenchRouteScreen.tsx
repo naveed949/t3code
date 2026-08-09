@@ -605,6 +605,14 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.retryTicketIntegration,
     "retry ticket integration",
   );
+  const preflightBaselineRefreshCommand = useAtomCommand(
+    threadEnvironment.preflightBaselineRefresh,
+    "preflight Baseline Refresh",
+  );
+  const confirmBaselineRefreshCommand = useAtomCommand(
+    threadEnvironment.confirmBaselineRefresh,
+    "confirm Baseline Refresh",
+  );
   const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
@@ -962,6 +970,34 @@ function WayfinderWorkbenchContent(props: {
     },
     [props.environmentId, retryWorkflowTicketIntegrationCommand, workstream],
   );
+  const preflightBaselineRefresh = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void preflightBaselineRefreshCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightBaselineRefreshCommand, props.environmentId, workstream]);
+  const confirmBaselineRefresh = useCallback(
+    (currentCommit: string, sourceCommit: string) => {
+      const attachment = workstream?.workflowAttachment;
+      if (attachment === undefined || attachment === null) return;
+      void confirmBaselineRefreshCommand({
+        environmentId: props.environmentId,
+        input: {
+          threadId: attachment.originThreadId,
+          expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+          currentCommit,
+          sourceCommit,
+          confirmed: true,
+        },
+      });
+    },
+    [confirmBaselineRefreshCommand, props.environmentId, workstream],
+  );
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -1045,6 +1081,11 @@ function WayfinderWorkbenchContent(props: {
         onStopTicketImplementation={stopTicketImplementation}
         onRecoverTicketImplementation={recoverTicketImplementation}
         onRetryTicketIntegration={retryTicketIntegration}
+        {...(workstream?.workflowAttachment !== undefined
+          ? { workflowAttachment: workstream.workflowAttachment }
+          : {})}
+        onPreflightBaselineRefresh={preflightBaselineRefresh}
+        onConfirmBaselineRefresh={confirmBaselineRefresh}
       />
 
       {linkedTicketAction === null ? (
