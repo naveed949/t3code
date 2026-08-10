@@ -11,6 +11,8 @@ export interface NormalizedBitbucketPullRequestRecord {
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
   readonly updatedAt: Option.Option<DateTime.Utc>;
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
@@ -32,12 +34,20 @@ export const BitbucketPullRequestBranchSchema = Schema.Struct({
   branch: Schema.Struct({
     name: TrimmedNonEmptyString,
   }),
+  commit: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        hash: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    ),
+  ),
 });
 
 export const BitbucketPullRequestSchema = Schema.Struct({
   id: PositiveInt,
   title: TrimmedNonEmptyString,
   state: Schema.optional(Schema.NullOr(Schema.String)),
+  draft: Schema.optional(Schema.Boolean),
   updated_on: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
   links: Schema.Struct({
     html: Schema.Struct({
@@ -99,7 +109,11 @@ export function normalizeBitbucketPullRequestRecord(
     headRefName: raw.source.branch.name,
     state: normalizeBitbucketPullRequestState(raw.state),
     updatedAt: raw.updated_on ?? Option.none(),
-    ...(isCrossRepository ? { isCrossRepository: true } : {}),
+    ...(typeof raw.draft === "boolean" ? { isDraft: raw.draft } : {}),
+    ...(trimOptionalString(raw.source.commit?.hash)
+      ? { headCommitSha: trimOptionalString(raw.source.commit?.hash)! }
+      : {}),
+    isCrossRepository,
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
   };

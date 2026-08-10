@@ -18,6 +18,8 @@ function toChangeRequest(summary: NormalizedBitbucketPullRequestRecord): ChangeR
     headRefName: summary.headRefName,
     state: summary.state,
     updatedAt: summary.updatedAt ?? Option.none(),
+    ...(summary.isDraft === undefined ? {} : { isDraft: summary.isDraft }),
+    ...(summary.headCommitSha === undefined ? {} : { headCommitSha: summary.headCommitSha }),
     ...(summary.isCrossRepository !== undefined
       ? { isCrossRepository: summary.isCrossRepository }
       : {}),
@@ -92,6 +94,7 @@ export const make = Effect.gen(function* () {
           ...(input.target ? { target: input.target } : {}),
           title: input.title,
           bodyFile: input.bodyFile,
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
         })
         .pipe(
           Effect.mapError(

@@ -613,6 +613,18 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.confirmBaselineRefresh,
     "confirm Baseline Refresh",
   );
+  const preflightPublicationCommand = useAtomCommand(
+    threadEnvironment.preflightPublication,
+    "preflight Workstream Publication",
+  );
+  const confirmPublicationCommand = useAtomCommand(
+    threadEnvironment.confirmPublication,
+    "confirm Workstream Publication",
+  );
+  const reconcilePublicationCommand = useAtomCommand(
+    threadEnvironment.reconcilePublication,
+    "reconcile Workstream Publication",
+  );
   const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
@@ -998,6 +1010,40 @@ function WayfinderWorkbenchContent(props: {
     },
     [confirmBaselineRefreshCommand, props.environmentId, workstream],
   );
+  const preflightPublication = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void preflightPublicationCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightPublicationCommand, props.environmentId, workstream]);
+  const confirmPublication = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void confirmPublicationCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [confirmPublicationCommand, props.environmentId, workstream]);
+  const reconcilePublication = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void reconcilePublicationCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [reconcilePublicationCommand, props.environmentId, workstream]);
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -1086,6 +1132,9 @@ function WayfinderWorkbenchContent(props: {
           : {})}
         onPreflightBaselineRefresh={preflightBaselineRefresh}
         onConfirmBaselineRefresh={confirmBaselineRefresh}
+        onPreflightPublication={preflightPublication}
+        onConfirmPublication={confirmPublication}
+        onReconcilePublication={reconcilePublication}
       />
 
       {linkedTicketAction === null ? (

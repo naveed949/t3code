@@ -15,6 +15,8 @@ export interface NormalizedGitLabMergeRequestRecord {
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
   readonly updatedAt: Option.Option<DateTime.Utc>;
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
@@ -42,6 +44,8 @@ const GitLabMergeRequestSchema = Schema.Struct({
   target_branch: TrimmedNonEmptyString,
   state: Schema.optional(Schema.NullOr(Schema.String)),
   updated_at: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
+  draft: Schema.optional(Schema.Boolean),
+  sha: Schema.optional(Schema.NullOr(Schema.String)),
   source_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   target_project_id: Schema.optional(Schema.NullOr(Schema.Number)),
   source_project: Schema.optional(Schema.NullOr(GitLabProjectReferenceSchema)),
@@ -109,6 +113,8 @@ function normalizeGitLabMergeRequestRecord(
     headRefName: raw.source_branch,
     state: normalizeGitLabMergeRequestState(raw.state),
     updatedAt: raw.updated_at ?? Option.none(),
+    ...(typeof raw.draft === "boolean" ? { isDraft: raw.draft } : {}),
+    ...(trimOptionalString(raw.sha) ? { headCommitSha: trimOptionalString(raw.sha)! } : {}),
     ...(typeof isCrossRepository === "boolean" ? { isCrossRepository } : {}),
     ...(sourceProjectPath ? { headRepositoryNameWithOwner: sourceProjectPath } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),

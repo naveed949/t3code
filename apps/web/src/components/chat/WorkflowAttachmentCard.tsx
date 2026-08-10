@@ -4,6 +4,7 @@ import type {
   WorkflowAttachment,
   WorkflowAttachmentHint,
   WorkflowPrdDocument,
+  WorkflowPublicationAction,
   WorkflowRunConfiguration,
   WorkflowRunRequiredSkill,
 } from "@t3tools/contracts";
@@ -31,6 +32,9 @@ export function WorkflowAttachmentCard(props: {
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
@@ -291,6 +295,17 @@ export function WorkflowAttachmentCard(props: {
             {...(props.onConfirmBaselineRefresh
               ? { onConfirm: props.onConfirmBaselineRefresh }
               : {})}
+          />
+        ) : null}
+        {props.attachment.workflowRun &&
+        (props.onPreflightPublication ||
+          props.onConfirmPublication ||
+          props.onReconcilePublication) ? (
+          <WorkflowPublicationControls
+            attachment={props.attachment}
+            {...(props.onPreflightPublication ? { onPreflight: props.onPreflightPublication } : {})}
+            {...(props.onConfirmPublication ? { onConfirm: props.onConfirmPublication } : {})}
+            {...(props.onReconcilePublication ? { onReconcile: props.onReconcilePublication } : {})}
           />
         ) : null}
       </section>
@@ -672,6 +687,134 @@ export function BaselineRefreshControls(props: {
         <p className="text-[11px] text-muted-foreground">
           Baseline refreshed at {refresh.currentCommit ?? "the confirmed source"}.
         </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function WorkflowPublicationControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly onPreflight?: () => void;
+  readonly onConfirm?: () => void;
+  readonly onReconcile?: () => void;
+}) {
+  const publication = props.attachment.publication;
+  const action = (id: WorkflowPublicationAction["id"]) =>
+    publication?.allowedActions?.find((candidate) => candidate.id === id);
+  const statusLabel = publication?.status.replaceAll("-", " ") ?? "not requested";
+  const canPreflight =
+    props.onPreflight !== undefined &&
+    (publication === undefined || action("preflight")?.enabled === true);
+  const canConfirm = action("confirm")?.enabled === true && props.onConfirm !== undefined;
+  const canReconcile = action("reconcile")?.enabled === true && props.onReconcile !== undefined;
+  return (
+    <div
+      className="mt-3 space-y-2 rounded-md border border-fuchsia-500/25 bg-fuchsia-500/5 p-2.5 text-xs"
+      aria-label="Workstream Publication"
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="font-semibold text-foreground">Workstream Publication</p>
+          <p className="mt-0.5 text-[11px] capitalize text-muted-foreground">
+            Status: {statusLabel}
+          </p>
+        </div>
+        {canPreflight ? (
+          <button
+            type="button"
+            className="rounded-md border border-border px-2 py-1 text-[11px] font-medium text-foreground"
+            onClick={props.onPreflight}
+          >
+            {publication === undefined ? "Preview publication" : "Refresh preview"}
+          </button>
+        ) : null}
+      </div>
+      {publication ? (
+        <>
+          <dl className="grid gap-0.5 text-[11px] text-muted-foreground">
+            <div>
+              <dt className="inline font-medium">Title:</dt>{" "}
+              <dd className="inline">{publication.title}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium">Remote:</dt>{" "}
+              <dd className="inline">{publication.remoteTarget}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium">Head:</dt>{" "}
+              <dd className="inline">{publication.headBranch}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium">Target:</dt>{" "}
+              <dd className="inline">{publication.targetBranch}</dd>
+            </div>
+            <div>
+              <dt className="inline font-medium">Authority:</dt>{" "}
+              <dd className="inline">
+                {publication.authorityGranted
+                  ? "push baseline + create draft pull request granted"
+                  : "read-only preview"}
+              </dd>
+            </div>
+          </dl>
+          {publication.commits.length > 0 ? (
+            <ul className="space-y-0.5 text-[11px] text-muted-foreground">
+              {publication.commits.slice(0, 5).map((commit) => (
+                <li key={commit.sha}>
+                  <code>{commit.sha.slice(0, 8)}</code> {commit.title || "Untitled commit"}
+                </li>
+              ))}
+              {publication.commits.length > 5 ? (
+                <li>…and {publication.commits.length - 5} more commits.</li>
+              ) : null}
+            </ul>
+          ) : null}
+          <details className="rounded border border-border/60 bg-background/50 p-2">
+            <summary className="cursor-pointer text-[11px] font-medium">Pull request body</summary>
+            <pre className="mt-2 whitespace-pre-wrap text-[11px] text-muted-foreground">
+              {publication.body}
+            </pre>
+          </details>
+          {publication.changeRequest ? (
+            <div className="space-y-0.5 text-[11px] text-muted-foreground">
+              <a
+                className="font-medium text-primary underline"
+                href={publication.changeRequest.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Pull request #{publication.changeRequest.number} ({publication.changeRequest.state})
+              </a>
+              <p>
+                Checks: {publication.changeRequest.checksState ?? "unavailable"}; Reviews:{" "}
+                {publication.changeRequest.reviewState ?? "unavailable"}
+              </p>
+            </div>
+          ) : null}
+          {publication.failure ? (
+            <p role="alert" className="text-[11px] text-destructive">
+              {publication.failure}
+            </p>
+          ) : null}
+          {canConfirm ? (
+            <button
+              type="button"
+              className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground"
+              onClick={props.onConfirm}
+            >
+              Publish draft pull request
+            </button>
+          ) : null}
+          {canReconcile ? (
+            <button
+              type="button"
+              className="ml-2 rounded-md border border-border px-2 py-1 font-medium text-foreground"
+              onClick={props.onReconcile}
+            >
+              Reconcile publication
+            </button>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

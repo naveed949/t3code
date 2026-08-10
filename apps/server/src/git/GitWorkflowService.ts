@@ -46,6 +46,14 @@ export interface GitBaselineRefreshPreview {
   }>;
 }
 
+export interface GitPublicationPreview {
+  readonly baselineCommit: string;
+  readonly commits: ReadonlyArray<{
+    readonly sha: string;
+    readonly title: string;
+  }>;
+}
+
 export interface GitDiffSummary {
   readonly files: ReadonlyArray<{
     readonly path: string;
@@ -127,6 +135,17 @@ export class GitWorkflowService extends Context.Service<
       readonly remoteTarget: string;
       readonly expectedSourceCommit: string;
     }) => Effect.Effect<{ readonly commitSha: string }, GitCommandError>;
+    readonly previewPublication: (input: {
+      readonly cwd: string;
+      readonly baselineBranch: string;
+      readonly fixedPoint: string;
+      readonly remoteTarget: string;
+    }) => Effect.Effect<GitPublicationPreview, GitCommandError>;
+    readonly pushCurrentBranch: (input: {
+      readonly cwd: string;
+      readonly branch: string;
+      readonly remoteName: string;
+    }) => Effect.Effect<GitVcsDriver.GitPushResult, GitCommandError>;
     readonly diffFromFixedPoint: (input: {
       readonly cwd: string;
       readonly fixedPoint: string;
@@ -202,12 +221,15 @@ function commandFailure(input: {
   });
 }
 
-function parseRefreshCommits(stdout: string): ReadonlyArray<{ sha: string; title: string }> {
-  return stdout
+function parseRefreshCommits(
+  stdout: string,
+  limit: number | undefined = 256,
+): ReadonlyArray<{ sha: string; title: string }> {
+  const lines = stdout
     .split("\n")
     .map((line) => line.trimEnd())
-    .filter((line) => line.length > 0)
-    .slice(0, 256)
+    .filter((line) => line.length > 0);
+  return (limit === undefined ? lines : lines.slice(0, limit))
     .map((line) => {
       const [sha, ...title] = line.split("\t");
       return { sha: sha ?? "", title: title.join("\t") };
@@ -597,6 +619,88 @@ export const make = Effect.gen(function* () {
     return { commitSha };
   });
 
+  const previewPublication = Effect.fn("GitWorkflowService.previewPublication")(function* (input: {
+    readonly cwd: string;
+    readonly baselineBranch: string;
+    readonly fixedPoint: string;
+    readonly remoteTarget: string;
+  }) {
+    yield* ensureGitCommand("GitWorkflowService.previewPublication", input.cwd);
+    const currentBranch = yield* git.execute({
+      operation: "GitWorkflowService.previewPublication.current-branch",
+      cwd: input.cwd,
+      args: ["symbolic-ref", "--quiet", "--short", "HEAD"],
+    });
+    if (currentBranch.stdout.trim() !== input.baselineBranch) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.previewPublication",
+        command: "symbolic-ref",
+        cwd: input.cwd,
+        detail: `Publication requires ${input.baselineBranch} to be checked out; found ${currentBranch.stdout.trim() || "detached HEAD"}.`,
+      });
+    }
+    const status = yield* git.execute({
+      operation: "GitWorkflowService.previewPublication.clean-check",
+      cwd: input.cwd,
+      args: ["status", "--porcelain"],
+    });
+    if (status.stdout.trim().length > 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.previewPublication",
+        command: "status",
+        cwd: input.cwd,
+        detail: "Publication requires a clean Workstream Baseline working tree.",
+      });
+    }
+    yield* git.execute({
+      operation: "GitWorkflowService.previewPublication.diff-check",
+      cwd: input.cwd,
+      args: ["diff", "--check", `${input.fixedPoint}..${input.baselineBranch}`],
+    });
+    const baseline = yield* git.execute({
+      operation: "GitWorkflowService.previewPublication.baseline-commit",
+      cwd: input.cwd,
+      args: ["rev-parse", input.baselineBranch],
+    });
+    const commits = yield* git.execute({
+      operation: "GitWorkflowService.previewPublication.commits",
+      cwd: input.cwd,
+      args: ["log", "--format=%H%x09%s", `${input.fixedPoint}..${input.baselineBranch}`],
+    });
+    if (commits.stdoutTruncated) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.previewPublication",
+        command: "log",
+        cwd: input.cwd,
+        detail: "The Workstream Baseline commit preview was truncated; publication was blocked.",
+      });
+    }
+    const baselineCommit = baseline.stdout.trim();
+    if (baselineCommit.length === 0) {
+      return yield* new GitCommandError({
+        operation: "GitWorkflowService.previewPublication",
+        command: "rev-parse",
+        cwd: input.cwd,
+        detail: `The Workstream Baseline ${input.baselineBranch} did not resolve to a commit.`,
+      });
+    }
+    return {
+      baselineCommit,
+      commits: parseRefreshCommits(commits.stdout, undefined),
+    } satisfies GitPublicationPreview;
+  });
+
+  const pushCurrentBranch = Effect.fn("GitWorkflowService.pushCurrentBranch")(function* (input: {
+    readonly cwd: string;
+    readonly branch: string;
+    readonly remoteName: string;
+  }) {
+    yield* ensureGitCommand("GitWorkflowService.pushCurrentBranch", input.cwd);
+    return yield* git.pushCurrentBranch(input.cwd, input.branch, {
+      remoteName: input.remoteName,
+    });
+  });
+
   const diffFromFixedPoint = Effect.fn("GitWorkflowService.diffFromFixedPoint")(function* (input: {
     readonly cwd: string;
     readonly fixedPoint: string;
@@ -700,6 +804,8 @@ export const make = Effect.gen(function* () {
     abortIntegrationMerge,
     previewBaselineRefresh,
     refreshBaseline,
+    previewPublication,
+    pushCurrentBranch,
     diffFromFixedPoint,
     validateIntegration,
     renameBranch: (input) =>

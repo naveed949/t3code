@@ -27,6 +27,7 @@ function makeLayer(input: {
 
 function makeGitIntegrationLayer(input: {
   readonly execute: GitVcsDriver.GitVcsDriver["Service"]["execute"];
+  readonly pushCurrentBranch?: GitVcsDriver.GitVcsDriver["Service"]["pushCurrentBranch"];
 }) {
   const repository = {} as VcsRepositoryIdentity;
   const handle = {
@@ -41,12 +42,126 @@ function makeGitIntegrationLayer(input: {
         resolve: () => Effect.succeed(handle),
       }),
     ),
-    Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({ execute: input.execute })),
+    Layer.provide(
+      Layer.mock(GitVcsDriver.GitVcsDriver)({
+        execute: input.execute,
+        ...(input.pushCurrentBranch === undefined
+          ? {}
+          : { pushCurrentBranch: input.pushCurrentBranch }),
+      }),
+    ),
     Layer.provide(Layer.mock(GitManager.GitManager)({})),
   );
 }
 
 describe("GitWorkflowService", () => {
+  it.effect("previews the exact baseline range and routes confirmed push authority", () => {
+    const commands: string[][] = [];
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.sync(() => {
+        commands.push([...input.args]);
+        const stdout =
+          input.args[0] === "symbolic-ref"
+            ? "feature/development-workflow\n"
+            : input.args[0] === "rev-parse"
+              ? "baseline-publication-sha\n"
+              : input.args[0] === "log"
+                ? "ticket-44-sha\tPublish draft Workstream PR\n"
+                : "";
+        return {
+          exitCode: ChildProcessSpawner.ExitCode(0),
+          stdout,
+          stderr: "",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        };
+      });
+    const pushCurrentBranch: GitVcsDriver.GitVcsDriver["Service"]["pushCurrentBranch"] = (
+      cwd,
+      fallbackBranch,
+      options,
+    ) =>
+      Effect.succeed({
+        status: "pushed" as const,
+        branch: fallbackBranch ?? "feature/development-workflow",
+        upstreamBranch: `${options?.remoteName ?? "origin"}/feature/development-workflow`,
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const preview = yield* workflow.previewPublication({
+        cwd: "/repo",
+        baselineBranch: "feature/development-workflow",
+        fixedPoint: "fixed-point-sha",
+        remoteTarget: "origin/feature/development-workflow",
+      });
+      const pushed = yield* workflow.pushCurrentBranch({
+        cwd: "/repo",
+        branch: "feature/development-workflow",
+        remoteName: "origin",
+      });
+
+      expect(preview).toEqual({
+        baselineCommit: "baseline-publication-sha",
+        commits: [{ sha: "ticket-44-sha", title: "Publish draft Workstream PR" }],
+      });
+      expect(pushed).toEqual({
+        status: "pushed",
+        branch: "feature/development-workflow",
+        upstreamBranch: "origin/feature/development-workflow",
+      });
+      expect(commands).toEqual([
+        ["symbolic-ref", "--quiet", "--short", "HEAD"],
+        ["status", "--porcelain"],
+        ["diff", "--check", "fixed-point-sha..feature/development-workflow"],
+        ["rev-parse", "feature/development-workflow"],
+        ["log", "--format=%H%x09%s", "fixed-point-sha..feature/development-workflow"],
+      ]);
+    }).pipe(
+      Effect.provide(
+        makeGitIntegrationLayer({
+          execute,
+          pushCurrentBranch,
+        }),
+      ),
+    );
+  });
+
+  it.effect("blocks publication when Git truncates the complete commit receipt", () => {
+    const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>
+      Effect.succeed({
+        exitCode: ChildProcessSpawner.ExitCode(0),
+        stdout:
+          input.args[0] === "symbolic-ref"
+            ? "feature/development-workflow\n"
+            : input.args[0] === "rev-parse"
+              ? "baseline-publication-sha\n"
+              : input.args[0] === "log"
+                ? "ticket-44-sha\tPublish draft Workstream PR\n"
+                : "",
+        stderr: "",
+        stdoutTruncated: input.args[0] === "log",
+        stderrTruncated: false,
+      });
+
+    return Effect.gen(function* () {
+      const workflow = yield* GitWorkflowService.GitWorkflowService;
+      const error = yield* workflow
+        .previewPublication({
+          cwd: "/repo",
+          baselineBranch: "feature/development-workflow",
+          fixedPoint: "fixed-point-sha",
+          remoteTarget: "origin/feature/development-workflow",
+        })
+        .pipe(Effect.flip);
+
+      expect(error).toMatchObject({
+        _tag: "GitCommandError",
+        detail: "The Workstream Baseline commit preview was truncated; publication was blocked.",
+      });
+    }).pipe(Effect.provide(makeGitIntegrationLayer({ execute })));
+  });
+
   it.effect("merges a reviewed ticket branch into a clean Workstream Baseline", () => {
     const commands: string[][] = [];
     const execute: GitVcsDriver.GitVcsDriver["Service"]["execute"] = (input) =>

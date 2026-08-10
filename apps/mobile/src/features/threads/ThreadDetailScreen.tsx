@@ -129,6 +129,9 @@ export interface ThreadDetailScreenProps {
   ) => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
   readonly showContent?: boolean;
 }
 
@@ -448,6 +451,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                     onConfirmRun={props.onConfirmWorkflowRun}
                     onPreflightBaselineRefresh={props.onPreflightBaselineRefresh}
                     onConfirmBaselineRefresh={props.onConfirmBaselineRefresh}
+                    onPreflightPublication={props.onPreflightPublication}
+                    onConfirmPublication={props.onConfirmPublication}
+                    onReconcilePublication={props.onReconcilePublication}
                   />
                 </Animated.View>
               ) : null}

@@ -62,6 +62,7 @@ import { WayfinderReconciliationReactorLive } from "./orchestration/Layers/Wayfi
 import { WayfinderResearchReactorLive } from "./orchestration/Layers/WayfinderResearchReactor.ts";
 import { TicketBatchPublicationReactorLive } from "./orchestration/Layers/TicketBatchPublicationReactor.ts";
 import { WorkflowTicketImplementationReactorLive } from "./orchestration/Layers/WorkflowTicketImplementationReactor.ts";
+import { WorkflowPublicationReactorLive } from "./orchestration/Layers/WorkflowPublicationReactor.ts";
 import * as IssueTracker from "./nativeSkills/IssueTracker.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
@@ -236,6 +237,7 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(WayfinderResearchReactorLive),
   Layer.provideMerge(TicketBatchPublicationReactorLive),
   Layer.provideMerge(WorkflowTicketImplementationReactorLive),
+  Layer.provideMerge(WorkflowPublicationReactorLive),
   Layer.provideMerge(WayfinderIssueTrackerLayerLive),
   Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),

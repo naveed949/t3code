@@ -47,6 +47,10 @@ import {
   ThreadWorkflowRunAutomationUpdatedPayload,
   ThreadWorkflowBaselineRefreshRequestedPayload,
   ThreadWorkflowBaselineRefreshUpdatedPayload,
+  ThreadWorkflowPublicationPreflightedPayload,
+  ThreadWorkflowPublicationRequestedPayload,
+  ThreadWorkflowPublicationObservationRequestedPayload,
+  ThreadWorkflowPublicationUpdatedPayload,
   ThreadWorkflowArtifactAcknowledgedPayload,
   ThreadWorkflowAttachmentHintDismissedPayload,
   ThreadWorkflowAttachmentHintedPayload,
@@ -1091,6 +1095,70 @@ export function projectEvent(
     case "thread.workflow-baseline-refresh-updated":
       return decodeForEvent(
         ThreadWorkflowBaselineRefreshUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-publication-preflighted":
+      return decodeForEvent(
+        ThreadWorkflowPublicationPreflightedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-publication-requested":
+      return decodeForEvent(
+        ThreadWorkflowPublicationRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-publication-observation-requested":
+      return decodeForEvent(
+        ThreadWorkflowPublicationObservationRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-publication-updated":
+      return decodeForEvent(
+        ThreadWorkflowPublicationUpdatedPayload,
         event.payload,
         event.type,
         "payload",

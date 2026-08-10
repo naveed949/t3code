@@ -138,6 +138,7 @@ it.effect("creates GitLab MRs through provider-neutral input names", () =>
       headSelector: "owner:feature/provider",
       title: "Provider MR",
       bodyFile: "/tmp/body.md",
+      draft: true,
     });
 
     assert.deepStrictEqual(createInput, {
@@ -150,6 +151,7 @@ it.effect("creates GitLab MRs through provider-neutral input names", () =>
       },
       title: "Provider MR",
       bodyFile: "/tmp/body.md",
+      draft: true,
     });
   }),
 );

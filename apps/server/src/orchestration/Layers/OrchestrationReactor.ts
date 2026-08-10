@@ -16,6 +16,7 @@ import { WayfinderReconciliationReactor } from "../Services/WayfinderReconciliat
 import { WayfinderResearchReactor } from "../Services/WayfinderResearchReactor.ts";
 import { TicketBatchPublicationReactor } from "../Services/TicketBatchPublicationReactor.ts";
 import { WorkflowTicketImplementationReactor } from "../Services/WorkflowTicketImplementationReactor.ts";
+import { WorkflowPublicationReactor } from "../Services/WorkflowPublicationReactor.ts";
 import * as AgentAwarenessRelay from "../../relay/AgentAwarenessRelay.ts";
 
 export const makeOrchestrationReactor = Effect.gen(function* () {
@@ -31,6 +32,7 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
   const workflowTicketImplementationReactor = yield* Effect.serviceOption(
     WorkflowTicketImplementationReactor,
   );
+  const workflowPublicationReactor = yield* Effect.serviceOption(WorkflowPublicationReactor);
   const agentAwarenessRelay = yield* AgentAwarenessRelay.AgentAwarenessRelay;
 
   const start: OrchestrationReactorShape["start"] = Effect.fn("start")(function* () {
@@ -47,6 +49,9 @@ export const makeOrchestrationReactor = Effect.gen(function* () {
     }
     if (Option.isSome(workflowTicketImplementationReactor)) {
       yield* workflowTicketImplementationReactor.value.start();
+    }
+    if (Option.isSome(workflowPublicationReactor)) {
+      yield* workflowPublicationReactor.value.start();
     }
     yield* agentAwarenessRelay.start();
   });

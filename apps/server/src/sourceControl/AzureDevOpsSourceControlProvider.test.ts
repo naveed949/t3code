@@ -104,6 +104,7 @@ it.effect("creates Azure DevOps PRs through provider-neutral input names", () =>
       headSelector: "feature/provider",
       title: "Provider PR",
       bodyFile: "/tmp/body.md",
+      draft: true,
     });
 
     assert.deepStrictEqual(createInput, {
@@ -112,6 +113,7 @@ it.effect("creates Azure DevOps PRs through provider-neutral input names", () =>
       headSelector: "feature/provider",
       title: "Provider PR",
       bodyFile: "/tmp/body.md",
+      draft: true,
     });
   }),
 );

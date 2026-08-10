@@ -464,6 +464,7 @@ it.effect("creates pull requests using the official REST payload shape", () => {
       headSelector: "owner:feature/provider",
       title: "Provider PR",
       bodyFile,
+      draft: true,
     });
 
     const request = execute.mock.calls[0]?.[0];
@@ -479,6 +480,7 @@ it.effect("creates pull requests using the official REST payload shape", () => {
     assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(rawBody)), {
       title: "Provider PR",
       description: "PR body",
+      draft: true,
       source: {
         branch: { name: "feature/provider" },
         repository: { full_name: "owner/t3code" },

@@ -247,6 +247,18 @@ function ThreadRouteContent(
     threadEnvironment.confirmBaselineRefresh,
     "confirm Baseline Refresh",
   );
+  const preflightPublicationCommand = useAtomCommand(
+    threadEnvironment.preflightPublication,
+    "preflight Workstream Publication",
+  );
+  const confirmPublicationCommand = useAtomCommand(
+    threadEnvironment.confirmPublication,
+    "confirm Workstream Publication",
+  );
+  const reconcilePublicationCommand = useAtomCommand(
+    threadEnvironment.reconcilePublication,
+    "reconcile Workstream Publication",
+  );
   const completeWorkflowSpecificationCommand = useAtomCommand(
     threadEnvironment.completeWorkflowSpecification,
     "complete Workflow Specification",
@@ -782,6 +794,40 @@ function ThreadRouteContent(
     },
     [confirmBaselineRefreshCommand, selectedThread],
   );
+  const preflightPublication = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void preflightPublicationCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightPublicationCommand, selectedThread]);
+  const confirmPublication = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void confirmPublicationCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [confirmPublicationCommand, selectedThread]);
+  const reconcilePublication = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void reconcilePublicationCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [reconcilePublicationCommand, selectedThread]);
   const completeWorkflowSpecification = useCallback(
     (prd: WorkflowPrdDocument) => {
       if (!selectedThread) return;
@@ -1116,6 +1162,9 @@ function ThreadRouteContent(
           onConfirmWorkflowRun={confirmWorkflowRun}
           onPreflightBaselineRefresh={preflightBaselineRefresh}
           onConfirmBaselineRefresh={confirmBaselineRefresh}
+          onPreflightPublication={preflightPublication}
+          onConfirmPublication={confirmPublication}
+          onReconcilePublication={reconcilePublication}
           {...(wayfinderMap ? { onOpenWorkflow: openWayfinderWorkbench } : {})}
         />
       </View>

@@ -145,6 +145,23 @@ export const WorkflowBaselineRefreshProgressReceipt = Schema.Struct({
 export type WorkflowBaselineRefreshProgressReceipt =
   typeof WorkflowBaselineRefreshProgressReceipt.Type;
 
+export const WorkflowPublicationProgressReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.publication.progress"),
+  threadId: ThreadId,
+  status: Schema.Literals([
+    "previewing",
+    "blocked",
+    "ready",
+    "publishing",
+    "published-for-review",
+    "needs-recovery",
+    "merged",
+  ]),
+  createdAt: IsoDateTime,
+  message: Schema.NullOr(Schema.String),
+});
+export type WorkflowPublicationProgressReceipt = typeof WorkflowPublicationProgressReceipt.Type;
+
 export const WorkflowTicketFrontierScheduledReceipt = Schema.Struct({
   type: Schema.Literal("workflow.ticket-frontier.scheduled"),
   workstreamId: WorkstreamId,
@@ -176,6 +193,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WorkflowTicketBatchPublicationProgressReceipt,
   WorkflowTicketImplementationProgressReceipt,
   WorkflowBaselineRefreshProgressReceipt,
+  WorkflowPublicationProgressReceipt,
   WorkflowTicketFrontierScheduledReceipt,
   WorkflowTicketFrontierDispatchFailedReceipt,
 ]);

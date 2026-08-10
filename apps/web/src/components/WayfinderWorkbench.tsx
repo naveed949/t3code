@@ -580,6 +580,9 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [workflowWorkspaceOpen, setWorkflowWorkspaceOpen] = useState(false);
@@ -781,6 +784,15 @@ export const WayfinderWorkbench = memo(function WayfinderWorkbench(props: {
             : {})}
           {...(props.onConfirmBaselineRefresh
             ? { onConfirmBaselineRefresh: props.onConfirmBaselineRefresh }
+            : {})}
+          {...(props.onPreflightPublication
+            ? { onPreflightPublication: props.onPreflightPublication }
+            : {})}
+          {...(props.onConfirmPublication
+            ? { onConfirmPublication: props.onConfirmPublication }
+            : {})}
+          {...(props.onReconcilePublication
+            ? { onReconcilePublication: props.onReconcilePublication }
             : {})}
         />
 

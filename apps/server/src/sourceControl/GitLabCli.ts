@@ -231,6 +231,8 @@ export interface GitLabMergeRequestSummary {
   readonly headRefName: string;
   readonly state?: "open" | "closed" | "merged";
   readonly updatedAt?: Option.Option<DateTime.Utc>;
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
@@ -283,6 +285,7 @@ export class GitLabCli extends Context.Service<
       readonly target?: SourceControlProvider.SourceControlRefSelector;
       readonly title: string;
       readonly bodyFile: string;
+      readonly draft?: boolean;
     }) => Effect.Effect<void, GitLabCliError>;
 
     readonly getDefaultBranch: (input: {
@@ -598,6 +601,7 @@ export const make = Effect.gen(function* () {
           ...(sourceProject ? ["--raw-field", `source_project_id=${sourceProject}`] : []),
           "--raw-field",
           `title=${input.title}`,
+          ...(input.draft === true ? ["--raw-field", "draft=true"] : []),
           "--field",
           `description=@${input.bodyFile}`,
         ],

@@ -12,7 +12,10 @@ import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { BaselineRefreshControls } from "../threads/WorkflowAttachmentCard";
+import {
+  BaselineRefreshControls,
+  WorkflowPublicationControls,
+} from "../threads/WorkflowAttachmentCard";
 
 function WorkflowNodeInspector(props: {
   readonly node: WayfinderWorkflowOutlineNode;
@@ -312,6 +315,9 @@ export function WorkflowPanel(props: {
   readonly workflowAttachment?: WorkflowAttachment | null;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const selectedNode = props.model.outline.find((node) => node.id === selectedNodeId) ?? null;
@@ -344,6 +350,18 @@ export function WorkflowPanel(props: {
           attachment={props.workflowAttachment}
           onPreflight={props.onPreflightBaselineRefresh}
           {...(props.onConfirmBaselineRefresh ? { onConfirm: props.onConfirmBaselineRefresh } : {})}
+        />
+      ) : null}
+
+      {props.workflowAttachment?.workflowRun &&
+      (props.onPreflightPublication ||
+        props.onConfirmPublication ||
+        props.onReconcilePublication) ? (
+        <WorkflowPublicationControls
+          attachment={props.workflowAttachment}
+          {...(props.onPreflightPublication ? { onPreflight: props.onPreflightPublication } : {})}
+          {...(props.onConfirmPublication ? { onConfirm: props.onConfirmPublication } : {})}
+          {...(props.onReconcilePublication ? { onReconcile: props.onReconcilePublication } : {})}
         />
       ) : null}
 
