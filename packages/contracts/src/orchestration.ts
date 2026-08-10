@@ -979,6 +979,57 @@ export const WorkflowPublication = Schema.Struct({
 });
 export type WorkflowPublication = typeof WorkflowPublication.Type;
 
+export const WorkflowCleanupResourceKind = Schema.Literals(["worktree", "branch", "disposable"]);
+export type WorkflowCleanupResourceKind = typeof WorkflowCleanupResourceKind.Type;
+
+export const WorkflowCleanupResourceStatus = Schema.Literals([
+  "eligible",
+  "blocked",
+  "retained",
+  "removed",
+]);
+export type WorkflowCleanupResourceStatus = typeof WorkflowCleanupResourceStatus.Type;
+
+export const WorkflowCleanupResource = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  kind: WorkflowCleanupResourceKind,
+  path: Schema.NullOr(TrimmedNonEmptyString),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  owned: Schema.Boolean,
+  status: WorkflowCleanupResourceStatus,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type WorkflowCleanupResource = typeof WorkflowCleanupResource.Type;
+
+export const WorkflowCleanupStatus = Schema.Literals([
+  "previewing",
+  "blocked",
+  "ready",
+  "cleaning",
+  "completed",
+  "needs-recovery",
+]);
+export type WorkflowCleanupStatus = typeof WorkflowCleanupStatus.Type;
+
+export const WorkflowCleanupAction = Schema.Struct({
+  id: Schema.Literals(["preflight", "confirm"]),
+  label: TrimmedNonEmptyString,
+  enabled: Schema.Boolean,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type WorkflowCleanupAction = typeof WorkflowCleanupAction.Type;
+
+export const WorkflowCleanup = Schema.Struct({
+  status: WorkflowCleanupStatus,
+  resources: Schema.Array(WorkflowCleanupResource),
+  blockers: Schema.Array(TrimmedNonEmptyString),
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  allowedActions: Schema.optional(Schema.Array(WorkflowCleanupAction)),
+  requestedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowCleanup = typeof WorkflowCleanup.Type;
+
 export const WorkflowDiffEvidenceFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   additions: NonNegativeInt,
@@ -1060,6 +1111,10 @@ export const WorkflowTicketImplementation = Schema.Struct({
   implementationThreadId: Schema.NullOr(ThreadId),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   branch: Schema.NullOr(TrimmedNonEmptyString),
+  // Cleanup is allowed to remove only resources this Workstream created.
+  // Older implementations omit these flags and therefore remain retained.
+  worktreeOwned: Schema.optional(Schema.Boolean),
+  branchOwned: Schema.optional(Schema.Boolean),
   fixedPoint: TrimmedNonEmptyString,
   acceptanceCriteria: WorkflowTicketImplementationAcceptanceCriteria,
   providerInstanceId: ProviderInstanceId,
@@ -1194,6 +1249,11 @@ export const WorkflowAttachment = Schema.Struct({
   ticketImplementations: Schema.optional(Schema.Array(WorkflowTicketImplementation)),
   baselineRefresh: Schema.optional(WorkflowBaselineRefresh),
   publication: Schema.optional(WorkflowPublication),
+  // Workstream lifecycle is separate from the linked Origin Thread lifecycle.
+  // Optional fields keep attachments written before archival readable.
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  archiveRequestedAt: Schema.optional(IsoDateTime),
+  workflowCleanup: Schema.optional(WorkflowCleanup),
   // The optimistic command version is optional for attachments written before
   // the Specification stage existed; those attachments start at version 0.
   workflowVersion: Schema.optional(NonNegativeInt),
@@ -1851,6 +1911,41 @@ const ThreadWorkflowAttachCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowArchiveCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.archive"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowReopenCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.reopen"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowCleanupPreflightCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.cleanup.preflight"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowCleanupConfirmCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.cleanup.confirm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowRunPreflightCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.run.preflight"),
   commandId: CommandId,
@@ -2107,6 +2202,10 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowArchiveCommand,
+  ThreadWorkflowReopenCommand,
+  ThreadWorkflowCleanupPreflightCommand,
+  ThreadWorkflowCleanupConfirmCommand,
   ThreadWorkflowRunPreflightCommand,
   ThreadWorkflowRunConfirmCommand,
   ThreadWorkflowRunStartCommand,
@@ -2159,6 +2258,10 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWayfinderResearchCommand,
   ThreadWorkflowAttachmentHintDismissCommand,
   ThreadWorkflowAttachCommand,
+  ThreadWorkflowArchiveCommand,
+  ThreadWorkflowReopenCommand,
+  ThreadWorkflowCleanupPreflightCommand,
+  ThreadWorkflowCleanupConfirmCommand,
   ThreadWorkflowRunPreflightCommand,
   ThreadWorkflowRunConfirmCommand,
   ThreadWorkflowRunStartCommand,
@@ -2299,6 +2402,15 @@ const ThreadWorkflowRunDrainCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowCleanupUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.cleanup.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  cleanup: WorkflowCleanup,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowBaselineRefreshUpdateCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.baseline-refresh.update"),
   commandId: CommandId,
@@ -2388,6 +2500,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadWayfinderPublicationUpdateCommand,
   ThreadWorkflowTicketingPublicationUpdateCommand,
   ThreadWorkflowRunDrainCompleteCommand,
+  ThreadWorkflowCleanupUpdateCommand,
   ThreadWorkflowBaselineRefreshUpdateCommand,
   ThreadWorkflowPublicationUpdateCommand,
   ThreadWorkflowTicketImplementationUpdateCommand,
@@ -2438,6 +2551,12 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-attachment-hinted",
   "thread.workflow-attachment-hint-dismissed",
   "thread.workflow-attached",
+  "thread.workflow-archive-requested",
+  "thread.workflow-archived",
+  "thread.workflow-reopened",
+  "thread.workflow-cleanup-preflighted",
+  "thread.workflow-cleanup-requested",
+  "thread.workflow-cleanup-updated",
   "thread.workflow-run-preflighted",
   "thread.workflow-run-confirmed",
   "thread.workflow-run-started",
@@ -2721,6 +2840,36 @@ export const ThreadWorkflowAttachmentHintDismissedPayload = Schema.Struct({
 export const ThreadWorkflowAttachedPayload = Schema.Struct({
   threadId: ThreadId,
   hint: WorkflowAttachmentHint,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowArchiveRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowArchivedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowReopenedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowCleanupPreflightedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowCleanupRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowCleanupUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
   attachment: WorkflowAttachment,
 });
 
@@ -3091,6 +3240,36 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-attached"),
     payload: ThreadWorkflowAttachedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-archive-requested"),
+    payload: ThreadWorkflowArchiveRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-archived"),
+    payload: ThreadWorkflowArchivedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-reopened"),
+    payload: ThreadWorkflowReopenedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-cleanup-preflighted"),
+    payload: ThreadWorkflowCleanupPreflightedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-cleanup-requested"),
+    payload: ThreadWorkflowCleanupRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-cleanup-updated"),
+    payload: ThreadWorkflowCleanupUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

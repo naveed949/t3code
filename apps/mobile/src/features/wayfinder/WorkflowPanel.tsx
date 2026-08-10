@@ -313,6 +313,10 @@ export function WorkflowPanel(props: {
   ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
   readonly workflowAttachment?: WorkflowAttachment | null;
+  readonly onArchive?: () => void;
+  readonly onReopen?: () => void;
+  readonly onPreflightCleanup?: () => void;
+  readonly onConfirmCleanup?: () => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
   readonly onPreflightPublication?: () => void;
@@ -320,6 +324,8 @@ export function WorkflowPanel(props: {
   readonly onReconcilePublication?: () => void;
 }) {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [archiveConfirmationArmed, setArchiveConfirmationArmed] = useState(false);
+  const [cleanupConfirmationArmed, setCleanupConfirmationArmed] = useState(false);
   const selectedNode = props.model.outline.find((node) => node.id === selectedNodeId) ?? null;
 
   useEffect(() => {
@@ -344,6 +350,126 @@ export function WorkflowPanel(props: {
           separate.
         </Text>
       </View>
+
+      {props.workflowAttachment ? (
+        <View
+          accessibilityLabel="Workstream lifecycle"
+          className="gap-2 rounded-xl border border-neutral-200/80 bg-white/60 p-3 dark:border-white/8 dark:bg-neutral-950/30"
+        >
+          <View className="gap-2">
+            <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+              Workstream: {props.workflowAttachment.archivedAt ? "Archived (read-only)" : "Active"}
+            </Text>
+            {props.workflowAttachment.archiveRequestedAt ? (
+              <Text className="font-sans text-xs text-amber-700 dark:text-amber-300">
+                Draining before archive…
+              </Text>
+            ) : null}
+            {props.workflowAttachment.archivedAt && props.onReopen ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Reopen Workstream"
+                className="self-start rounded-lg bg-neutral-200 px-3 py-2 dark:bg-neutral-800"
+                onPress={props.onReopen}
+              >
+                <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                  Reopen Workstream
+                </Text>
+              </Pressable>
+            ) : !props.workflowAttachment.archivedAt &&
+              !props.workflowAttachment.archiveRequestedAt &&
+              props.onArchive ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  archiveConfirmationArmed ? "Confirm archive" : "Archive Workstream"
+                }
+                className="self-start rounded-lg bg-neutral-200 px-3 py-2 dark:bg-neutral-800"
+                onPress={() => {
+                  if (!archiveConfirmationArmed) {
+                    setArchiveConfirmationArmed(true);
+                    return;
+                  }
+                  props.onArchive?.();
+                  setArchiveConfirmationArmed(false);
+                }}
+              >
+                <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                  {archiveConfirmationArmed ? "Confirm archive" : "Archive Workstream"}
+                </Text>
+              </Pressable>
+            ) : null}
+          </View>
+          {props.workflowAttachment.archivedAt && props.onPreflightCleanup ? (
+            <View className="gap-2 border-t border-neutral-200 pt-2 dark:border-white/8">
+              <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                Cleanup:{" "}
+                {props.workflowAttachment.workflowCleanup?.status.replaceAll("-", " ") ??
+                  "not previewed"}
+              </Text>
+              {(props.workflowAttachment.workflowCleanup?.blockers.length ?? 0) > 0 ? (
+                <Text className="font-sans text-xs text-amber-700 dark:text-amber-300">
+                  {props.workflowAttachment.workflowCleanup?.blockers.join(" ")}
+                </Text>
+              ) : null}
+              {props.workflowAttachment.workflowCleanup?.resources.map((resource) => (
+                <Text
+                  key={resource.id}
+                  className="font-sans text-xs text-neutral-600 dark:text-neutral-300"
+                >
+                  {resource.kind}: {resource.path ?? resource.branch ?? resource.id} —{" "}
+                  {resource.status}
+                </Text>
+              ))}
+              {!props.workflowAttachment.workflowCleanup ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Preview local cleanup"
+                  className="self-start rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700"
+                  onPress={props.onPreflightCleanup}
+                >
+                  <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                    Preview local cleanup
+                  </Text>
+                </Pressable>
+              ) : props.workflowAttachment.workflowCleanup.status === "ready" &&
+                props.onConfirmCleanup ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    cleanupConfirmationArmed ? "Confirm cleanup" : "Clean up eligible resources"
+                  }
+                  className="self-start rounded-lg bg-neutral-200 px-3 py-2 dark:bg-neutral-800"
+                  onPress={() => {
+                    if (!cleanupConfirmationArmed) {
+                      setCleanupConfirmationArmed(true);
+                      return;
+                    }
+                    props.onConfirmCleanup?.();
+                    setCleanupConfirmationArmed(false);
+                  }}
+                >
+                  <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                    {cleanupConfirmationArmed ? "Confirm cleanup" : "Clean up eligible resources"}
+                  </Text>
+                </Pressable>
+              ) : props.workflowAttachment.workflowCleanup.status === "blocked" ||
+                props.workflowAttachment.workflowCleanup.status === "needs-recovery" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh cleanup preview"
+                  className="self-start rounded-lg border border-neutral-300 px-3 py-2 dark:border-neutral-700"
+                  onPress={props.onPreflightCleanup}
+                >
+                  <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+                    Refresh cleanup preview
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      ) : null}
 
       {props.workflowAttachment?.workflowRun && props.onPreflightBaselineRefresh ? (
         <BaselineRefreshControls

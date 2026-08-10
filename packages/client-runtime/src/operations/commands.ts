@@ -53,6 +53,10 @@ export type ControlWayfinderResearchInput = CommandInput<"thread.wayfinder.resea
 export type DismissWorkflowAttachmentHintInput =
   CommandInput<"thread.workflow-attachment.hint.dismiss">;
 export type AttachWorkflowInput = CommandInput<"thread.workflow.attach">;
+export type ArchiveWorkflowInput = CommandInput<"thread.workflow.archive">;
+export type ReopenWorkflowInput = CommandInput<"thread.workflow.reopen">;
+export type PreflightWorkflowCleanupInput = CommandInput<"thread.workflow.cleanup.preflight">;
+export type ConfirmWorkflowCleanupInput = CommandInput<"thread.workflow.cleanup.confirm">;
 export type PreflightWorkflowRunInput = CommandInput<"thread.workflow.run.preflight">;
 export type ConfirmWorkflowRunInput = CommandInput<"thread.workflow.run.confirm">;
 export type StartWorkflowRunInput = CommandInput<"thread.workflow.run.start">;
@@ -384,6 +388,55 @@ export const attachWorkflow: (input: AttachWorkflowInput) => CommandEffect = Eff
     createdAt: metadata.createdAt,
   });
 });
+
+export const archiveWorkflow: (input: ArchiveWorkflowInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.archiveWorkflow",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.archive",
+    commandId: metadata.commandId,
+    confirmed: true,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const reopenWorkflow: (input: ReopenWorkflowInput) => CommandEffect = Effect.fn(
+  "EnvironmentCommands.reopenWorkflow",
+)(function* (input) {
+  const metadata = yield* timestampedCommandMetadata(input);
+  return yield* dispatch({
+    ...input,
+    type: "thread.workflow.reopen",
+    commandId: metadata.commandId,
+    confirmed: true,
+    createdAt: metadata.createdAt,
+  });
+});
+
+export const preflightWorkflowCleanup: (input: PreflightWorkflowCleanupInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.preflightWorkflowCleanup")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.cleanup.preflight",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const confirmWorkflowCleanup: (input: ConfirmWorkflowCleanupInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.confirmWorkflowCleanup")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.cleanup.confirm",
+      commandId: metadata.commandId,
+      confirmed: true,
+      createdAt: metadata.createdAt,
+    });
+  });
 
 export const viewWorkflowArtifacts: (input: ViewWorkflowArtifactsInput) => CommandEffect =
   Effect.fn("EnvironmentCommands.viewWorkflowArtifacts")(function* (input) {

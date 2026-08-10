@@ -25,6 +25,7 @@ import {
   WayfinderResearchTicketStatus,
   WorkstreamId,
   type WorkflowBaselineRefreshStatus,
+  type WorkflowCleanupStatus,
   WorkflowTicketImplementationStatus,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
@@ -145,6 +146,22 @@ export const WorkflowBaselineRefreshProgressReceipt = Schema.Struct({
 export type WorkflowBaselineRefreshProgressReceipt =
   typeof WorkflowBaselineRefreshProgressReceipt.Type;
 
+export const WorkflowCleanupProgressReceipt = Schema.Struct({
+  type: Schema.Literal("workflow.cleanup.progress"),
+  threadId: ThreadId,
+  status: Schema.Literals([
+    "previewing",
+    "blocked",
+    "ready",
+    "cleaning",
+    "completed",
+    "needs-recovery",
+  ] satisfies ReadonlyArray<WorkflowCleanupStatus>),
+  createdAt: IsoDateTime,
+  message: Schema.NullOr(Schema.String),
+});
+export type WorkflowCleanupProgressReceipt = typeof WorkflowCleanupProgressReceipt.Type;
+
 export const WorkflowPublicationProgressReceipt = Schema.Struct({
   type: Schema.Literal("workflow.publication.progress"),
   threadId: ThreadId,
@@ -193,6 +210,7 @@ export const OrchestrationRuntimeReceipt = Schema.Union([
   WorkflowTicketBatchPublicationProgressReceipt,
   WorkflowTicketImplementationProgressReceipt,
   WorkflowBaselineRefreshProgressReceipt,
+  WorkflowCleanupProgressReceipt,
   WorkflowPublicationProgressReceipt,
   WorkflowTicketFrontierScheduledReceipt,
   WorkflowTicketFrontierDispatchFailedReceipt,
