@@ -26,6 +26,7 @@ import {
 } from "./baseSchemas.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
 import { UserInputQuestion } from "./providerRuntime.ts";
+import { ChangeRequest } from "./sourceControl.ts";
 import {
   OptionalWayfinderDraft,
   OptionalWayfinderMutation,
@@ -925,6 +926,59 @@ export const WorkflowBaselineRefresh = Schema.Struct({
 });
 export type WorkflowBaselineRefresh = typeof WorkflowBaselineRefresh.Type;
 
+export const WorkflowPublicationAuthority = Schema.Struct({
+  pushBaseline: Schema.Boolean,
+  createDraftPullRequest: Schema.Boolean,
+});
+export type WorkflowPublicationAuthority = typeof WorkflowPublicationAuthority.Type;
+
+export const WorkflowPublicationStatus = Schema.Literals([
+  "previewing",
+  "blocked",
+  "ready",
+  "publishing",
+  "published-for-review",
+  "needs-recovery",
+  "merged",
+]);
+export type WorkflowPublicationStatus = typeof WorkflowPublicationStatus.Type;
+
+export const WorkflowPublicationAction = Schema.Struct({
+  id: Schema.Literals(["preflight", "confirm", "reconcile"]),
+  label: TrimmedNonEmptyString,
+  enabled: Schema.Boolean,
+  reason: Schema.NullOr(TrimmedNonEmptyString),
+});
+export type WorkflowPublicationAction = typeof WorkflowPublicationAction.Type;
+
+export const WorkflowPublicationCommit = Schema.Struct({
+  sha: TrimmedNonEmptyString,
+  title: TrimmedString,
+});
+export type WorkflowPublicationCommit = typeof WorkflowPublicationCommit.Type;
+
+export const WorkflowPublication = Schema.Struct({
+  status: WorkflowPublicationStatus,
+  remoteTarget: TrimmedNonEmptyString,
+  remote: TrimmedNonEmptyString,
+  headBranch: TrimmedNonEmptyString,
+  targetBranch: TrimmedNonEmptyString,
+  baselineCommit: Schema.NullOr(TrimmedNonEmptyString),
+  commits: Schema.Array(WorkflowPublicationCommit),
+  title: TrimmedNonEmptyString,
+  body: TrimmedNonEmptyString,
+  authority: WorkflowPublicationAuthority,
+  authorityGranted: Schema.Boolean,
+  changeRequest: Schema.optional(ChangeRequest),
+  trackerState: Schema.optional(WayfinderTicketState),
+  observedAt: Schema.optional(IsoDateTime),
+  failure: Schema.NullOr(TrimmedNonEmptyString),
+  allowedActions: Schema.optional(Schema.Array(WorkflowPublicationAction)),
+  requestedAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type WorkflowPublication = typeof WorkflowPublication.Type;
+
 export const WorkflowDiffEvidenceFile = Schema.Struct({
   path: TrimmedNonEmptyString,
   additions: NonNegativeInt,
@@ -1139,6 +1193,7 @@ export const WorkflowAttachment = Schema.Struct({
   trackerProjection: Schema.optional(WorkflowTrackerProjection),
   ticketImplementations: Schema.optional(Schema.Array(WorkflowTicketImplementation)),
   baselineRefresh: Schema.optional(WorkflowBaselineRefresh),
+  publication: Schema.optional(WorkflowPublication),
   // The optimistic command version is optional for attachments written before
   // the Specification stage existed; those attachments start at version 0.
   workflowVersion: Schema.optional(NonNegativeInt),
@@ -1859,6 +1914,31 @@ const ThreadWorkflowBaselineRefreshConfirmCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowPublicationPreflightCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.publication.preflight"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowPublicationConfirmCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.publication.confirm"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  confirmed: Schema.Literal(true),
+  createdAt: IsoDateTime,
+});
+
+const ThreadWorkflowPublicationReconcileCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.publication.reconcile"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowNodeHoldCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.node.hold"),
   commandId: CommandId,
@@ -2034,6 +2114,9 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowRunResumeCommand,
   ThreadWorkflowBaselineRefreshPreflightCommand,
   ThreadWorkflowBaselineRefreshConfirmCommand,
+  ThreadWorkflowPublicationPreflightCommand,
+  ThreadWorkflowPublicationConfirmCommand,
+  ThreadWorkflowPublicationReconcileCommand,
   ThreadWorkflowNodeHoldCommand,
   ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
@@ -2083,6 +2166,9 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadWorkflowRunResumeCommand,
   ThreadWorkflowBaselineRefreshPreflightCommand,
   ThreadWorkflowBaselineRefreshConfirmCommand,
+  ThreadWorkflowPublicationPreflightCommand,
+  ThreadWorkflowPublicationConfirmCommand,
+  ThreadWorkflowPublicationReconcileCommand,
   ThreadWorkflowNodeHoldCommand,
   ThreadWorkflowNodeReleaseCommand,
   ThreadWorkflowArtifactsViewCommand,
@@ -2223,6 +2309,15 @@ const ThreadWorkflowBaselineRefreshUpdateCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadWorkflowPublicationUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.workflow.publication.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  publication: WorkflowPublication,
+  expectedWorkstreamVersion: NonNegativeInt,
+  createdAt: IsoDateTime,
+});
+
 const ThreadWorkflowTicketImplementationReviewRecordCommand = Schema.Struct({
   type: Schema.Literal("thread.workflow.ticket-implementation.review.record"),
   commandId: CommandId,
@@ -2294,6 +2389,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadWorkflowTicketingPublicationUpdateCommand,
   ThreadWorkflowRunDrainCompleteCommand,
   ThreadWorkflowBaselineRefreshUpdateCommand,
+  ThreadWorkflowPublicationUpdateCommand,
   ThreadWorkflowTicketImplementationUpdateCommand,
   ThreadWorkflowTicketImplementationCheckpointCommand,
   ThreadWorkflowTicketImplementationReviewRecordCommand,
@@ -2350,6 +2446,10 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.workflow-run-resumed",
   "thread.workflow-baseline-refresh-requested",
   "thread.workflow-baseline-refresh-updated",
+  "thread.workflow-publication-preflighted",
+  "thread.workflow-publication-requested",
+  "thread.workflow-publication-observation-requested",
+  "thread.workflow-publication-updated",
   "thread.workflow-node-held",
   "thread.workflow-node-released",
   "thread.workflow-synchronized",
@@ -2645,6 +2745,26 @@ export const ThreadWorkflowBaselineRefreshRequestedPayload = Schema.Struct({
 });
 
 export const ThreadWorkflowBaselineRefreshUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowPublicationPreflightedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowPublicationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowPublicationObservationRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  attachment: WorkflowAttachment,
+});
+
+export const ThreadWorkflowPublicationUpdatedPayload = Schema.Struct({
   threadId: ThreadId,
   attachment: WorkflowAttachment,
 });
@@ -3011,6 +3131,26 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.workflow-baseline-refresh-updated"),
     payload: ThreadWorkflowBaselineRefreshUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-publication-preflighted"),
+    payload: ThreadWorkflowPublicationPreflightedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-publication-requested"),
+    payload: ThreadWorkflowPublicationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-publication-observation-requested"),
+    payload: ThreadWorkflowPublicationObservationRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.workflow-publication-updated"),
+    payload: ThreadWorkflowPublicationUpdatedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

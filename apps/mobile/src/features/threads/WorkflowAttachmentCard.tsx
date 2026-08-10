@@ -31,6 +31,9 @@ export function WorkflowAttachmentCard(props: {
   readonly onConfirmRun?: (configuration: WorkflowRunConfiguration) => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
 }) {
   const [workflowGoal, setWorkflowGoal] = useState("");
   const [originConfirmed, setOriginConfirmed] = useState(false);
@@ -200,6 +203,17 @@ export function WorkflowAttachmentCard(props: {
               </View>
             ) : null}
           </View>
+        ) : null}
+        {props.attachment.workflowRun &&
+        (props.onPreflightPublication ||
+          props.onConfirmPublication ||
+          props.onReconcilePublication) ? (
+          <WorkflowPublicationControls
+            attachment={props.attachment}
+            {...(props.onPreflightPublication ? { onPreflight: props.onPreflightPublication } : {})}
+            {...(props.onConfirmPublication ? { onConfirm: props.onConfirmPublication } : {})}
+            {...(props.onReconcilePublication ? { onReconcile: props.onReconcilePublication } : {})}
+          />
         ) : null}
         {props.onPreflightRun &&
         props.defaultProviderInstanceId &&
@@ -757,6 +771,138 @@ function WorkflowRunSummary(props: {
         {props.configuration.authority.pushBaseline ? "yes" : "no"}, draft PR{" "}
         {props.configuration.authority.createDraftPullRequest ? "yes" : "no"})
       </Text>
+    </View>
+  );
+}
+
+export function WorkflowPublicationControls(props: {
+  readonly attachment: WorkflowAttachment;
+  readonly onPreflight?: () => void;
+  readonly onConfirm?: () => void;
+  readonly onReconcile?: () => void;
+}) {
+  const publication = props.attachment.publication;
+  const action = (id: "preflight" | "confirm" | "reconcile") =>
+    publication?.allowedActions?.find((candidate) => candidate.id === id);
+  const canPreflight =
+    props.onPreflight !== undefined &&
+    (publication === undefined || action("preflight")?.enabled === true);
+  const canConfirm = action("confirm")?.enabled === true && props.onConfirm !== undefined;
+  const canReconcile = action("reconcile")?.enabled === true && props.onReconcile !== undefined;
+  return (
+    <View
+      accessibilityLabel="Workstream Publication"
+      className="gap-2 rounded-xl border border-fuchsia-500/25 bg-fuchsia-50/70 p-3 dark:bg-fuchsia-400/10"
+    >
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="flex-1 gap-1">
+          <Text className="font-t3-bold text-xs text-neutral-900 dark:text-neutral-100">
+            Workstream Publication
+          </Text>
+          <Text className="font-sans text-[11px] capitalize text-neutral-600 dark:text-neutral-300">
+            Status: {publication?.status.replaceAll("-", " ") ?? "not requested"}
+          </Text>
+        </View>
+        {canPreflight ? (
+          <Pressable
+            accessibilityRole="button"
+            className="rounded-lg border border-fuchsia-500/30 px-2 py-1"
+            onPress={props.onPreflight}
+          >
+            <Text className="font-t3-bold text-[11px] text-fuchsia-700 dark:text-fuchsia-300">
+              {publication === undefined ? "Preview publication" : "Refresh preview"}
+            </Text>
+          </Pressable>
+        ) : null}
+      </View>
+      {publication ? (
+        <>
+          <View className="gap-0.5">
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              Title: {publication.title}
+            </Text>
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              Remote: {publication.remoteTarget}
+            </Text>
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              Head: {publication.headBranch} · Target: {publication.targetBranch}
+            </Text>
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              Authority:{" "}
+              {publication.authorityGranted ? "push + draft PR granted" : "read-only preview"}
+            </Text>
+          </View>
+          {publication.commits.length > 0 ? (
+            <View className="gap-1">
+              {publication.commits.map((commit) => (
+                <Text
+                  key={commit.sha}
+                  className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300"
+                >
+                  {commit.sha.slice(0, 8)} {commit.title || "Untitled commit"}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          <View className="gap-1 rounded-lg border border-fuchsia-500/20 bg-white/45 p-2 dark:bg-neutral-950/25">
+            <Text className="font-t3-bold text-[11px] text-neutral-900 dark:text-neutral-100">
+              Pull request body
+            </Text>
+            <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+              {publication.body}
+            </Text>
+          </View>
+          {publication.changeRequest ? (
+            <View className="gap-1">
+              <Pressable
+                accessibilityRole="link"
+                onPress={() =>
+                  void import("../../lib/openExternalUrl").then(({ tryOpenExternalUrl }) =>
+                    tryOpenExternalUrl(publication.changeRequest!.url, "pull-request"),
+                  )
+                }
+              >
+                <Text className="text-[11px] font-semibold text-fuchsia-700 underline dark:text-fuchsia-300">
+                  Pull request #{publication.changeRequest.number} (
+                  {publication.changeRequest.state})
+                </Text>
+              </Pressable>
+              <Text className="font-sans text-[11px] text-neutral-600 dark:text-neutral-300">
+                Checks: {publication.changeRequest.checksState ?? "unavailable"}; Reviews:{" "}
+                {publication.changeRequest.reviewState ?? "unavailable"}
+              </Text>
+            </View>
+          ) : null}
+          {publication.failure ? (
+            <Text
+              accessibilityRole="alert"
+              className="font-sans text-[11px] text-red-700 dark:text-red-300"
+            >
+              {publication.failure}
+            </Text>
+          ) : null}
+          <View className="flex-row flex-wrap gap-2">
+            {canConfirm ? (
+              <Pressable
+                accessibilityRole="button"
+                className="rounded-lg bg-fuchsia-600 px-3 py-2"
+                onPress={props.onConfirm}
+              >
+                <Text className="font-t3-bold text-xs text-white">Publish draft PR</Text>
+              </Pressable>
+            ) : null}
+            {canReconcile ? (
+              <Pressable
+                accessibilityRole="button"
+                className="rounded-lg border border-border px-3 py-2"
+                onPress={props.onReconcile}
+              >
+                <Text className="font-t3-bold text-xs text-foreground">Reconcile</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }

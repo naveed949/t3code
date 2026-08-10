@@ -62,6 +62,11 @@ export type PreflightWorkflowBaselineRefreshInput =
   CommandInput<"thread.workflow.baseline-refresh.preflight">;
 export type ConfirmWorkflowBaselineRefreshInput =
   CommandInput<"thread.workflow.baseline-refresh.confirm">;
+export type PreflightWorkflowPublicationInput =
+  CommandInput<"thread.workflow.publication.preflight">;
+export type ConfirmWorkflowPublicationInput = CommandInput<"thread.workflow.publication.confirm">;
+export type ReconcileWorkflowPublicationInput =
+  CommandInput<"thread.workflow.publication.reconcile">;
 export type HoldWorkflowNodeInput = CommandInput<"thread.workflow.node.hold">;
 export type ReleaseWorkflowNodeInput = CommandInput<"thread.workflow.node.release">;
 export type ViewWorkflowArtifactsInput = CommandInput<"thread.workflow.artifacts.view">;
@@ -537,6 +542,45 @@ export const confirmWorkflowBaselineRefresh: (
     return yield* dispatch({
       ...input,
       type: "thread.workflow.baseline-refresh.confirm",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const preflightWorkflowPublication: (
+  input: PreflightWorkflowPublicationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.preflightWorkflowPublication")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.publication.preflight",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  },
+);
+
+export const confirmWorkflowPublication: (input: ConfirmWorkflowPublicationInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.confirmWorkflowPublication")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.publication.confirm",
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    });
+  });
+
+export const reconcileWorkflowPublication: (
+  input: ReconcileWorkflowPublicationInput,
+) => CommandEffect = Effect.fn("EnvironmentCommands.reconcileWorkflowPublication")(
+  function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.workflow.publication.reconcile",
       commandId: metadata.commandId,
       createdAt: metadata.createdAt,
     });

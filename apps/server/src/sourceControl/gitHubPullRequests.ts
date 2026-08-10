@@ -4,7 +4,12 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
+import {
+  PositiveInt,
+  TrimmedNonEmptyString,
+  type ChangeRequestChecksState,
+  type ChangeRequestReviewState,
+} from "@t3tools/contracts";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 
 export interface NormalizedGitHubPullRequestRecord {
@@ -15,6 +20,10 @@ export interface NormalizedGitHubPullRequestRecord {
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
   readonly updatedAt: Option.Option<DateTime.Utc>;
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
+  readonly checksState?: ChangeRequestChecksState;
+  readonly reviewState?: ChangeRequestReviewState;
   readonly isCrossRepository?: boolean;
   readonly headRepositoryNameWithOwner?: string | null;
   readonly headRepositoryOwnerLogin?: string | null;
@@ -29,6 +38,10 @@ const GitHubPullRequestSchema = Schema.Struct({
   state: Schema.optional(Schema.NullOr(Schema.String)),
   mergedAt: Schema.optional(Schema.NullOr(Schema.String)),
   updatedAt: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
+  isDraft: Schema.optional(Schema.Boolean),
+  headRefOid: Schema.optional(Schema.NullOr(Schema.String)),
+  reviewDecision: Schema.optional(Schema.NullOr(Schema.String)),
+  statusCheckRollup: Schema.optional(Schema.NullOr(Schema.Array(Schema.Unknown))),
   isCrossRepository: Schema.optional(Schema.Boolean),
   // gh < 2.47 exports headRepository as {id, name} only; nameWithOwner was
   // added later. Both fields stay optional so a version-drifted gh CLI can
@@ -72,6 +85,43 @@ function normalizeGitHubPullRequestState(input: {
   return "open";
 }
 
+function normalizeGitHubReviewState(value: string | null | undefined): ChangeRequestReviewState {
+  switch (value?.trim().toUpperCase()) {
+    case "APPROVED":
+      return "approved";
+    case "CHANGES_REQUESTED":
+      return "changes-requested";
+    case "REVIEW_REQUIRED":
+      return "pending";
+    default:
+      return "unknown";
+  }
+}
+
+function normalizeGitHubChecksState(
+  checks: ReadonlyArray<unknown> | null | undefined,
+): ChangeRequestChecksState {
+  if (checks === undefined || checks === null || checks.length === 0) return "unknown";
+  const values = checks.flatMap((check) => {
+    if (typeof check !== "object" || check === null) return [];
+    const record = check as Record<string, unknown>;
+    return [record.status, record.state, record.conclusion]
+      .filter((value): value is string => typeof value === "string")
+      .map((value) => value.toUpperCase());
+  });
+  if (values.some((value) => ["FAILURE", "ERROR", "CANCELLED", "TIMED_OUT"].includes(value))) {
+    return "failed";
+  }
+  if (
+    values.some((value) =>
+      ["EXPECTED", "QUEUED", "IN_PROGRESS", "PENDING", "REQUESTED"].includes(value),
+    )
+  ) {
+    return "pending";
+  }
+  return values.length > 0 ? "passed" : "unknown";
+}
+
 function normalizeGitHubPullRequestRecord(
   raw: Schema.Schema.Type<typeof GitHubPullRequestSchema>,
 ): NormalizedGitHubPullRequestRecord {
@@ -94,6 +144,16 @@ function normalizeGitHubPullRequestRecord(
     headRefName: raw.headRefName,
     state: normalizeGitHubPullRequestState(raw),
     updatedAt: raw.updatedAt ?? Option.none(),
+    ...(typeof raw.isDraft === "boolean" ? { isDraft: raw.isDraft } : {}),
+    ...(trimOptionalString(raw.headRefOid)
+      ? { headCommitSha: trimOptionalString(raw.headRefOid)! }
+      : {}),
+    ...(raw.reviewDecision !== undefined
+      ? { reviewState: normalizeGitHubReviewState(raw.reviewDecision) }
+      : {}),
+    ...(raw.statusCheckRollup !== undefined
+      ? { checksState: normalizeGitHubChecksState(raw.statusCheckRollup) }
+      : {}),
     ...(typeof raw.isCrossRepository === "boolean"
       ? { isCrossRepository: raw.isCrossRepository }
       : {}),

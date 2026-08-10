@@ -30,6 +30,10 @@ function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeReq
     headRefName: summary.headRefName,
     state: summary.state ?? "open",
     updatedAt: Option.none(),
+    ...(summary.isDraft === undefined ? {} : { isDraft: summary.isDraft }),
+    ...(summary.headCommitSha === undefined ? {} : { headCommitSha: summary.headCommitSha }),
+    ...(summary.checksState === undefined ? {} : { checksState: summary.checksState }),
+    ...(summary.reviewState === undefined ? {} : { reviewState: summary.reviewState }),
     ...(summary.isCrossRepository !== undefined
       ? { isCrossRepository: summary.isCrossRepository }
       : {}),
@@ -139,7 +143,7 @@ export const make = Effect.gen(function* () {
             "--limit",
             String(input.limit ?? 20),
             "--json",
-            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isCrossRepository,headRepository,headRepositoryOwner",
+            "number,title,url,baseRefName,headRefName,state,mergedAt,updatedAt,isDraft,headRefOid,isCrossRepository,headRepository,headRepositoryOwner",
           ],
         })
         .pipe(
@@ -213,6 +217,7 @@ export const make = Effect.gen(function* () {
           headSelector: input.headSelector,
           title: input.title,
           bodyFile: input.bodyFile,
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
         })
         .pipe(
           Effect.mapError(

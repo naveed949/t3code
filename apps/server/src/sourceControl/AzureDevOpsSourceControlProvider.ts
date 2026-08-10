@@ -58,6 +58,8 @@ function toChangeRequest(summary: {
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
   readonly updatedAt: ChangeRequest["updatedAt"];
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
 }): ChangeRequest {
   return {
     provider: "azure-devops",
@@ -68,6 +70,8 @@ function toChangeRequest(summary: {
     headRefName: summary.headRefName,
     state: summary.state,
     updatedAt: summary.updatedAt,
+    ...(summary.isDraft === undefined ? {} : { isDraft: summary.isDraft }),
+    ...(summary.headCommitSha === undefined ? {} : { headCommitSha: summary.headCommitSha }),
     isCrossRepository: false,
   };
 }
@@ -134,6 +138,7 @@ export const make = Effect.gen(function* () {
           ...(input.target !== undefined ? { target: input.target } : {}),
           title: input.title,
           bodyFile: input.bodyFile,
+          ...(input.draft === undefined ? {} : { draft: input.draft }),
         })
         .pipe(
           Effect.mapError(

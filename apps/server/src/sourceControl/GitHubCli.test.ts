@@ -31,6 +31,42 @@ afterEach(() => {
 });
 
 describe("GitHubCli.layer", () => {
+  it.effect("passes draft authority explicitly when creating a pull request", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(Effect.succeed(processOutput("")));
+
+      const gh = yield* GitHubCli.GitHubCli;
+      yield* gh.createPullRequest({
+        cwd: "/repo",
+        baseBranch: "feature/development-workflow",
+        headSelector: "codex/issue-44-publish-draft-workstream-pr",
+        title: "Workflow: Development Workflow",
+        bodyFile: "/tmp/workflow-publication.md",
+        draft: true,
+      });
+
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: [
+          "pr",
+          "create",
+          "--base",
+          "feature/development-workflow",
+          "--head",
+          "codex/issue-44-publish-draft-workstream-pr",
+          "--title",
+          "Workflow: Development Workflow",
+          "--body-file",
+          "/tmp/workflow-publication.md",
+          "--draft",
+        ],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it("does not classify a missing cwd as an unavailable gh executable", () => {
     const context = { command: "gh", cwd: "/repo" } as const;
     const missingCwd = new VcsProcessSpawnError({
@@ -103,7 +139,7 @@ describe("GitHubCli.layer", () => {
           "view",
           "#42",
           "--json",
-          "number,title,url,baseRefName,headRefName,state,mergedAt,isCrossRepository,headRepository,headRepositoryOwner",
+          "number,title,url,baseRefName,headRefName,state,mergedAt,isDraft,headRefOid,reviewDecision,statusCheckRollup,isCrossRepository,headRepository,headRepositoryOwner",
         ],
         cwd: "/repo",
         timeoutMs: 30_000,

@@ -15,6 +15,8 @@ export interface NormalizedAzureDevOpsPullRequestRecord {
   readonly headRefName: string;
   readonly state: "open" | "closed" | "merged";
   readonly updatedAt: Option.Option<DateTime.Utc>;
+  readonly isDraft?: boolean;
+  readonly headCommitSha?: string;
 }
 
 const AzureDevOpsPullRequestSchema = Schema.Struct({
@@ -37,6 +39,14 @@ const AzureDevOpsPullRequestSchema = Schema.Struct({
   status: Schema.String,
   creationDate: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
   closedDate: Schema.optional(Schema.OptionFromNullOr(Schema.DateTimeUtcFromString)),
+  isDraft: Schema.optional(Schema.Boolean),
+  lastMergeSourceCommit: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        commitId: Schema.optional(Schema.NullOr(Schema.String)),
+      }),
+    ),
+  ),
   _links: Schema.optional(
     Schema.Struct({
       web: Schema.optional(
@@ -142,6 +152,10 @@ function normalizeAzureDevOpsPullRequestRecord(
     updatedAt: (raw.closedDate ?? Option.none()).pipe(
       Option.orElse(() => raw.creationDate ?? Option.none()),
     ),
+    ...(typeof raw.isDraft === "boolean" ? { isDraft: raw.isDraft } : {}),
+    ...(trimOptionalString(raw.lastMergeSourceCommit?.commitId)
+      ? { headCommitSha: trimOptionalString(raw.lastMergeSourceCommit?.commitId)! }
+      : {}),
   };
 }
 

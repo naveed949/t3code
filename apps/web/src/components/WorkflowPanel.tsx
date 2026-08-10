@@ -11,7 +11,10 @@ import { memo, type KeyboardEvent, useCallback, useEffect, useRef, useState } fr
 
 import { cn } from "~/lib/utils";
 
-import { BaselineRefreshControls } from "./chat/WorkflowAttachmentCard.tsx";
+import {
+  BaselineRefreshControls,
+  WorkflowPublicationControls,
+} from "./chat/WorkflowAttachmentCard.tsx";
 
 export function nextWorkflowOutlineIndex(
   key: string,
@@ -309,6 +312,9 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
   readonly workflowAttachment?: WorkflowAttachment | null;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
+  readonly onPreflightPublication?: () => void;
+  readonly onConfirmPublication?: () => void;
+  readonly onReconcilePublication?: () => void;
   readonly initialSelectedNodeId?: string | null;
   readonly selectedNodeId?: string | null;
   readonly onSelectNode?: (nodeId: string | null) => void;
@@ -370,6 +376,18 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
           attachment={props.workflowAttachment}
           onPreflight={props.onPreflightBaselineRefresh}
           {...(props.onConfirmBaselineRefresh ? { onConfirm: props.onConfirmBaselineRefresh } : {})}
+        />
+      ) : null}
+
+      {props.workflowAttachment?.workflowRun &&
+      (props.onPreflightPublication ||
+        props.onConfirmPublication ||
+        props.onReconcilePublication) ? (
+        <WorkflowPublicationControls
+          attachment={props.workflowAttachment}
+          {...(props.onPreflightPublication ? { onPreflight: props.onPreflightPublication } : {})}
+          {...(props.onConfirmPublication ? { onConfirm: props.onConfirmPublication } : {})}
+          {...(props.onReconcilePublication ? { onReconcile: props.onReconcilePublication } : {})}
         />
       ) : null}
 

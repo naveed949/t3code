@@ -1248,6 +1248,15 @@ function ChatViewContent(props: ChatViewProps) {
   const confirmBaselineRefreshCommand = useAtomCommand(threadEnvironment.confirmBaselineRefresh, {
     reportFailure: false,
   });
+  const preflightPublicationCommand = useAtomCommand(threadEnvironment.preflightPublication, {
+    reportFailure: false,
+  });
+  const confirmPublicationCommand = useAtomCommand(threadEnvironment.confirmPublication, {
+    reportFailure: false,
+  });
+  const reconcilePublicationCommand = useAtomCommand(threadEnvironment.reconcilePublication, {
+    reportFailure: false,
+  });
   const viewWorkflowArtifactsCommand = useAtomCommand(threadEnvironment.viewWorkflowArtifacts, {
     reportFailure: false,
   });
@@ -1808,6 +1817,40 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, confirmBaselineRefreshCommand],
   );
+  const preflightPublication = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void preflightPublicationCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [activeThread, preflightPublicationCommand]);
+  const confirmPublication = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void confirmPublicationCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [activeThread, confirmPublicationCommand]);
+  const reconcilePublication = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void reconcilePublicationCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [activeThread, reconcilePublicationCommand]);
   const completeWorkflowSpecification = useCallback(
     (prd: WorkflowPrdDocument) => {
       const attachment = activeThread?.workflowAttachment;
@@ -6351,6 +6394,9 @@ function ChatViewContent(props: ChatViewProps) {
         onRetryTicketIntegration={retryWorkflowTicketIntegration}
         onPreflightBaselineRefresh={preflightBaselineRefresh}
         onConfirmBaselineRefresh={confirmBaselineRefresh}
+        onPreflightPublication={preflightPublication}
+        onConfirmPublication={confirmPublication}
+        onReconcilePublication={reconcilePublication}
         connected={!activeEnvironmentUnavailable}
         onReconcile={reconcileActiveWayfinderMap}
       />
@@ -6542,6 +6588,9 @@ function ChatViewContent(props: ChatViewProps) {
                         onConfirmRun={confirmWorkflowRun}
                         onPreflightBaselineRefresh={preflightBaselineRefresh}
                         onConfirmBaselineRefresh={confirmBaselineRefresh}
+                        onPreflightPublication={preflightPublication}
+                        onConfirmPublication={confirmPublication}
+                        onReconcilePublication={reconcilePublication}
                         {...(activeWayfinderMap ? { onOpenWorkstream: openAttachedWorkflow } : {})}
                       />
                     </div>

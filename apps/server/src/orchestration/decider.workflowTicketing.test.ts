@@ -18,6 +18,7 @@ import {
   type ResolvedSkillInvocation,
   type WorkflowAttachment,
   type WorkflowBaselineRefresh,
+  type WorkflowPublication,
   type WorkflowGraphNode,
   type WorkflowPrdDocument,
   type WorkflowRun,
@@ -28,6 +29,7 @@ import { initializeWorkflowGraph } from "@t3tools/shared/workflowGraph";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 
 import { decideOrchestrationCommand } from "./decider.ts";
 import { projectEvent } from "./projector.ts";
@@ -2098,6 +2100,149 @@ it.layer(NodeServices.layer)("Baseline Refresh checkpoint boundary", (it) => {
         },
       });
       expect(normalizeEvents(resumed)[0]?.type).toBe("thread.workflow-run-resumed");
+    }),
+  );
+});
+
+it.layer(NodeServices.layer)("Workstream Publication approval boundary", (it) => {
+  it.effect("keeps preview read-only and grants publication authority only on confirmation", () =>
+    Effect.gen(function* () {
+      let model = implementationReadModel();
+      const preflight = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.publication.preflight" as const,
+          commandId: CommandId.make("workflow-publication-preflight"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 3,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(preflight)[0]?.type).toBe("thread.workflow-publication-preflighted");
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(preflight)));
+      expect(model.threads[0]?.workflowAttachment?.publication).toMatchObject({
+        status: "previewing",
+        authorityGranted: false,
+      });
+
+      const preview = {
+        ...model.threads[0]!.workflowAttachment!.publication!,
+        status: "ready" as const,
+        baselineCommit: "baseline-publication-sha",
+        commits: [{ sha: "ticket-44-sha", title: "Publish draft Workstream PR" }],
+        updatedAt: publishedAt,
+      } satisfies WorkflowPublication;
+      const ready = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.publication.update" as const,
+          commandId: CommandId.make("workflow-publication-ready"),
+          threadId: originThreadId,
+          publication: preview,
+          expectedWorkstreamVersion: 4,
+          createdAt: publishedAt,
+        },
+      });
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(ready)));
+      expect(model.threads[0]?.workflowAttachment?.publication?.status).toBe("ready");
+
+      const confirmed = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.publication.confirm" as const,
+          commandId: CommandId.make("workflow-publication-confirm"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 5,
+          confirmed: true,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(confirmed)[0]?.type).toBe("thread.workflow-publication-requested");
+      const afterConfirmation = yield* Effect.promise(() =>
+        applyEvents(model, normalizeEvents(confirmed)),
+      );
+      expect(afterConfirmation.threads[0]?.workflowAttachment?.publication).toMatchObject({
+        status: "publishing",
+        authorityGranted: true,
+        authority: { pushBaseline: true, createDraftPullRequest: true },
+      });
+
+      const recoveryObservation = yield* decideOrchestrationCommand({
+        readModel: afterConfirmation,
+        command: {
+          type: "thread.workflow.publication.reconcile" as const,
+          commandId: CommandId.make("workflow-publication-reconcile-after-restart"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 6,
+          createdAt: publishedAt,
+        },
+      });
+      expect(normalizeEvents(recoveryObservation)[0]?.type).toBe(
+        "thread.workflow-publication-observation-requested",
+      );
+    }),
+  );
+
+  it.effect("does not project Merged before the external PR and PRD both close", () =>
+    Effect.gen(function* () {
+      let model = implementationReadModel();
+      const preflight = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.publication.preflight" as const,
+          commandId: CommandId.make("workflow-publication-merge-preflight"),
+          threadId: originThreadId,
+          expectedWorkstreamVersion: 3,
+          createdAt: publishedAt,
+        },
+      });
+      model = yield* Effect.promise(() => applyEvents(model, normalizeEvents(preflight)));
+      const current = model.threads[0]!.workflowAttachment!.publication!;
+      model = {
+        ...model,
+        threads: model.threads.map((thread) =>
+          thread.id === originThreadId
+            ? {
+                ...thread,
+                workflowAttachment: {
+                  ...thread.workflowAttachment!,
+                  publication: {
+                    ...current,
+                    status: "published-for-review" as const,
+                    authorityGranted: true,
+                  },
+                },
+              }
+            : thread,
+        ),
+      };
+      const error = yield* decideOrchestrationCommand({
+        readModel: model,
+        command: {
+          type: "thread.workflow.publication.update" as const,
+          commandId: CommandId.make("workflow-publication-merge-too-early"),
+          threadId: originThreadId,
+          publication: {
+            ...current,
+            status: "merged",
+            changeRequest: {
+              provider: "github",
+              number: 44,
+              title: current.title,
+              url: "https://github.com/naveed949/t3code/pull/44",
+              baseRefName: current.targetBranch,
+              headRefName: current.headBranch,
+              state: "open",
+              updatedAt: Option.none(),
+            },
+            trackerState: "open",
+            updatedAt: publishedAt,
+          },
+          expectedWorkstreamVersion: 4,
+          createdAt: publishedAt,
+        },
+      }).pipe(Effect.flip);
+      expect(error.message).toContain("Merged is projected only after both");
     }),
   );
 });

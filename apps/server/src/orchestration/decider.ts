@@ -31,6 +31,7 @@ import {
   type WorkflowValidationEvidence,
   type WorkflowTicketImplementationStatus,
   type WorkflowBaselineRefresh,
+  type WorkflowPublication,
   type WorkflowTicketingCheckpointRequest,
   type WorkflowTicketingStage,
   isBlockingWorkflowCodeReviewFinding,
@@ -64,6 +65,13 @@ import type * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import {
+  WORKFLOW_PUBLICATION_AUTHORITY,
+  splitWorkflowRemoteTarget,
+  withWorkflowPublicationActions,
+  workflowPublicationBody,
+  workflowPublicationTitle,
+} from "./WorkflowPublication.ts";
 import {
   activeWayfinderDraftSkillRunId,
   approvedWayfinderPublicationSkillRunId,
@@ -3535,6 +3543,222 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandId: command.commandId,
         })),
         type: "thread.workflow-baseline-refresh-updated",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.publication.preflight": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication preflight requires a confirmed Workflow Run.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication preflight has a stale Workstream version.",
+        });
+      }
+      const existing = attachment.publication;
+      if (
+        existing !== undefined &&
+        ["publishing", "published-for-review", "merged"].includes(existing.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication is already in flight or published; reconcile the existing outcome.",
+        });
+      }
+      const target = splitWorkflowRemoteTarget(workflowRun.configuration.remoteTarget);
+      const publication = withWorkflowPublicationActions({
+        status: "previewing",
+        remoteTarget: workflowRun.configuration.remoteTarget,
+        remote: target.remote,
+        headBranch: workflowRun.configuration.workstreamBaseline,
+        targetBranch: target.targetBranch,
+        baselineCommit: null,
+        commits: [],
+        title: workflowPublicationTitle(attachment),
+        body: workflowPublicationBody(attachment),
+        authority: WORKFLOW_PUBLICATION_AUTHORITY,
+        authorityGranted: false,
+        ...(existing?.changeRequest === undefined ? {} : { changeRequest: existing.changeRequest }),
+        ...(existing?.trackerState === undefined ? {} : { trackerState: existing.trackerState }),
+        failure: null,
+        requestedAt: existing?.requestedAt ?? command.createdAt,
+        updatedAt: command.createdAt,
+      } satisfies WorkflowPublication);
+      const nextAttachment = incrementWorkflowVersion({ ...attachment, publication });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-publication-preflighted",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.publication.confirm": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const workflowRun = attachment?.workflowRun;
+      const publication = attachment?.publication;
+      if (attachment === undefined || workflowRun?.status !== "confirmed") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication confirmation requires a confirmed Workflow Run.",
+        });
+      }
+      if (publication === undefined || !["ready", "needs-recovery"].includes(publication.status)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication confirmation requires a ready preview or explicit recovery.",
+        });
+      }
+      if (publication.baselineCommit === null || publication.commits.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication confirmation requires a non-empty validated baseline preview.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication confirmation has a stale Workstream version.",
+        });
+      }
+      const nextPublication = {
+        ...publication,
+        status: "publishing" as const,
+        authority: WORKFLOW_PUBLICATION_AUTHORITY,
+        authorityGranted: true,
+        failure: null,
+        updatedAt: command.createdAt,
+        allowedActions: [],
+      } satisfies WorkflowPublication;
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        publication: nextPublication,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-publication-requested",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.publication.reconcile": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const publication = attachment?.publication;
+      if (
+        attachment === undefined ||
+        publication === undefined ||
+        !["publishing", "published-for-review", "needs-recovery"].includes(publication.status)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication reconciliation requires a published or recoverable outcome.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication reconciliation has a stale Workstream version.",
+        });
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        publication: {
+          ...publication,
+          updatedAt: command.createdAt,
+          allowedActions: [],
+        },
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-publication-observation-requested",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.publication.update": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.publication;
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication update requires a prior server-owned publication request.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Publication update has a stale Workstream version.",
+        });
+      }
+      const nextPublication = withWorkflowPublicationActions(command.publication);
+      const samePublication = stableStringify(current) === stableStringify(nextPublication);
+      const validTransition =
+        samePublication ||
+        (current.status === "previewing" &&
+          ["blocked", "ready", "needs-recovery"].includes(nextPublication.status)) ||
+        (current.status === "publishing" &&
+          ["published-for-review", "needs-recovery"].includes(nextPublication.status)) ||
+        (current.status === "published-for-review" &&
+          ["published-for-review", "needs-recovery", "merged"].includes(nextPublication.status)) ||
+        (current.status === "needs-recovery" &&
+          ["blocked", "ready", "needs-recovery", "published-for-review", "merged"].includes(
+            nextPublication.status,
+          )) ||
+        (current.status === "merged" && nextPublication.status === "merged");
+      if (!validTransition) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Publication cannot transition from ${current.status} to ${nextPublication.status}.`,
+        });
+      }
+      if (
+        nextPublication.status === "merged" &&
+        (nextPublication.changeRequest?.state !== "merged" ||
+          nextPublication.trackerState !== "closed")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail:
+            "Merged is projected only after both the pull request and Workflow PRD are closed.",
+        });
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        publication: nextPublication,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-publication-updated",
         payload: { threadId: command.threadId, attachment: nextAttachment },
       };
     }

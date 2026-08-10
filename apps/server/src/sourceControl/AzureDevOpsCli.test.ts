@@ -288,6 +288,7 @@ describe("AzureDevOpsCli.layer", () => {
         headSelector: "feature/provider",
         title: "Provider PR",
         bodyFile,
+        draft: true,
       });
 
       expect(mockRun).toHaveBeenCalledWith(
@@ -297,6 +298,7 @@ describe("AzureDevOpsCli.layer", () => {
           args: expect.arrayContaining(["--description", `@${bodyFile}`]),
         }),
       );
+      expect(mockRun.mock.calls[0]?.[0].args).toEqual(expect.arrayContaining(["--draft", "true"]));
       expect(mockRun.mock.calls[0]?.[0].args).not.toContain("--output");
     }).pipe(Effect.provide(layer)),
   );
