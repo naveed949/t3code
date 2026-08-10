@@ -42,6 +42,12 @@ import {
   ThreadWayfinderReconciliationUpdatedPayload,
   ThreadWayfinderResearchUpdatedPayload,
   ThreadWorkflowAttachedPayload,
+  ThreadWorkflowArchiveRequestedPayload,
+  ThreadWorkflowArchivedPayload,
+  ThreadWorkflowReopenedPayload,
+  ThreadWorkflowCleanupPreflightedPayload,
+  ThreadWorkflowCleanupRequestedPayload,
+  ThreadWorkflowCleanupUpdatedPayload,
   ThreadWorkflowRunPreflightedPayload,
   ThreadWorkflowRunConfirmedPayload,
   ThreadWorkflowRunAutomationUpdatedPayload,
@@ -1017,6 +1023,102 @@ export function projectEvent(
           ...nextBase,
           threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachmentHint: payload.hint,
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-archive-requested":
+      return decodeForEvent(
+        ThreadWorkflowArchiveRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-archived":
+      return decodeForEvent(
+        ThreadWorkflowArchivedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-reopened":
+      return decodeForEvent(
+        ThreadWorkflowReopenedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-cleanup-preflighted":
+      return decodeForEvent(
+        ThreadWorkflowCleanupPreflightedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-cleanup-requested":
+      return decodeForEvent(
+        ThreadWorkflowCleanupRequestedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            workflowAttachment: payload.attachment,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.workflow-cleanup-updated":
+      return decodeForEvent(
+        ThreadWorkflowCleanupUpdatedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
             workflowAttachment: payload.attachment,
             updatedAt: event.occurredAt,
           }),

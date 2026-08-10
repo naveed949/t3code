@@ -625,6 +625,22 @@ function WayfinderWorkbenchContent(props: {
     threadEnvironment.reconcilePublication,
     "reconcile Workstream Publication",
   );
+  const archiveWorkflowCommand = useAtomCommand(
+    threadEnvironment.archiveWorkflow,
+    "archive Development Workflow",
+  );
+  const reopenWorkflowCommand = useAtomCommand(
+    threadEnvironment.reopenWorkflow,
+    "reopen Development Workflow",
+  );
+  const preflightWorkflowCleanupCommand = useAtomCommand(
+    threadEnvironment.preflightWorkflowCleanup,
+    "preview Workflow cleanup",
+  );
+  const confirmWorkflowCleanupCommand = useAtomCommand(
+    threadEnvironment.confirmWorkflowCleanup,
+    "confirm Workflow cleanup",
+  );
   const startTurn = useAtomCommand(threadEnvironment.startTurn, "start to-spec");
   const { environments } = useEnvironments();
   const isFocused = useIsFocused();
@@ -1044,6 +1060,53 @@ function WayfinderWorkbenchContent(props: {
       },
     });
   }, [reconcilePublicationCommand, props.environmentId, workstream]);
+  const archiveWorkflow = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void archiveWorkflowCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [archiveWorkflowCommand, props.environmentId, workstream]);
+  const reopenWorkflow = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void reopenWorkflowCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [props.environmentId, reopenWorkflowCommand, workstream]);
+  const preflightWorkflowCleanup = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void preflightWorkflowCleanupCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightWorkflowCleanupCommand, props.environmentId, workstream]);
+  const confirmWorkflowCleanup = useCallback(() => {
+    const attachment = workstream?.workflowAttachment;
+    if (attachment === undefined || attachment === null) return;
+    void confirmWorkflowCleanupCommand({
+      environmentId: props.environmentId,
+      input: {
+        threadId: attachment.originThreadId,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [confirmWorkflowCleanupCommand, props.environmentId, workstream]);
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -1127,6 +1190,10 @@ function WayfinderWorkbenchContent(props: {
         onStopTicketImplementation={stopTicketImplementation}
         onRecoverTicketImplementation={recoverTicketImplementation}
         onRetryTicketIntegration={retryTicketIntegration}
+        onArchive={archiveWorkflow}
+        onReopen={reopenWorkflow}
+        onPreflightCleanup={preflightWorkflowCleanup}
+        onConfirmCleanup={confirmWorkflowCleanup}
         {...(workstream?.workflowAttachment !== undefined
           ? { workflowAttachment: workstream.workflowAttachment }
           : {})}

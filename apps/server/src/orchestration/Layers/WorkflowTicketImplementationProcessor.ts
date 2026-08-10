@@ -372,7 +372,8 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
         if (
           attachment?.originThreadId !== thread.id ||
           attachment.workflowRun === undefined ||
-          attachment.workflowGraph === undefined
+          attachment.workflowGraph === undefined ||
+          (attachment.archivedAt !== undefined && attachment.archivedAt !== null)
         ) {
           return [];
         }
@@ -851,18 +852,22 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       (ref) => ref.name === branch && ref.worktreePath !== null,
     )?.worktreePath;
     if (existing !== undefined && existing !== null) {
-      return { branch, path: existing };
+      return { branch, path: existing, worktreeOwned: false, branchOwned: false };
     }
+    const branchExists = refs.refs.some((ref) => ref.name === branch);
     const worktree = yield* git.createWorktree({
       cwd: input.cwd,
-      refName: refs.refs.some((ref) => ref.name === branch)
-        ? branch
-        : input.implementation.fixedPoint,
-      ...(refs.refs.some((ref) => ref.name === branch) ? {} : { newRefName: branch }),
+      refName: branchExists ? branch : input.implementation.fixedPoint,
+      ...(branchExists ? {} : { newRefName: branch }),
       baseRefName: input.implementation.fixedPoint,
       path: null,
     });
-    return { branch, path: worktree.worktree.path };
+    return {
+      branch,
+      path: worktree.worktree.path,
+      worktreeOwned: true,
+      branchOwned: !branchExists,
+    };
   });
 
   const ensureImplementationThread = Effect.fn(
@@ -1063,13 +1068,22 @@ export const makeWorkflowTicketImplementationProcessor = Effect.gen(function* ()
       const worktree =
         implementation.worktreePath === null
           ? yield* worktreeForImplementation({ cwd, implementation })
-          : { branch: implementation.branch!, path: implementation.worktreePath };
+          : {
+              branch: implementation.branch!,
+              path: implementation.worktreePath,
+              worktreeOwned: implementation.worktreeOwned,
+              branchOwned: implementation.branchOwned,
+            };
       const implementing = yield* updateImplementation({
         implementationId: implementation.id,
         patch: {
           status: "implementing",
           branch: worktree.branch,
           worktreePath: worktree.path,
+          ...(worktree.worktreeOwned === undefined
+            ? {}
+            : { worktreeOwned: worktree.worktreeOwned }),
+          ...(worktree.branchOwned === undefined ? {} : { branchOwned: worktree.branchOwned }),
           failure: null,
           updatedAt: event.payload.createdAt,
         },

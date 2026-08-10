@@ -310,6 +310,10 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
   ) => void;
   readonly onRetryTicketIntegration?: (implementationId: string) => void;
   readonly workflowAttachment?: WorkflowAttachment | null;
+  readonly onArchive?: () => void;
+  readonly onReopen?: () => void;
+  readonly onPreflightCleanup?: () => void;
+  readonly onConfirmCleanup?: () => void;
   readonly onPreflightBaselineRefresh?: () => void;
   readonly onConfirmBaselineRefresh?: (currentCommit: string, sourceCommit: string) => void;
   readonly onPreflightPublication?: () => void;
@@ -333,6 +337,8 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
     [props.onSelectNode, props.selectedNodeId],
   );
   const nodeButtons = useRef(new Map<string, HTMLButtonElement>());
+  const [archiveConfirmationArmed, setArchiveConfirmationArmed] = useState(false);
+  const [cleanupConfirmationArmed, setCleanupConfirmationArmed] = useState(false);
   const nodes = props.model.outline;
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? null;
 
@@ -370,6 +376,102 @@ export const WorkflowPanel = memo(function WorkflowPanel(props: {
           separate.
         </p>
       </header>
+
+      {props.workflowAttachment ? (
+        <section
+          aria-label="Workstream lifecycle"
+          className="space-y-2 rounded-md border border-border/60 bg-background/50 px-2.5 py-2 text-xs"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-medium text-foreground">
+              Workstream: {props.workflowAttachment.archivedAt ? "Archived (read-only)" : "Active"}
+            </span>
+            {props.workflowAttachment.archiveRequestedAt ? (
+              <span className="text-amber-700 dark:text-amber-300">Draining before archive…</span>
+            ) : null}
+            {props.workflowAttachment.archivedAt && props.onReopen ? (
+              <button
+                type="button"
+                className="ml-auto rounded-md bg-secondary px-2 py-1 font-medium hover:bg-secondary/80"
+                onClick={props.onReopen}
+              >
+                Reopen Workstream
+              </button>
+            ) : !props.workflowAttachment.archivedAt &&
+              !props.workflowAttachment.archiveRequestedAt &&
+              props.onArchive ? (
+              <button
+                type="button"
+                className="ml-auto rounded-md bg-secondary px-2 py-1 font-medium hover:bg-secondary/80"
+                onClick={() => {
+                  if (!archiveConfirmationArmed) {
+                    setArchiveConfirmationArmed(true);
+                    return;
+                  }
+                  props.onArchive?.();
+                  setArchiveConfirmationArmed(false);
+                }}
+              >
+                {archiveConfirmationArmed ? "Confirm archive" : "Archive Workstream"}
+              </button>
+            ) : null}
+          </div>
+          {props.workflowAttachment.archivedAt && props.onPreflightCleanup ? (
+            <div className="space-y-1 border-t border-border/60 pt-2">
+              <p className="font-medium text-foreground">
+                Cleanup:{" "}
+                {props.workflowAttachment.workflowCleanup?.status.replaceAll("-", " ") ??
+                  "not previewed"}
+              </p>
+              {props.workflowAttachment.workflowCleanup?.blockers.length ? (
+                <p className="text-amber-700 dark:text-amber-300">
+                  {props.workflowAttachment.workflowCleanup.blockers.join(" ")}
+                </p>
+              ) : null}
+              {props.workflowAttachment.workflowCleanup?.resources.map((resource) => (
+                <p key={resource.id} className="text-muted-foreground">
+                  {resource.kind}: {resource.path ?? resource.branch ?? resource.id} —{" "}
+                  {resource.status}
+                </p>
+              ))}
+              {!props.workflowAttachment.workflowCleanup ? (
+                <button
+                  type="button"
+                  className="rounded-md border border-border px-2 py-1 font-medium hover:bg-muted"
+                  onClick={props.onPreflightCleanup}
+                >
+                  Preview local cleanup
+                </button>
+              ) : props.workflowAttachment.workflowCleanup.status === "ready" &&
+                props.onConfirmCleanup ? (
+                <button
+                  type="button"
+                  className="rounded-md bg-secondary px-2 py-1 font-medium hover:bg-secondary/80"
+                  onClick={() => {
+                    if (!cleanupConfirmationArmed) {
+                      setCleanupConfirmationArmed(true);
+                      return;
+                    }
+                    props.onConfirmCleanup?.();
+                    setCleanupConfirmationArmed(false);
+                  }}
+                >
+                  {cleanupConfirmationArmed ? "Confirm cleanup" : "Clean up eligible resources"}
+                </button>
+              ) : props.workflowAttachment.workflowCleanup.status === "blocked" ||
+                props.workflowAttachment.workflowCleanup.status === "needs-recovery" ? (
+                <button
+                  type="button"
+                  className="rounded-md border border-border px-2 py-1 font-medium hover:bg-muted"
+                  onClick={props.onPreflightCleanup}
+                >
+                  Refresh cleanup preview
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       {props.workflowAttachment?.workflowRun && props.onPreflightBaselineRefresh ? (
         <BaselineRefreshControls

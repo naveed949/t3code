@@ -1235,6 +1235,19 @@ function ChatViewContent(props: ChatViewProps) {
   const attachWorkflowCommand = useAtomCommand(threadEnvironment.attachWorkflow, {
     reportFailure: false,
   });
+  const archiveWorkflowCommand = useAtomCommand(threadEnvironment.archiveWorkflow, {
+    reportFailure: false,
+  });
+  const reopenWorkflowCommand = useAtomCommand(threadEnvironment.reopenWorkflow, {
+    reportFailure: false,
+  });
+  const preflightWorkflowCleanupCommand = useAtomCommand(
+    threadEnvironment.preflightWorkflowCleanup,
+    { reportFailure: false },
+  );
+  const confirmWorkflowCleanupCommand = useAtomCommand(threadEnvironment.confirmWorkflowCleanup, {
+    reportFailure: false,
+  });
   const preflightWorkflowRunCommand = useAtomCommand(threadEnvironment.preflightWorkflowRun, {
     reportFailure: false,
   });
@@ -1779,6 +1792,53 @@ function ChatViewContent(props: ChatViewProps) {
     },
     [activeThread, preflightWorkflowRunCommand],
   );
+  const archiveWorkflow = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void archiveWorkflowCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [activeThread, archiveWorkflowCommand]);
+  const reopenWorkflow = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void reopenWorkflowCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [activeThread, reopenWorkflowCommand]);
+  const preflightWorkflowCleanup = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void preflightWorkflowCleanupCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [activeThread, preflightWorkflowCleanupCommand]);
+  const confirmWorkflowCleanup = useCallback(() => {
+    const attachment = activeThread?.workflowAttachment;
+    if (!activeThread || attachment === undefined) return;
+    void confirmWorkflowCleanupCommand({
+      environmentId: activeThread.environmentId,
+      input: {
+        threadId: activeThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [activeThread, confirmWorkflowCleanupCommand]);
   const confirmWorkflowRun = useCallback(
     (configuration: WorkflowRunConfiguration) => {
       if (!activeThread) return;
@@ -6392,6 +6452,10 @@ function ChatViewContent(props: ChatViewProps) {
         onStopTicketImplementation={stopWorkflowTicketImplementation}
         onRecoverTicketImplementation={recoverWorkflowTicketImplementation}
         onRetryTicketIntegration={retryWorkflowTicketIntegration}
+        onArchive={archiveWorkflow}
+        onReopen={reopenWorkflow}
+        onPreflightCleanup={preflightWorkflowCleanup}
+        onConfirmCleanup={confirmWorkflowCleanup}
         onPreflightBaselineRefresh={preflightBaselineRefresh}
         onConfirmBaselineRefresh={confirmBaselineRefresh}
         onPreflightPublication={preflightPublication}
@@ -6574,6 +6638,10 @@ function ChatViewContent(props: ChatViewProps) {
                         attachment={activeThread.workflowAttachment ?? null}
                         onDismiss={dismissWorkflowAttachmentHint}
                         onAttach={attachWorkflow}
+                        onArchive={archiveWorkflow}
+                        onReopen={reopenWorkflow}
+                        onPreflightCleanup={preflightWorkflowCleanup}
+                        onConfirmCleanup={confirmWorkflowCleanup}
                         onViewArtifacts={viewWorkflowArtifacts}
                         onAcknowledgeArtifact={acknowledgeWorkflowArtifact}
                         onResolveStale={resolveWorkflowStale}

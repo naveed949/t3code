@@ -231,6 +231,22 @@ function ThreadRouteContent(
     threadEnvironment.attachWorkflow,
     "attach Development Workflow",
   );
+  const archiveWorkflowCommand = useAtomCommand(
+    threadEnvironment.archiveWorkflow,
+    "archive Development Workflow",
+  );
+  const reopenWorkflowCommand = useAtomCommand(
+    threadEnvironment.reopenWorkflow,
+    "reopen Development Workflow",
+  );
+  const preflightWorkflowCleanupCommand = useAtomCommand(
+    threadEnvironment.preflightWorkflowCleanup,
+    "preview Workflow cleanup",
+  );
+  const confirmWorkflowCleanupCommand = useAtomCommand(
+    threadEnvironment.confirmWorkflowCleanup,
+    "confirm Workflow cleanup",
+  );
   const preflightWorkflowRunCommand = useAtomCommand(
     threadEnvironment.preflightWorkflowRun,
     "preflight Development Workflow Run",
@@ -756,6 +772,53 @@ function ThreadRouteContent(
     },
     [preflightWorkflowRunCommand, selectedThread],
   );
+  const archiveWorkflow = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void archiveWorkflowCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [archiveWorkflowCommand, selectedThread]);
+  const reopenWorkflow = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void reopenWorkflowCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [reopenWorkflowCommand, selectedThread]);
+  const preflightWorkflowCleanup = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void preflightWorkflowCleanupCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+      },
+    });
+  }, [preflightWorkflowCleanupCommand, selectedThread]);
+  const confirmWorkflowCleanup = useCallback(() => {
+    const attachment = selectedThread?.workflowAttachment;
+    if (!selectedThread || attachment === undefined) return;
+    void confirmWorkflowCleanupCommand({
+      environmentId: selectedThread.environmentId,
+      input: {
+        threadId: selectedThread.id,
+        expectedWorkstreamVersion: attachment.workflowVersion ?? 0,
+        confirmed: true,
+      },
+    });
+  }, [confirmWorkflowCleanupCommand, selectedThread]);
   const confirmWorkflowRun = useCallback(
     (configuration: WorkflowRunConfiguration) => {
       if (!selectedThread) return;
@@ -1151,6 +1214,10 @@ function ThreadRouteContent(
           onPublishWayfinderDraft={publishWayfinderDraft}
           onDismissWorkflowAttachmentHint={dismissWorkflowAttachmentHint}
           onAttachWorkflow={attachWorkflow}
+          onArchiveWorkflow={archiveWorkflow}
+          onReopenWorkflow={reopenWorkflow}
+          onPreflightWorkflowCleanup={preflightWorkflowCleanup}
+          onConfirmWorkflowCleanup={confirmWorkflowCleanup}
           onViewWorkflowArtifacts={viewWorkflowArtifacts}
           onAcknowledgeWorkflowArtifact={acknowledgeWorkflowArtifact}
           onResolveWorkflowStale={resolveWorkflowStale}

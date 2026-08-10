@@ -31,6 +31,8 @@ import {
   type WorkflowValidationEvidence,
   type WorkflowTicketImplementationStatus,
   type WorkflowBaselineRefresh,
+  type WorkflowCleanup,
+  type WorkflowCleanupResource,
   type WorkflowPublication,
   type WorkflowTicketingCheckpointRequest,
   type WorkflowTicketingStage,
@@ -554,6 +556,9 @@ function workflowSpecificationContextForHandoff(input: {
   );
   const attachment = originThread?.workflowAttachment;
   if (originThread === undefined || attachment === undefined) return null;
+  if (workflowIsReadOnly(attachment)) {
+    return { detail: "Archived Workstreams cannot dispatch Specification work." };
+  }
   if (attachment.workstreamId !== input.workstreamId) {
     return { detail: "Specification provenance does not match the attached Workflow Run." };
   }
@@ -675,6 +680,9 @@ function workflowTicketingContextForHandoff(input: {
   const attachment = originThread?.workflowAttachment;
   if (sourceThread === undefined || originThread === undefined || attachment === undefined) {
     return null;
+  }
+  if (workflowIsReadOnly(attachment)) {
+    return { detail: "Archived Workstreams cannot dispatch Ticketing work." };
   }
   if (attachment.workstreamId !== input.workstreamId) {
     return { detail: "Ticketing provenance does not match the attached Workflow Run." };
@@ -846,6 +854,261 @@ function workflowTicketImplementations(attachment: WorkflowAttachment) {
 function workflowAutomationStatus(attachment: WorkflowAttachment) {
   return attachment.workflowRun?.automationStatus ?? "idle";
 }
+
+function workflowIsArchived(attachment: WorkflowAttachment): boolean {
+  return attachment.archivedAt !== undefined && attachment.archivedAt !== null;
+}
+
+function workflowIsArchiveRequested(attachment: WorkflowAttachment): boolean {
+  return attachment.archiveRequestedAt !== undefined;
+}
+
+function workflowIsReadOnly(attachment: WorkflowAttachment): boolean {
+  return workflowIsArchived(attachment) || workflowIsArchiveRequested(attachment);
+}
+
+function workflowImplementationIsActive(implementation: WorkflowTicketImplementation): boolean {
+  return (
+    ["dispatching", "implementing", "reviewing", "stopping", "integrating"].includes(
+      implementation.status,
+    ) ||
+    (implementation.status === "needs-recovery" && implementation.recoveryPhase === "integration")
+  );
+}
+
+function workflowImplementationHasUnresolvedCleanupState(
+  implementation: WorkflowTicketImplementation,
+): boolean {
+  return [
+    "dispatching",
+    "implementing",
+    "reviewing",
+    "stopping",
+    "needs-recovery",
+    "checkpointed",
+    "needs-correction",
+    "needs-decision",
+    "integrating",
+    "integration-failed",
+    "failed",
+  ].includes(implementation.status);
+}
+
+function workflowThreadBelongsToWorkstream(
+  thread: OrchestrationThread,
+  attachment: WorkflowAttachment,
+): boolean {
+  return (
+    thread.id === attachment.originThreadId ||
+    thread.id === attachment.specificationStage?.specificationThreadId ||
+    thread.id === attachment.ticketingStage?.ticketingThreadId ||
+    thread.workflowAttachment?.workstreamId === attachment.workstreamId ||
+    thread.latestTurn?.skillInvocation?.workstreamId === attachment.workstreamId ||
+    thread.latestTurn?.skillInvocation?.reconnectWorkstreamId === attachment.workstreamId ||
+    (attachment.ticketImplementations ?? []).some(
+      (implementation) => implementation.implementationThreadId === thread.id,
+    )
+  );
+}
+
+function workflowHasActiveProviderRun(
+  readModel: OrchestrationReadModel,
+  attachment: WorkflowAttachment,
+): boolean {
+  return readModel.threads.some(
+    (thread) =>
+      workflowThreadBelongsToWorkstream(thread, attachment) &&
+      (thread.latestTurn?.state === "running" ||
+        thread.session?.status === "starting" ||
+        thread.session?.status === "running"),
+  );
+}
+
+function workflowHasActiveWork(
+  readModel: OrchestrationReadModel,
+  attachment: WorkflowAttachment,
+): boolean {
+  return (
+    workflowAutomationStatus(attachment) === "running" ||
+    workflowAutomationStatus(attachment) === "draining" ||
+    workflowHasActiveProviderRun(readModel, attachment) ||
+    (attachment.ticketImplementations ?? []).some(workflowImplementationIsActive)
+  );
+}
+
+function workflowCleanupResources(
+  attachment: WorkflowAttachment,
+): ReadonlyArray<WorkflowCleanupResource> {
+  const resources: Array<WorkflowCleanupResource> = [];
+  for (const implementation of attachment.ticketImplementations ?? []) {
+    if (implementation.worktreePath !== null) {
+      const owned = implementation.worktreeOwned === true;
+      resources.push({
+        id: `worktree:${implementation.id}`,
+        kind: "worktree",
+        path: implementation.worktreePath,
+        branch: implementation.branch,
+        owned,
+        status: owned ? "eligible" : "retained",
+        reason: owned ? null : "Worktree ownership was not recorded; retaining the worktree.",
+      });
+    }
+    if (implementation.branch !== null) {
+      const owned = implementation.branchOwned === true;
+      resources.push({
+        id: `branch:${implementation.id}`,
+        kind: "branch",
+        path: null,
+        branch: implementation.branch,
+        owned,
+        status: "retained",
+        reason: owned
+          ? "Cleanup retains local branches; branch deletion is never automatic."
+          : "Branch ownership was not recorded; retaining the branch.",
+      });
+    }
+  }
+  return resources;
+}
+
+function workflowCleanupBlockers(
+  readModel: OrchestrationReadModel,
+  attachment: WorkflowAttachment,
+): ReadonlyArray<string> {
+  const blockers: Array<string> = [];
+  const add = (detail: string) => {
+    if (!blockers.includes(detail)) blockers.push(detail);
+  };
+  if (!workflowIsArchived(attachment)) {
+    add("Cleanup requires an archived Workstream.");
+  }
+  if (attachment.publication?.status !== "merged") {
+    add("Cleanup is available only after the Workstream publication is merged.");
+  }
+  if (workflowHasActiveProviderRun(readModel, attachment)) {
+    add("Cleanup is blocked while provider runs are still active.");
+  }
+  if (
+    readModel.threads.some(
+      (thread) =>
+        workflowThreadBelongsToWorkstream(thread, attachment) &&
+        thread.checkpoints.some((checkpoint) => checkpoint.status !== "ready"),
+    )
+  ) {
+    add("Cleanup is blocked while unresolved checkpoints remain.");
+  }
+  if (
+    workflowAutomationStatus(attachment) === "running" ||
+    workflowAutomationStatus(attachment) === "draining"
+  ) {
+    add("Cleanup is blocked while Workflow effects are still unresolved.");
+  }
+  if (
+    attachment.baselineRefresh !== undefined &&
+    ["previewing", "draining", "refreshing"].includes(attachment.baselineRefresh.status)
+  ) {
+    add("Cleanup is blocked while Baseline Refresh effects are still unresolved.");
+  }
+  if (
+    attachment.publication !== undefined &&
+    ["publishing"].includes(attachment.publication.status)
+  ) {
+    add("Cleanup is blocked while Publication effects are still unresolved.");
+  }
+  if (
+    attachment.ticketingStage?.publication !== undefined &&
+    ["requested", "publishing"].includes(attachment.ticketingStage.publication.status)
+  ) {
+    add("Cleanup is blocked while Ticketing publication effects are still unresolved.");
+  }
+  if (attachment.specificationStage?.checkpoint?.status === "pending") {
+    add("Cleanup is blocked while a Specification checkpoint is pending.");
+  }
+  if (attachment.ticketingStage?.checkpoint?.status === "pending") {
+    add("Cleanup is blocked while a Ticketing checkpoint is pending.");
+  }
+  if (
+    (attachment.ticketImplementations ?? []).some(workflowImplementationHasUnresolvedCleanupState)
+  ) {
+    add("Cleanup is blocked while Ticket Implementation effects are still unresolved.");
+  }
+  if (
+    attachment.baselineRefresh?.status === "needs-recovery" ||
+    attachment.publication?.status === "needs-recovery" ||
+    (attachment.ticketImplementations ?? []).some(
+      (implementation) => implementation.status === "needs-recovery",
+    )
+  ) {
+    add("Cleanup is blocked while Needs Recovery remains unresolved.");
+  }
+  if (
+    (attachment.ticketImplementations ?? []).some(
+      (implementation) => implementation.status === "needs-decision",
+    ) ||
+    attachment.workflowGraph?.nodes.some((node) => node.resolution.status === "required")
+  ) {
+    add("Cleanup is blocked while Needs Decision remains unresolved.");
+  }
+  return blockers;
+}
+
+function withWorkflowCleanupActions(cleanup: WorkflowCleanup): WorkflowCleanup {
+  const canPreflight = ["blocked", "completed", "needs-recovery"].includes(cleanup.status);
+  const canConfirm =
+    cleanup.status === "ready" &&
+    cleanup.blockers.length === 0 &&
+    cleanup.resources.every((resource) => resource.status !== "blocked");
+  return {
+    ...cleanup,
+    allowedActions: [
+      ...(canPreflight
+        ? [
+            {
+              id: "preflight" as const,
+              label:
+                cleanup.status === "needs-recovery" ? "Retry cleanup preview" : "Preview cleanup",
+              enabled: true,
+              reason: null,
+            },
+          ]
+        : []),
+      ...(canConfirm
+        ? [
+            {
+              id: "confirm" as const,
+              label: "Clean up workflow resources",
+              enabled: true,
+              reason: null,
+            },
+          ]
+        : []),
+    ],
+  };
+}
+
+const ARCHIVED_WORKFLOW_BLOCKED_COMMANDS: ReadonlySet<OrchestrationCommand["type"]> = new Set([
+  "thread.workflow.run.preflight",
+  "thread.workflow.run.confirm",
+  "thread.workflow.run.start",
+  "thread.workflow.run.pause",
+  "thread.workflow.run.resume",
+  "thread.workflow.baseline-refresh.preflight",
+  "thread.workflow.baseline-refresh.confirm",
+  "thread.workflow.publication.preflight",
+  "thread.workflow.publication.confirm",
+  "thread.workflow.publication.reconcile",
+  "thread.workflow.node.hold",
+  "thread.workflow.node.release",
+  "thread.workflow.artifacts.view",
+  "thread.workflow.artifact.acknowledge",
+  "thread.workflow.stale.resolve",
+  "thread.workflow.specification.complete",
+  "thread.workflow.ticketing.publish",
+  "thread.workflow.ticket-implementation.start",
+  "thread.workflow.ticket-implementation.stop",
+  "thread.workflow.ticket-implementation.recover",
+  "thread.workflow.ticket-integration.retry",
+]);
 
 function workflowBaselineRefreshBlocksAutomation(attachment: WorkflowAttachment): boolean {
   return (
@@ -1536,6 +1799,9 @@ function synchronizeWorkflowAttachment(input: {
   if (currentAttachment === undefined) {
     return Effect.succeed(null);
   }
+  if (workflowIsReadOnly(currentAttachment)) {
+    return Effect.succeed(null);
+  }
   const attachment = synchronizeWorkflowAttachmentWayfinderData({
     attachment: currentAttachment,
     sourceSkillRunId: input.skillRunId,
@@ -1610,6 +1876,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
   OrchestrationCommandInvariantError | PlatformError.PlatformError,
   Crypto.Crypto
 > {
+  if ("threadId" in command && ARCHIVED_WORKFLOW_BLOCKED_COMMANDS.has(command.type)) {
+    const attachment = readModel.threads.find(
+      (thread) => thread.id === command.threadId,
+    )?.workflowAttachment;
+    if (attachment !== undefined && workflowIsReadOnly(attachment)) {
+      return yield* new OrchestrationCommandInvariantError({
+        commandType: command.type,
+        detail: "This Workstream is archived or draining for archive and is read-only.",
+      });
+    }
+  }
   switch (command.type) {
     case "project.create": {
       yield* requireProjectAbsent({
@@ -3023,6 +3300,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
               }
             : {}),
         },
+        archivedAt: null,
         attachedAt: command.createdAt,
       };
       const attachment = {
@@ -3046,6 +3324,286 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
           attachment,
         },
+      };
+    }
+
+    case "thread.workflow.archive": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Archiving a Workstream requires an attached Workstream.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Archiving a Workstream requires the current Workflow Projection version.",
+        });
+      }
+      if (attachment.workflowCleanup?.status === "cleaning") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "The Workstream cannot be archived while cleanup effects are unresolved.",
+        });
+      }
+      if (workflowIsArchived(attachment) || workflowIsArchiveRequested(attachment)) {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: workflowIsArchived(attachment)
+            ? "thread.workflow-archived"
+            : "thread.workflow-archive-requested",
+          payload: { threadId: command.threadId, attachment },
+        };
+      }
+      if (workflowHasActiveWork(readModel, attachment) && attachment.workflowRun === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Active Workstream work must drain before it can be archived.",
+        });
+      }
+      if (workflowHasActiveWork(readModel, attachment)) {
+        const nextAttachment = incrementWorkflowVersion({
+          ...attachment,
+          archiveRequestedAt: command.createdAt,
+          workflowRun: {
+            ...attachment.workflowRun!,
+            automationStatus: "draining",
+          },
+        });
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.workflow-archive-requested",
+          payload: { threadId: command.threadId, attachment: nextAttachment },
+        };
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        archivedAt: command.createdAt,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-archived",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.reopen": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Reopening a Workstream requires an attached Workstream.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Reopening a Workstream requires the current Workflow Projection version.",
+        });
+      }
+      if (!workflowIsArchived(attachment)) {
+        if (workflowIsArchiveRequested(attachment)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "The Workstream must finish draining before it can be reopened.",
+          });
+        }
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.workflow-reopened",
+          payload: { threadId: command.threadId, attachment },
+        };
+      }
+      const synchronization = attachment.backfilledWayfinderData.wayfinderSynchronization;
+      if (synchronization?.status !== "healthy") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Reopening a Workstream requires healthy Wayfinder synchronization.",
+        });
+      }
+      const trackerProjection =
+        attachment.trackerProjection ?? attachment.ticketingStage?.trackerProjection;
+      if (trackerProjection !== undefined && trackerProjection.status !== "healthy") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Reopening a Workstream requires healthy tracker synchronization.",
+        });
+      }
+      const unavailableSkill = attachment.workflowRun?.configuration.requiredSkills.find(
+        (requiredSkill) =>
+          requiredSkill.status !== "available" ||
+          requiredSkill.skill.path === undefined ||
+          requiredSkill.skill.contentDigest === undefined,
+      );
+      if (unavailableSkill !== undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Reopening a Workstream requires capability ${unavailableSkill.skill.name} to be available and pinned.`,
+        });
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        archivedAt: null,
+        archiveRequestedAt: undefined,
+        workflowCleanup: undefined,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-reopened",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.cleanup.preflight": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      if (attachment === undefined || !workflowIsArchived(attachment)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup preview requires an archived Workstream.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup preview requires the current Workflow Projection version.",
+        });
+      }
+      const existing = attachment.workflowCleanup;
+      if (existing?.status === "cleaning") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup is already in progress for this Workstream.",
+        });
+      }
+      if (existing?.status === "completed") {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.workflow-cleanup-preflighted",
+          payload: { threadId: command.threadId, attachment },
+        };
+      }
+      const blockers = workflowCleanupBlockers(readModel, attachment);
+      const cleanup = withWorkflowCleanupActions({
+        status: blockers.length === 0 ? "previewing" : "blocked",
+        resources: workflowCleanupResources(attachment),
+        blockers,
+        failure: null,
+        requestedAt: existing?.requestedAt ?? command.createdAt,
+        updatedAt: command.createdAt,
+      });
+      const nextAttachment = incrementWorkflowVersion({ ...attachment, workflowCleanup: cleanup });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-cleanup-preflighted",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
+    }
+
+    case "thread.workflow.cleanup.confirm": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const cleanup = attachment?.workflowCleanup;
+      if (attachment === undefined || !workflowIsArchived(attachment) || cleanup === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup confirmation requires an archived Workstream cleanup preview.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup confirmation requires the current Workflow Projection version.",
+        });
+      }
+      if (cleanup.status === "completed" || cleanup.status === "cleaning") {
+        return {
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.workflow-cleanup-requested",
+          payload: { threadId: command.threadId, attachment },
+        };
+      }
+      if (cleanup.status !== "ready") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup confirmation requires a ready cleanup preview.",
+        });
+      }
+      const blockers = workflowCleanupBlockers(readModel, attachment);
+      if (blockers.length > 0 || cleanup.blockers.length > 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: [...blockers, ...cleanup.blockers].join(" "),
+        });
+      }
+      if (cleanup.resources.some((resource) => resource.status === "blocked")) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup confirmation cannot proceed while a resource is blocked.",
+        });
+      }
+      const nextCleanup = withWorkflowCleanupActions({
+        ...cleanup,
+        status: "cleaning",
+        updatedAt: command.createdAt,
+        allowedActions: [],
+      });
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        workflowCleanup: nextCleanup,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-cleanup-requested",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
       };
     }
 
@@ -3466,6 +4024,28 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           detail: "A Workflow Run cannot finish draining while Ticket Implementations are active.",
         });
       }
+      if (workflowIsArchiveRequested(attachment)) {
+        const nextAttachment = refreshTicketImplementationAvailability(
+          incrementWorkflowVersion({
+            ...attachment,
+            archivedAt: command.createdAt,
+            archiveRequestedAt: undefined,
+            workflowRun: {
+              ...workflowRun,
+              automationStatus: "paused",
+            },
+          }),
+        );
+        const paused = yield* workflowAutomationEvent({
+          command,
+          attachment: nextAttachment,
+          eventType: "thread.workflow-run-paused",
+        });
+        return {
+          ...paused,
+          type: "thread.workflow-archived" as const,
+        };
+      }
       const baselineRefresh =
         attachment.baselineRefresh?.status === "draining"
           ? {
@@ -3488,6 +4068,61 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         ),
         eventType: "thread.workflow-run-paused",
       });
+    }
+
+    case "thread.workflow.cleanup.update": {
+      const thread = yield* requireThread({ readModel, command, threadId: command.threadId });
+      const attachment = thread.workflowAttachment;
+      const current = attachment?.workflowCleanup;
+      if (attachment === undefined || current === undefined) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup update requires a prior server-owned cleanup request.",
+        });
+      }
+      if ((attachment.workflowVersion ?? 0) !== command.expectedWorkstreamVersion) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Cleanup update has a stale Workstream version.",
+        });
+      }
+      const nextCleanup = withWorkflowCleanupActions(command.cleanup);
+      const sameCleanup = stableStringify(current) === stableStringify(nextCleanup);
+      const validTransition =
+        sameCleanup ||
+        (current.status === "previewing" &&
+          ["blocked", "ready", "needs-recovery"].includes(nextCleanup.status)) ||
+        (current.status === "blocked" &&
+          ["blocked", "ready", "needs-recovery"].includes(nextCleanup.status)) ||
+        (current.status === "ready" &&
+          ["blocked", "ready", "cleaning", "needs-recovery"].includes(nextCleanup.status)) ||
+        (current.status === "cleaning" &&
+          ["cleaning", "completed", "needs-recovery"].includes(nextCleanup.status)) ||
+        (current.status === "needs-recovery" &&
+          ["blocked", "ready", "cleaning", "completed", "needs-recovery"].includes(
+            nextCleanup.status,
+          )) ||
+        (current.status === "completed" && nextCleanup.status === "completed");
+      if (!validTransition) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Cleanup cannot transition from ${current.status} to ${nextCleanup.status}.`,
+        });
+      }
+      const nextAttachment = incrementWorkflowVersion({
+        ...attachment,
+        workflowCleanup: nextCleanup,
+      });
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.workflow-cleanup-updated",
+        payload: { threadId: command.threadId, attachment: nextAttachment },
+      };
     }
 
     case "thread.workflow.baseline-refresh.update": {
