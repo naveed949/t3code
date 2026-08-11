@@ -9,6 +9,7 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useSubscriptionAllowance } from "../../state/subscriptionAllowance";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE } from "@t3tools/client-runtime/state/subscription-allowance";
 import {
   enumerateDays,
   formatCount,
@@ -459,6 +460,14 @@ function SubscriptionUsagePage({
   const { groups, environments, isPending, isPartial, isRefreshing, refresh } =
     useSubscriptionAllowance();
   const environmentNotices = environments.flatMap((environment) => {
+    if (environment.compatibility) {
+      return [
+        {
+          environmentId: environment.environmentId,
+          message: `${environment.label}: ${SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE}`,
+        },
+      ];
+    }
     if (environment.error !== null) {
       return [
         {

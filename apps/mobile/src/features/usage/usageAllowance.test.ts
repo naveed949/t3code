@@ -163,6 +163,17 @@ describe("mobile subscription allowance presentation", () => {
       formatAllowanceEnvironmentNotice({
         label: "Desktop",
         connectionPhase: "connected",
+        compatibility: true,
+        error: "failed",
+        snapshot: null,
+      }),
+    ).toBe(
+      "Desktop: Subscription allowance reporting is not supported by this environment version.",
+    );
+    expect(
+      formatAllowanceEnvironmentNotice({
+        label: "Desktop",
+        connectionPhase: "connected",
         error: "failed",
         snapshot: null,
       }),

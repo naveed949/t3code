@@ -7,6 +7,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
+  isSubscriptionAllowanceCompatibilityCause,
   reconcileSubscriptionAllowances,
   type EnvironmentSubscriptionAllowanceStatus,
   type SubscriptionAllowanceProjection,
@@ -27,16 +28,23 @@ const subscriptionAllowanceByEnvironmentAtom = Atom.make(
 
     for (const [environmentId, presentation] of presentations) {
       const result = get(serverEnvironment.subscriptionAllowance({ environmentId, input: {} }));
+      const connectionPhase = presentation.connection.phase;
+      const isConnected = connectionPhase === "connected";
+      const compatibility =
+        isConnected &&
+        result._tag === "Failure" &&
+        isSubscriptionAllowanceCompatibilityCause(result.cause);
       statuses.push({
         environmentId,
         label: presentation.entry.target.label,
-        connectionPhase: presentation.connection.phase,
-        isPending: result.waiting,
+        connectionPhase,
+        isPending: isConnected && result.waiting,
+        compatibility,
         error:
-          result._tag === "Failure"
+          isConnected && result._tag === "Failure" && !compatibility
             ? "This environment could not report subscription usage."
             : null,
-        snapshot: Option.getOrNull(AsyncResult.value(result)),
+        snapshot: compatibility ? null : Option.getOrNull(AsyncResult.value(result)),
       });
     }
 
