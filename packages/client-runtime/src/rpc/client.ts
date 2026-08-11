@@ -84,6 +84,19 @@ export class EnvironmentRpcSubscriptionObserver extends Context.Reference<{
 
 export const isRpcClientError = Schema.is(RpcClientError.RpcClientError);
 
+/**
+ * Older servers answer additive RPCs with a protocol defect rather than a
+ * provider failure. Keep this classification narrow so callers can project a
+ * compatibility state without surfacing the defect as account auth failure.
+ */
+export function isRpcMethodNotFoundError(error: unknown): boolean {
+  return (
+    isRpcClientError(error) &&
+    error.reason._tag === "RpcClientDefect" &&
+    /^Unknown request tag:\s*\S+/.test(error.reason.message)
+  );
+}
+
 export type EnvironmentRpcInput<TTag extends EnvironmentRpcTag> = Parameters<RpcMethod<TTag>>[0];
 
 export type EnvironmentRpcSuccess<TTag extends EnvironmentUnaryRpcTag> =
@@ -169,6 +182,8 @@ export function runStream<TTag extends EnvironmentStreamCommandRpcTag>(
 }
 
 interface SubscriptionOptions<TTag extends EnvironmentSubscriptionRpcTag> {
+  /** Preserve an additive method-not-found as a typed stream failure. */
+  readonly failOnMethodNotFound?: boolean;
   readonly onExpectedFailure?: (
     cause: Cause.Cause<EnvironmentRpcStreamFailure<TTag>>,
   ) => Effect.Effect<void, never, never>;
@@ -235,6 +250,13 @@ export function subscribeDynamic<TTag extends EnvironmentSubscriptionRpcTag>(
                               (reason) => reason._tag === "Fail" && isRpcClientError(reason.error),
                             );
                           if (isTransportFailure) {
+                            const isMethodNotFound = cause.reasons.every(
+                              (reason) =>
+                                reason._tag === "Fail" && isRpcMethodNotFoundError(reason.error),
+                            );
+                            if (isMethodNotFound && options?.failOnMethodNotFound === true) {
+                              return Stream.failCause(cause);
+                            }
                             return Stream.fromEffect(
                               Effect.logWarning(
                                 "Durable RPC subscription lost its transport; waiting for the next session.",

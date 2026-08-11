@@ -6,6 +6,7 @@ import type {
   SubscriptionAllowanceSpendingControl,
   SubscriptionAllowanceWindow,
 } from "@t3tools/contracts";
+import { SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE } from "@t3tools/client-runtime/state/subscription-allowance";
 
 import { PROVIDER_LABEL } from "./usageProviderLabels";
 
@@ -122,9 +123,13 @@ export function formatAllowanceUnavailableMessage(
 export function formatAllowanceEnvironmentNotice(environment: {
   readonly label: string;
   readonly connectionPhase: EnvironmentConnectionPhase;
+  readonly compatibility?: boolean;
   readonly error: string | null;
   readonly snapshot: unknown;
 }): string | null {
+  if (environment.compatibility === true) {
+    return `${environment.label}: ${SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE}`;
+  }
   if (environment.error !== null) {
     return `${environment.label} could not report subscription usage.`;
   }

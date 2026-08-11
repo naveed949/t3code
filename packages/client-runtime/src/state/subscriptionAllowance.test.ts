@@ -31,6 +31,7 @@ function environment(
     label: environmentId,
     connectionPhase: "connected",
     isPending: allowances === null,
+    compatibility: false,
     error: null,
     snapshot:
       allowances === null
@@ -182,6 +183,23 @@ describe("reconcileSubscriptionAllowances", () => {
       result.environments.find((entry) => entry.environmentId === EnvironmentId.make("offline"))
         ?.connectionPhase,
     ).toBe("offline");
+  });
+
+  it("keeps older-server compatibility separate and does not refresh unsupported environments", () => {
+    const result = reconcileSubscriptionAllowances([
+      environment("old-server", null, {
+        isPending: false,
+        compatibility: true,
+      }),
+      environment("connected", null),
+    ]);
+
+    expect(result.isPending).toBe(true);
+    expect(result.refreshEnvironmentIds).toEqual([EnvironmentId.make("connected")]);
+    expect(
+      result.environments.find((entry) => entry.environmentId === EnvironmentId.make("connected"))
+        ?.compatibility,
+    ).toBe(false);
   });
 
   it("does not wait on disconnected environments after a connected snapshot arrives", () => {

@@ -718,6 +718,7 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:subscription-allowance",
       tag: WS_METHODS.subscribeSubscriptionAllowance,
       idleTtlMs: 0,
+      failOnMethodNotFound: true,
     }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {

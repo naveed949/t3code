@@ -3,8 +3,13 @@ import type {
   SubscriptionAllowance,
   SubscriptionAllowanceSnapshot,
 } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
 
 import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
+import { isRpcMethodNotFoundError } from "../rpc/client.ts";
+
+export const SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE =
+  "Subscription allowance reporting is not supported by this environment version.";
 
 /**
  * The allowance state owned by one connected environment.
@@ -18,8 +23,19 @@ export interface EnvironmentSubscriptionAllowanceStatus {
   readonly label: string;
   readonly connectionPhase: EnvironmentConnectionPhase;
   readonly isPending: boolean;
+  /** The connected server predates the additive allowance RPC. */
+  readonly compatibility: boolean;
   readonly error: string | null;
   readonly snapshot: SubscriptionAllowanceSnapshot | null;
+}
+
+export function isSubscriptionAllowanceCompatibilityCause(cause: Cause.Cause<unknown>): boolean {
+  return (
+    cause.reasons.length > 0 &&
+    cause.reasons.every(
+      (reason) => Cause.isFailReason(reason) && isRpcMethodNotFoundError(reason.error),
+    )
+  );
 }
 
 export interface SubscriptionAllowanceSource {
@@ -280,7 +296,10 @@ export function reconcileSubscriptionAllowances(
   const answeredCount = connected.filter((environment) => environment.snapshot !== null).length;
   const stillReporting = connected.filter(
     (environment) =>
-      environment.snapshot === null && environment.error === null && environment.isPending,
+      environment.snapshot === null &&
+      !environment.compatibility &&
+      environment.error === null &&
+      environment.isPending,
   ).length;
   const sources = projectSources(environments);
 
@@ -290,6 +309,8 @@ export function reconcileSubscriptionAllowances(
     groups: makeGroups(sources),
     isPending: answeredCount === 0 && stillReporting > 0,
     isPartial: answeredCount > 0 && stillReporting > 0,
-    refreshEnvironmentIds: connected.map((environment) => environment.environmentId),
+    refreshEnvironmentIds: connected
+      .filter((environment) => !environment.compatibility)
+      .map((environment) => environment.environmentId),
   };
 }
