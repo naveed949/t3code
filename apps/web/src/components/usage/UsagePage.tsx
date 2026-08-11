@@ -544,20 +544,25 @@ function SubscriptionAllowanceCard({
                 window.resetsAt === undefined || window.resetsAt === null
                   ? null
                   : formatAllowanceResetAt(window.resetsAt);
+              const hasUsage = window.usedPercent !== undefined && window.usedPercent !== null;
               return (
                 <div key={window.scope} className="flex flex-col gap-1.5">
                   <div className="flex items-baseline justify-between gap-3 text-sm">
                     <span className="text-foreground">
                       {formatAllowanceWindowScope(window.scope)}
                     </span>
-                    <span className="text-foreground tabular-nums">{window.usedPercent}% used</span>
+                    <span className="text-foreground tabular-nums">
+                      {hasUsage ? `${window.usedPercent}% used` : "Not reported"}
+                    </span>
                   </div>
-                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full bg-foreground"
-                      style={{ width: `${progressWidthForAllowance(window.usedPercent)}%` }}
-                    />
-                  </div>
+                  {hasUsage ? (
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full bg-foreground"
+                        style={{ width: `${progressWidthForAllowance(window.usedPercent)}%` }}
+                      />
+                    </div>
+                  ) : null}
                   {duration !== null || reset !== null ? (
                     <span className="text-xs text-muted-foreground">
                       {[duration, reset === null ? null : `Resets ${reset}`]
@@ -608,6 +613,26 @@ function SubscriptionAllowanceCard({
               {allowance.spendingControl.resetsAt !== undefined &&
               allowance.spendingControl.resetsAt !== null ? (
                 <span>Resets {formatAllowanceResetAt(allowance.spendingControl.resetsAt)}</span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {allowance.extraUsage !== undefined && allowance.extraUsage !== null ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+              <span>Extra usage</span>
+              <span>{allowance.extraUsage.isEnabled ? "Enabled" : "Disabled"}</span>
+              {allowance.extraUsage.monthlyLimit !== null ? (
+                <span>Monthly limit {allowance.extraUsage.monthlyLimit}</span>
+              ) : null}
+              {allowance.extraUsage.usedCredits !== null ? (
+                <span>Used credits {allowance.extraUsage.usedCredits}</span>
+              ) : null}
+              {allowance.extraUsage.utilization !== null ? (
+                <span>{allowance.extraUsage.utilization}% used</span>
+              ) : null}
+              {allowance.extraUsage.currency !== undefined &&
+              allowance.extraUsage.currency !== null ? (
+                <span>{allowance.extraUsage.currency}</span>
               ) : null}
             </div>
           ) : null}

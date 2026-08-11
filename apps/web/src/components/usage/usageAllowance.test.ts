@@ -10,6 +10,9 @@ describe("usage allowance presentation", () => {
   it("uses the provider scope and duration without deriving missing values", () => {
     expect(formatAllowanceWindowScope("primary")).toBe("Primary limit");
     expect(formatAllowanceWindowScope("secondary")).toBe("Secondary limit");
+    expect(formatAllowanceWindowScope("five_hour")).toBe("5-hour limit");
+    expect(formatAllowanceWindowScope("seven_day_opus")).toBe("7-day Opus limit");
+    expect(formatAllowanceWindowScope("provider_native_window")).toBe("provider_native_window");
     expect(formatAllowanceDuration(300)).toBe("5 hours");
     expect(formatAllowanceDuration(null)).toBeNull();
     expect(formatAllowanceDuration(undefined)).toBeNull();

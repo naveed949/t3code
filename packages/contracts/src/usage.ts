@@ -205,16 +205,32 @@ export type SubscriptionAllowanceProviderKind = typeof SubscriptionAllowanceProv
 export const SubscriptionAllowanceStatus = Schema.Literals(["available", "unavailable"]);
 export type SubscriptionAllowanceStatus = typeof SubscriptionAllowanceStatus.Type;
 
-export const SubscriptionAllowanceWindowScope = Schema.Literals(["primary", "secondary"]);
+/**
+ * Provider-native allowance bucket identifiers. Codex currently uses the
+ * generic primary/secondary names; Claude supplies names such as
+ * `five_hour` and `seven_day_opus`. Keeping the identifier opaque prevents
+ * the shared contract from collapsing provider-specific windows.
+ */
+export const SubscriptionAllowanceWindowScope = TrimmedNonEmptyString;
 export type SubscriptionAllowanceWindowScope = typeof SubscriptionAllowanceWindowScope.Type;
 
 export const SubscriptionAllowanceWindow = Schema.Struct({
   scope: SubscriptionAllowanceWindowScope,
-  usedPercent: Schema.Number,
+  usedPercent: Schema.optionalKey(Schema.Union([Schema.Number, Schema.Null])),
   windowDurationMins: Schema.optionalKey(Schema.Union([NonNegativeInt, Schema.Null])),
   resetsAt: Schema.optionalKey(Schema.Union([IsoDateTime, Schema.Null])),
 });
 export type SubscriptionAllowanceWindow = typeof SubscriptionAllowanceWindow.Type;
+
+/** Claude's provider-native extra-usage spending fields, when supplied. */
+export const SubscriptionAllowanceExtraUsage = Schema.Struct({
+  isEnabled: Schema.Boolean,
+  monthlyLimit: Schema.Union([Schema.Number, Schema.Null]),
+  usedCredits: Schema.Union([Schema.Number, Schema.Null]),
+  utilization: Schema.Union([Schema.Number, Schema.Null]),
+  currency: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+});
+export type SubscriptionAllowanceExtraUsage = typeof SubscriptionAllowanceExtraUsage.Type;
 
 export const SubscriptionAllowanceCredits = Schema.Struct({
   balance: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
@@ -241,6 +257,7 @@ export const SubscriptionAllowance = Schema.Struct({
   spendingControl: Schema.optionalKey(
     Schema.Union([SubscriptionAllowanceSpendingControl, Schema.Null]),
   ),
+  extraUsage: Schema.optionalKey(Schema.Union([SubscriptionAllowanceExtraUsage, Schema.Null])),
   message: Schema.optionalKey(TrimmedNonEmptyString),
 });
 export type SubscriptionAllowance = typeof SubscriptionAllowance.Type;

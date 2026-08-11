@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import { ProviderInstanceId } from "@t3tools/contracts";
 
 import {
+  CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
   ProviderAllowanceReadError,
   type ProviderAllowanceReader,
 } from "../provider/Services/ProviderAllowanceReader.ts";
@@ -22,8 +23,11 @@ const allowance = {
   windows: [{ scope: "primary" as const, usedPercent: 20 }],
 };
 
-const reader = (read: ProviderAllowanceReader["read"]): ProviderAllowanceReader => ({
-  provider: "codex",
+const reader = (
+  read: ProviderAllowanceReader["read"],
+  provider: ProviderAllowanceReader["provider"] = "codex",
+): ProviderAllowanceReader => ({
+  provider,
   read,
 });
 
@@ -65,6 +69,33 @@ describe("readSubscriptionAllowances", () => {
           },
         ],
       });
+    }),
+  );
+
+  it.effect("keeps the Claude unavailable presentation stable when acquisition fails", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* readSubscriptionAllowances(
+        [
+          instance({
+            instanceId: ProviderInstanceId.make("claude"),
+            allowanceReader: reader(
+              Effect.fail(new ProviderAllowanceReadError({ detail: "provider failure" })),
+              "claude",
+            ),
+          }),
+        ],
+        readAt,
+      );
+
+      expect(snapshot.allowances).toEqual([
+        {
+          provider: "claude",
+          instanceId: ProviderInstanceId.make("claude"),
+          status: "unavailable",
+          windows: [],
+          message: CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
+        },
+      ]);
     }),
   );
 });

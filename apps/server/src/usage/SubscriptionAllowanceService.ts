@@ -8,7 +8,10 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import type { ProviderAllowanceReader } from "../provider/Services/ProviderAllowanceReader.ts";
+import {
+  CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
+  type ProviderAllowanceReader,
+} from "../provider/Services/ProviderAllowanceReader.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 
 export interface SubscriptionAllowanceProviderInstance {
@@ -61,9 +64,9 @@ export const readSubscriptionAllowances = Effect.fn("readSubscriptionAllowances"
                   provider: reader.provider,
                   instanceId: instance.instanceId,
                   message:
-                    reader.provider === "codex"
-                      ? "Codex subscription usage is unavailable."
-                      : "Provider subscription usage is unavailable.",
+                    reader.provider === "claude"
+                      ? CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE
+                      : "Codex subscription usage is unavailable.",
                 }),
               ),
             ),
