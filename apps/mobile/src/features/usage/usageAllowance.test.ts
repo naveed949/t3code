@@ -119,6 +119,7 @@ describe("mobile subscription allowance presentation", () => {
     expect(model.sourceLabel).toContain("codex-personal");
     expect(model.sourceLabel).toContain("Offline");
     expect(model.hasMultipleReadings).toBe(true);
+    expect(model.sources[0]?.isCurrent).toBe(false);
   });
 
   it("keeps multiple environment sources inspectable without blending them", () => {

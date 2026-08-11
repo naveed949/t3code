@@ -1,7 +1,13 @@
 import { Children, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vite-plus/test";
 
-import { UsageViewTabs, type UsageView } from "./UsagePage";
+import { DEFAULT_USAGE_VIEW, UsageViewTabs, type UsageView } from "./UsagePage";
+
+describe("UsagePage defaults", () => {
+  it("opens on the Subscription view", () => {
+    expect(DEFAULT_USAGE_VIEW).toBe("subscription");
+  });
+});
 
 describe("UsageViewTabs", () => {
   it("exposes an accessible Subscription/Historical segmented control", () => {

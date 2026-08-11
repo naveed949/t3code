@@ -1,5 +1,7 @@
 export type UsageView = "subscription" | "historical";
 
+export const DEFAULT_USAGE_VIEW: UsageView = "subscription";
+
 export const USAGE_VIEW_OPTIONS = [
   { value: "subscription" as const, label: "Subscription" },
   { value: "historical" as const, label: "Historical" },

@@ -9,7 +9,10 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useSubscriptionAllowance } from "../../state/subscriptionAllowance";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
-import { SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE } from "@t3tools/client-runtime/state/subscription-allowance";
+import {
+  isSubscriptionAllowanceSourceCurrent,
+  SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 import {
   enumerateDays,
   formatCount,
@@ -49,8 +52,10 @@ export const USAGE_VIEW_OPTIONS: ReadonlyArray<{
   { value: "historical", label: "Historical" },
 ];
 
+export const DEFAULT_USAGE_VIEW: UsageView = "subscription";
+
 export function UsagePage() {
-  const [view, setView] = useState<UsageView>("historical");
+  const [view, setView] = useState<UsageView>(DEFAULT_USAGE_VIEW);
 
   return view === "historical" ? (
     <HistoricalUsagePage onViewChange={setView} />
@@ -711,7 +716,9 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
                 ? " · unavailable"
                 : source.allowance.freshness === "stale"
                   ? " · stale"
-                  : " · current"}
+                  : isSubscriptionAllowanceSourceCurrent(source)
+                    ? " · current"
+                    : " · not current"}
               {group.effectiveSource === source ? " · shown" : ""}
             </span>
           ))}
