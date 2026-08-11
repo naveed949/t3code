@@ -1,4 +1,4 @@
-import { useNavigation } from "@react-navigation/native";
+import { useIsFocused, useNavigation } from "@react-navigation/native";
 import type { MergedUsage } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
@@ -10,17 +10,36 @@ import {
   makeWindow,
 } from "@t3tools/shared/usageFormat";
 import { useMemo, useState } from "react";
-import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { useSubscriptionAllowance } from "../../state/subscriptionAllowance";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import type { UsageChartMetric } from "./usageChartData";
+import {
+  formatAllowanceDuration,
+  formatAllowanceEnvironmentNotice,
+  formatAllowanceResetAt,
+  formatAllowanceUpdatedAt,
+  formatAllowanceWindowScope,
+  presentAllowanceGroup,
+  progressWidthForAllowance,
+  type MobileAllowanceCardModel,
+} from "./usageAllowance";
 import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
+import { subscriptionViewPhase, USAGE_VIEW_OPTIONS, type UsageView } from "./usageView";
 
 const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
@@ -33,6 +52,48 @@ const CHART_HEIGHT = 180;
 export function UsageRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
+  const [view, setView] = useState<UsageView>("historical");
+
+  return (
+    <View collapsable={false} className="flex-1 bg-sheet">
+      {Platform.OS === "android" ? (
+        <>
+          <NativeStackScreenOptions options={{ headerShown: false }} />
+          <AndroidScreenHeader title="Usage" onBack={() => navigation.goBack()} />
+        </>
+      ) : null}
+      <UsageContent
+        view={view}
+        isFocused={isFocused}
+        onViewChange={setView}
+        insetsBottom={insets.bottom}
+      />
+    </View>
+  );
+}
+
+function UsageContent(props: {
+  readonly view: UsageView;
+  readonly isFocused: boolean;
+  readonly onViewChange: (view: UsageView) => void;
+  readonly insetsBottom: number;
+}) {
+  // Mount only the selected data source so leaving Subscription tears down its
+  // allowance stream and leaving Historical releases its transcript query.
+  if (!props.isFocused) return null;
+
+  return props.view === "subscription" ? (
+    <SubscriptionUsageContent onViewChange={props.onViewChange} insetsBottom={props.insetsBottom} />
+  ) : (
+    <HistoricalUsageContent onViewChange={props.onViewChange} insetsBottom={props.insetsBottom} />
+  );
+}
+
+function HistoricalUsageContent(props: {
+  readonly onViewChange: (view: UsageView) => void;
+  readonly insetsBottom: number;
+}) {
   const [windowDays, setWindowDays] = useState<number>(30);
   const [metric, setMetric] = useState<UsageChartMetric>("cost");
 
@@ -52,69 +113,382 @@ export function UsageRouteScreen() {
   const refreshing = environments.some((entry) => entry.isPending && entry.summary !== null);
 
   return (
-    <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      showsVerticalScrollIndicator={false}
+      className="flex-1"
+      contentContainerClassName="gap-6 px-5 pt-4"
+      contentContainerStyle={{ paddingBottom: Math.max(props.insetsBottom, 18) + 18 }}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+    >
+      <UsageViewTabs value="historical" onChange={props.onViewChange} />
+      <SegmentedControl
+        accessibilityLabel="Historical usage window"
+        options={WINDOW_OPTIONS.map((option) => ({ value: option.days, label: option.label }))}
+        selected={windowDays}
+        onSelect={setWindowDays}
+      />
+
+      <UsageCoverageNotice environments={environments} merged={merged} isPartial={isPartial} />
+
+      {isPending ? (
+        <Text className="py-16 text-center text-base text-foreground-muted">
+          Scanning provider transcripts…
+        </Text>
+      ) : environments.length === 0 ? (
+        <Text className="py-16 text-center text-base text-foreground-muted">
+          Connect an environment to see usage.
+        </Text>
+      ) : (
         <>
-          <NativeStackScreenOptions options={{ headerShown: false }} />
-          <AndroidScreenHeader title="Usage" onBack={() => navigation.goBack()} />
+          <ChartCard
+            merged={merged}
+            days={days}
+            metric={metric}
+            onMetricChange={setMetric}
+            sinceDay={window.sinceDay}
+            untilDay={window.untilDay}
+          />
+          <ProviderSection merged={merged} metric={metric} />
+          <TotalsSection merged={merged} />
+          <ModelsSection merged={merged} />
         </>
+      )}
+    </ScrollView>
+  );
+}
+
+function UsageViewTabs(props: {
+  readonly value: UsageView;
+  readonly onChange: (view: UsageView) => void;
+}) {
+  return (
+    <SegmentedControl
+      accessibilityLabel="Usage view"
+      options={USAGE_VIEW_OPTIONS}
+      selected={props.value}
+      onSelect={props.onChange}
+    />
+  );
+}
+
+function SubscriptionUsageContent(props: {
+  readonly onViewChange: (view: UsageView) => void;
+  readonly insetsBottom: number;
+}) {
+  const { groups, environments, isPending, isPartial, isRefreshing, refresh } =
+    useSubscriptionAllowance();
+  const environmentNotices = environments.flatMap((environment) => {
+    const message = formatAllowanceEnvironmentNotice(environment);
+    return message === null ? [] : [{ environmentId: environment.environmentId, message }];
+  });
+  // Keep already available cards visible while another environment answers.
+  // Only an empty first response needs the full loading placeholder.
+  const phase = subscriptionViewPhase({
+    isPending,
+    isPartial,
+    groupCount: groups.length,
+  });
+
+  return (
+    <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      showsVerticalScrollIndicator={false}
+      className="flex-1"
+      contentContainerClassName="gap-6 px-5 pt-4"
+      contentContainerStyle={{ paddingBottom: Math.max(props.insetsBottom, 18) + 18 }}
+      refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={refresh} />}
+    >
+      <UsageViewTabs value="subscription" onChange={props.onViewChange} />
+
+      <View className="flex-row items-start justify-between gap-4">
+        <View className="min-w-0 flex-1 gap-0.5">
+          <Text accessibilityRole="header" className="text-lg font-t3-medium text-foreground">
+            Subscription allowance
+          </Text>
+          <Text className="text-sm text-foreground-muted">
+            Current provider-reported limits and reset windows.
+          </Text>
+        </View>
+        <Pressable
+          accessibilityLabel="Refresh subscription usage"
+          accessibilityRole="button"
+          accessibilityState={{ busy: isRefreshing, disabled: isRefreshing }}
+          disabled={isRefreshing}
+          onPress={refresh}
+          className="rounded-full border-continuous bg-card px-3 py-2 disabled:opacity-50"
+        >
+          <Text className="text-sm font-t3-medium text-foreground">
+            {isRefreshing ? "Refreshing…" : "Refresh"}
+          </Text>
+        </Pressable>
+      </View>
+
+      {phase === "loading" ? (
+        <View className="items-center gap-3 rounded-[24px] border-continuous bg-card px-4 py-10">
+          <ActivityIndicator />
+          <Text className="text-sm text-foreground-muted">Reading provider allowance…</Text>
+        </View>
+      ) : groups.length === 0 ? (
+        <View className="gap-1 rounded-[24px] border-continuous bg-card px-4 py-6">
+          {environmentNotices.length > 0 ? (
+            environmentNotices.map((notice) => (
+              <Text key={notice.environmentId} className="text-sm text-foreground-muted">
+                {notice.message}
+              </Text>
+            ))
+          ) : environments.length === 0 ? (
+            <Text className="text-sm text-foreground-muted">
+              Connect an environment to see subscription allowance.
+            </Text>
+          ) : (
+            <Text className="text-sm text-foreground-muted">
+              No enabled provider reports subscription allowance data.
+            </Text>
+          )}
+        </View>
+      ) : (
+        <>
+          {environmentNotices.length > 0 ? (
+            <View className="gap-1 rounded-[16px] border-continuous bg-card px-4 py-3">
+              {environmentNotices.map((notice) => (
+                <Text key={notice.environmentId} className="text-xs text-foreground-muted">
+                  {notice.message}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+          {phase === "partial" ? (
+            <Text className="text-xs text-foreground-muted">
+              Some environments are still reporting.
+            </Text>
+          ) : null}
+          <View className="gap-4">
+            {groups.map((group) => (
+              <SubscriptionAllowanceCard key={group.key} model={presentAllowanceGroup(group)} />
+            ))}
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardModel }) {
+  const { model } = props;
+  const updatedAt = formatAllowanceUpdatedAt(model.updatedAt);
+
+  return (
+    <View className="gap-5 rounded-[24px] border-continuous bg-card p-4">
+      <View className="gap-1">
+        <View className="flex-row items-baseline gap-2">
+          <Text accessibilityRole="header" className="text-lg font-t3-medium text-foreground">
+            {model.providerLabel}
+          </Text>
+          {model.accountLabel !== null ? (
+            <Text className="min-w-0 flex-1 text-sm text-foreground-muted" numberOfLines={1}>
+              {model.accountLabel}
+            </Text>
+          ) : null}
+        </View>
+        <View className="flex-row items-baseline justify-between gap-2">
+          <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
+            {model.sourceLabel}
+          </Text>
+          <Text
+            className={
+              model.freshness === "stale"
+                ? "text-xs font-t3-medium text-amber-600"
+                : "text-xs text-foreground-muted"
+            }
+          >
+            {model.freshness === "stale"
+              ? "Stale"
+              : updatedAt === null
+                ? "Updated time unavailable"
+                : `Updated ${updatedAt}`}
+          </Text>
+        </View>
+      </View>
+
+      {model.status === "unavailable" ? (
+        <Text className="text-sm text-foreground-muted">{model.message}</Text>
+      ) : (
+        <>
+          <View className="gap-4">
+            {model.windows.map((window) => (
+              <AllowanceWindowRow key={window.scope} window={window} />
+            ))}
+          </View>
+          <AllowanceMetadata model={model} />
+        </>
+      )}
+
+      {model.hasMultipleReadings ? (
+        <Text className="border-t border-border-subtle pt-3 text-xs text-foreground-muted">
+          Multiple readings are available; showing one whole provider source.
+        </Text>
       ) : null}
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        showsVerticalScrollIndicator={false}
-        className="flex-1"
-        contentContainerClassName="gap-6 px-5 pt-4"
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      >
-        <SegmentedControl
-          options={WINDOW_OPTIONS.map((option) => ({ value: option.days, label: option.label }))}
-          selected={windowDays}
-          onSelect={setWindowDays}
-        />
+      {model.sources.length > 1 ? <AllowanceSources sources={model.sources} /> : null}
+    </View>
+  );
+}
 
-        <UsageCoverageNotice environments={environments} merged={merged} isPartial={isPartial} />
+function AllowanceWindowRow(props: {
+  readonly window: MobileAllowanceCardModel["windows"][number];
+}) {
+  const { window } = props;
+  const hasUsage = window.usedPercent !== undefined && window.usedPercent !== null;
+  const duration = formatAllowanceDuration(window.windowDurationMins);
+  const reset =
+    window.resetsAt === undefined || window.resetsAt === null
+      ? null
+      : formatAllowanceResetAt(window.resetsAt);
 
-        {isPending ? (
-          <Text className="py-16 text-center text-base text-foreground-muted">
-            Scanning provider transcripts…
+  return (
+    <View className="gap-1.5">
+      <View className="flex-row items-baseline justify-between gap-3">
+        <Text className="min-w-0 flex-1 text-sm text-foreground">
+          {formatAllowanceWindowScope(window.scope)}
+        </Text>
+        <Text className="text-sm tabular-nums text-foreground">
+          {hasUsage ? `${window.usedPercent}% used` : "Not reported"}
+        </Text>
+      </View>
+      {hasUsage ? (
+        <View className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle">
+          <View
+            className="h-full rounded-full bg-foreground"
+            style={{ width: `${progressWidthForAllowance(window.usedPercent)}%` }}
+          />
+        </View>
+      ) : null}
+      {duration !== null || reset !== null ? (
+        <Text className="text-xs text-foreground-muted">
+          {[duration, reset === null ? null : `Resets ${reset}`].filter(Boolean).join(" · ")}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function AllowanceMetadata(props: { readonly model: MobileAllowanceCardModel }) {
+  const { model } = props;
+  const credits = model.credits;
+  const spendingControl = model.spendingControl;
+  const extraUsage = model.extraUsage;
+
+  return (
+    <>
+      {credits !== null ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Credits</Text>
+          {credits.balance !== undefined && credits.balance !== null ? (
+            <Text className="text-xs text-foreground-muted">Balance {credits.balance}</Text>
+          ) : null}
+          <Text className="text-xs text-foreground-muted">
+            {credits.unlimited ? "Unlimited" : credits.hasCredits ? "Available" : "No credits"}
           </Text>
-        ) : environments.length === 0 ? (
-          <Text className="py-16 text-center text-base text-foreground-muted">
-            Connect an environment to see usage.
+        </View>
+      ) : null}
+
+      {spendingControl !== null ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Spending control</Text>
+          {spendingControl.reached !== undefined && spendingControl.reached !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              {spendingControl.reached ? "Reached" : "Not reached"}
+            </Text>
+          ) : null}
+          {spendingControl.used !== undefined &&
+          spendingControl.used !== null &&
+          spendingControl.limit !== undefined &&
+          spendingControl.limit !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Used {spendingControl.used} / {spendingControl.limit}
+            </Text>
+          ) : null}
+          {spendingControl.remainingPercent !== undefined &&
+          spendingControl.remainingPercent !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              {spendingControl.remainingPercent}% remaining
+            </Text>
+          ) : null}
+          {spendingControl.resetsAt !== undefined && spendingControl.resetsAt !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Resets {formatAllowanceResetAt(spendingControl.resetsAt)}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {extraUsage !== null ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Extra usage</Text>
+          <Text className="text-xs text-foreground-muted">
+            {extraUsage.isEnabled ? "Enabled" : "Disabled"}
           </Text>
-        ) : (
-          <>
-            <ChartCard
-              merged={merged}
-              days={days}
-              metric={metric}
-              onMetricChange={setMetric}
-              sinceDay={window.sinceDay}
-              untilDay={window.untilDay}
-            />
-            <ProviderSection merged={merged} metric={metric} />
-            <TotalsSection merged={merged} />
-            <ModelsSection merged={merged} />
-          </>
-        )}
-      </ScrollView>
+          {extraUsage.monthlyLimit !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Monthly limit {extraUsage.monthlyLimit}
+            </Text>
+          ) : null}
+          {extraUsage.usedCredits !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Used credits {extraUsage.usedCredits}
+            </Text>
+          ) : null}
+          {extraUsage.utilization !== null ? (
+            <Text className="text-xs text-foreground-muted">{extraUsage.utilization}% used</Text>
+          ) : null}
+          {extraUsage.currency !== undefined && extraUsage.currency !== null ? (
+            <Text className="text-xs text-foreground-muted">{extraUsage.currency}</Text>
+          ) : null}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+function AllowanceSources(props: {
+  readonly sources: readonly MobileAllowanceCardModel["sources"][number][];
+}) {
+  return (
+    <View className="gap-1 border-t border-border-subtle pt-3">
+      <Text className="text-xs text-foreground-muted">Sources</Text>
+      {props.sources.map((source) => (
+        <Text key={source.key} className="text-xs text-foreground-muted">
+          {source.environmentLabel} · {source.instanceId} · {source.connectionLabel} ·{" "}
+          {source.status}
+          {source.status === "unavailable"
+            ? " · unavailable"
+            : source.freshness === "stale"
+              ? " · stale"
+              : " · current"}
+          {source.isEffective ? " · shown" : ""}
+        </Text>
+      ))}
     </View>
   );
 }
 
 function SegmentedControl<Value extends number | string>(props: {
+  readonly accessibilityLabel?: string;
   readonly options: readonly { readonly value: Value; readonly label: string }[];
   readonly selected: Value;
   readonly onSelect: (value: Value) => void;
 }) {
   return (
-    <View className="flex-row overflow-hidden rounded-full border-continuous bg-card">
+    <View
+      accessibilityLabel={props.accessibilityLabel}
+      className="flex-row overflow-hidden rounded-full border-continuous bg-card"
+    >
       {props.options.map((option) => {
         const active = option.value === props.selected;
         return (
           <Pressable
             key={String(option.value)}
+            accessibilityLabel={option.label}
             accessibilityRole="button"
             accessibilityState={{ selected: active }}
             onPress={() => props.onSelect(option.value)}
