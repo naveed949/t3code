@@ -14,6 +14,11 @@ describe("subscription allowance contract", () => {
           provider: "codex",
           instanceId: "codex",
           status: "available",
+          completeness: "complete",
+          observationSource: "snapshot",
+          deliverySource: "live",
+          verifiedAccountId: "provider-account-1",
+          maskedAccountLabel: "n•••@example.com",
           windows: [
             {
               scope: "primary",
@@ -47,6 +52,8 @@ describe("subscription allowance contract", () => {
 
     expect(snapshot.allowances[0]).not.toHaveProperty("credits");
     expect(snapshot.allowances[0]).not.toHaveProperty("spendingControl");
+    expect(snapshot.allowances[0]?.verifiedAccountId).toBe("provider-account-1");
+    expect(snapshot.allowances[0]?.deliverySource).toBe("live");
     expect(snapshot.allowances[1]?.windows[0]?.scope).toBe("seven_day_opus");
     expect(snapshot.allowances[1]?.extraUsage?.usedCredits).toBe(2.5);
   });

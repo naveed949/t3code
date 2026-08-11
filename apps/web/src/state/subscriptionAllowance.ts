@@ -1,30 +1,18 @@
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomValue } from "@effect/atom-react";
+import { type EnvironmentId, type SubscriptionAllowance } from "@t3tools/contracts";
 import {
-  type EnvironmentId,
-  type SubscriptionAllowance,
-  type SubscriptionAllowanceSnapshot,
-} from "@t3tools/contracts";
+  reconcileSubscriptionAllowances,
+  type EnvironmentSubscriptionAllowanceStatus,
+  type SubscriptionAllowanceProjection,
+  type SubscriptionAllowanceSource,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 import { useCallback, useMemo, useState } from "react";
 
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
-
-export interface EnvironmentSubscriptionAllowanceStatus {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly isPending: boolean;
-  readonly error: string | null;
-  readonly snapshot: SubscriptionAllowanceSnapshot | null;
-}
-
-export interface EnvironmentSubscriptionAllowance {
-  readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
-  readonly allowance: SubscriptionAllowance;
-}
 
 const subscriptionAllowanceByEnvironmentAtom = Atom.make(
   (get): readonly EnvironmentSubscriptionAllowanceStatus[] => {
@@ -36,6 +24,7 @@ const subscriptionAllowanceByEnvironmentAtom = Atom.make(
       statuses.push({
         environmentId,
         label: presentation.entry.target.label,
+        connectionPhase: presentation.connection.phase,
         isPending: result.waiting,
         error:
           result._tag === "Failure"
@@ -49,8 +38,22 @@ const subscriptionAllowanceByEnvironmentAtom = Atom.make(
   },
 ).pipe(Atom.withLabel("web-usage:subscription-allowance"));
 
+/** Backward-compatible web helper; reconciliation uses the shared source model below. */
+export interface EnvironmentSubscriptionAllowance {
+  readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
+  readonly allowance: SubscriptionAllowance;
+}
+
 export function flattenSubscriptionAllowances(
-  environments: readonly EnvironmentSubscriptionAllowanceStatus[],
+  environments: readonly (Pick<
+    EnvironmentSubscriptionAllowanceStatus,
+    "environmentId" | "snapshot"
+  > & {
+    readonly label: string;
+    readonly isPending?: boolean;
+    readonly error?: string | null;
+  })[],
 ): readonly EnvironmentSubscriptionAllowance[] {
   return environments.flatMap(
     (environment) =>
@@ -62,18 +65,14 @@ export function flattenSubscriptionAllowances(
   );
 }
 
-export interface SubscriptionAllowanceView {
-  readonly allowances: readonly EnvironmentSubscriptionAllowance[];
-  readonly environments: readonly EnvironmentSubscriptionAllowanceStatus[];
-  readonly isPending: boolean;
-  readonly isPartial: boolean;
+export interface SubscriptionAllowanceView extends SubscriptionAllowanceProjection {
   readonly isRefreshing: boolean;
   readonly refresh: () => void;
 }
 
 export function useSubscriptionAllowance(): SubscriptionAllowanceView {
   const environments = useAtomValue(subscriptionAllowanceByEnvironmentAtom);
-  const allowances = useMemo(() => flattenSubscriptionAllowances(environments), [environments]);
+  const projection = useMemo(() => reconcileSubscriptionAllowances(environments), [environments]);
   const refreshAllowance = useAtomCommand(serverEnvironment.refreshSubscriptionAllowance, {
     reportFailure: false,
   });
@@ -82,26 +81,20 @@ export function useSubscriptionAllowance(): SubscriptionAllowanceView {
   const refresh = useCallback(() => {
     setIsRefreshing(true);
     void Promise.all(
-      environments.map((environment) =>
+      projection.refreshEnvironmentIds.map((environmentId) =>
         refreshAllowance({
-          environmentId: environment.environmentId,
+          environmentId,
           input: {},
         }),
       ),
     ).finally(() => setIsRefreshing(false));
-  }, [environments, refreshAllowance]);
-
-  const answeredCount = environments.filter((environment) => environment.snapshot !== null).length;
-  const stillReporting = environments.filter(
-    (environment) => environment.snapshot === null && environment.error === null,
-  ).length;
+  }, [projection.refreshEnvironmentIds, refreshAllowance]);
 
   return {
-    allowances,
-    environments,
-    isPending: answeredCount === 0 && stillReporting > 0,
-    isPartial: answeredCount > 0 && stillReporting > 0,
+    ...projection,
     isRefreshing,
     refresh,
   };
 }
+
+export type { EnvironmentSubscriptionAllowanceStatus, SubscriptionAllowanceSource };

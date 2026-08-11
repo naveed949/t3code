@@ -1,4 +1,6 @@
-import type { SubscriptionAllowance, UsageProviderKind } from "@t3tools/contracts";
+import type { SubscriptionAllowanceGroup } from "@t3tools/client-runtime/state/subscription-allowance";
+import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import type { UsageProviderKind } from "@t3tools/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -454,9 +456,27 @@ function SubscriptionUsagePage({
 }: {
   readonly onViewChange: (view: UsageView) => void;
 }) {
-  const { allowances, environments, isPending, isPartial, isRefreshing, refresh } =
+  const { groups, environments, isPending, isPartial, isRefreshing, refresh } =
     useSubscriptionAllowance();
-  const failedEnvironments = environments.filter((environment) => environment.error !== null);
+  const environmentNotices = environments.flatMap((environment) => {
+    if (environment.error !== null) {
+      return [
+        {
+          environmentId: environment.environmentId,
+          message: `${environment.label} could not report subscription usage.`,
+        },
+      ];
+    }
+    if (environment.snapshot === null && environment.connectionPhase !== "connected") {
+      return [
+        {
+          environmentId: environment.environmentId,
+          message: `${environment.label} is ${formatAllowanceConnectionPhase(environment.connectionPhase).toLowerCase()}; subscription usage will return when it reconnects.`,
+        },
+      ];
+    }
+    return [];
+  });
   const settling = isPending || isPartial;
 
   return (
@@ -486,29 +506,33 @@ function SubscriptionUsagePage({
           <div className="border border-border px-4 py-6 text-sm text-muted-foreground">
             Reading provider allowance…
           </div>
-        ) : allowances.length === 0 ? (
+        ) : groups.length === 0 ? (
           <div className="flex flex-col gap-1 border border-border px-4 py-6 text-sm text-muted-foreground">
-            {failedEnvironments.map((environment) => (
-              <span key={environment.environmentId}>
-                {environment.label} could not report subscription usage.
-              </span>
-            ))}
-            <span>No enabled provider reports subscription allowance data.</span>
+            {environmentNotices.length > 0 ? (
+              environmentNotices.map((notice) => (
+                <span key={notice.environmentId}>{notice.message}</span>
+              ))
+            ) : (
+              <span>No enabled provider reports subscription allowance data.</span>
+            )}
           </div>
         ) : (
           <>
+            {environmentNotices.length > 0 ? (
+              <div className="flex flex-col gap-1 border border-border px-4 py-3 text-xs text-muted-foreground">
+                {environmentNotices.map((notice) => (
+                  <span key={notice.environmentId}>{notice.message}</span>
+                ))}
+              </div>
+            ) : null}
             {isPartial ? (
               <p className="text-xs text-muted-foreground">
                 Some environments are still reporting.
               </p>
             ) : null}
             <section className="grid gap-4 lg:grid-cols-2">
-              {allowances.map((entry) => (
-                <SubscriptionAllowanceCard
-                  key={`${entry.environmentId}:${entry.allowance.instanceId}`}
-                  environmentLabel={entry.environmentLabel}
-                  allowance={entry.allowance}
-                />
+              {groups.map((group) => (
+                <SubscriptionAllowanceCard key={group.key} group={group} />
               ))}
             </section>
           </>
@@ -518,22 +542,30 @@ function SubscriptionUsagePage({
   );
 }
 
-function SubscriptionAllowanceCard({
-  environmentLabel,
-  allowance,
-}: {
-  readonly environmentLabel: string;
-  readonly allowance: SubscriptionAllowance;
-}) {
+function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllowanceGroup }) {
+  const displayedSource = group.effectiveSource ?? group.sources[0]!;
+  const { allowance } = displayedSource;
+  const sourceConnectionLabel = formatAllowanceConnectionPhase(displayedSource.connectionPhase);
+  const sourceLabel = [
+    displayedSource.environmentLabel,
+    allowance.instanceId,
+    sourceConnectionLabel,
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
+
   return (
     <article className="flex flex-col gap-5 border border-border p-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
           <ProviderMark provider={allowance.provider} className="size-4" />
           {PROVIDER_LABEL[allowance.provider]}
+          {group.accountLabel !== null ? (
+            <span className="font-normal text-muted-foreground">{group.accountLabel}</span>
+          ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span>{environmentLabel}</span>
+          <span>{sourceLabel}</span>
           <span className={allowance.freshness === "stale" ? "text-amber-600" : undefined}>
             {allowance.freshness === "stale"
               ? "Stale"
@@ -652,8 +684,49 @@ function SubscriptionAllowanceCard({
           ) : null}
         </>
       )}
+      {group.hasMultipleReadings ? (
+        <p className="border-t border-border pt-3 text-xs text-muted-foreground">
+          Multiple readings are available; showing one whole provider source.
+        </p>
+      ) : null}
+      {group.sources.length > 1 ? (
+        <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+          <span>Sources</span>
+          {group.sources.map((source, index) => (
+            <span key={`${source.environmentId}:${source.allowance.instanceId}:${index}`}>
+              {source.environmentLabel} · {source.allowance.instanceId}
+              {formatAllowanceConnectionPhase(source.connectionPhase) === null
+                ? ""
+                : ` · ${formatAllowanceConnectionPhase(source.connectionPhase)?.toLowerCase()}`}
+              {source.allowance.status === "unavailable"
+                ? " · unavailable"
+                : source.allowance.freshness === "stale"
+                  ? " · stale"
+                  : " · current"}
+              {group.effectiveSource === source ? " · shown" : ""}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </article>
   );
+}
+
+function formatAllowanceConnectionPhase(phase: EnvironmentConnectionPhase): string {
+  switch (phase) {
+    case "available":
+      return "Available";
+    case "offline":
+      return "Offline";
+    case "connecting":
+      return "Connecting";
+    case "reconnecting":
+      return "Reconnecting";
+    case "connected":
+      return "Connected";
+    case "error":
+      return "Connection failed";
+  }
 }
 
 /** Brand mark for the harness a row belongs to. */
