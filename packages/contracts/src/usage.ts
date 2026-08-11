@@ -209,6 +209,19 @@ export type SubscriptionAllowanceStatus = typeof SubscriptionAllowanceStatus.Typ
 export const SubscriptionAllowanceFreshness = Schema.Literals(["fresh", "stale"]);
 export type SubscriptionAllowanceFreshness = typeof SubscriptionAllowanceFreshness.Type;
 
+/** Whether an allowance record contains a complete provider observation. */
+export const SubscriptionAllowanceCompleteness = Schema.Literals(["complete", "partial"]);
+export type SubscriptionAllowanceCompleteness = typeof SubscriptionAllowanceCompleteness.Type;
+
+/** The provider observation that supplied the allowance facts. */
+export const SubscriptionAllowanceObservationSource = Schema.Literals(["snapshot", "liveUpdate"]);
+export type SubscriptionAllowanceObservationSource =
+  typeof SubscriptionAllowanceObservationSource.Type;
+
+/** Whether the current client delivery came directly from the environment or its cache. */
+export const SubscriptionAllowanceDeliverySource = Schema.Literals(["live", "cache"]);
+export type SubscriptionAllowanceDeliverySource = typeof SubscriptionAllowanceDeliverySource.Type;
+
 /**
  * Provider-native allowance bucket identifiers. Codex currently uses the
  * generic primary/secondary names; Claude supplies names such as
@@ -257,6 +270,13 @@ export const SubscriptionAllowance = Schema.Struct({
   instanceId: ProviderInstanceId,
   status: SubscriptionAllowanceStatus,
   freshness: Schema.optional(SubscriptionAllowanceFreshness),
+  completeness: Schema.optional(SubscriptionAllowanceCompleteness),
+  observationSource: Schema.optional(SubscriptionAllowanceObservationSource),
+  deliverySource: Schema.optional(SubscriptionAllowanceDeliverySource),
+  /** Equality-only provider identity; clients must never render or log it. */
+  verifiedAccountId: Schema.optionalKey(TrimmedNonEmptyString),
+  /** Provider-reported privacy-safe descriptor, when available. */
+  maskedAccountLabel: Schema.optionalKey(TrimmedNonEmptyString),
   updatedAt: Schema.optional(IsoDateTime),
   windows: Schema.Array(SubscriptionAllowanceWindow),
   credits: Schema.optionalKey(Schema.Union([SubscriptionAllowanceCredits, Schema.Null])),
