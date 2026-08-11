@@ -24,6 +24,7 @@ import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./U
 import {
   formatAllowanceDuration,
   formatAllowanceResetAt,
+  formatAllowanceUpdatedAt,
   formatAllowanceWindowScope,
   progressWidthForAllowance,
 } from "./usageAllowance";
@@ -453,7 +454,8 @@ function SubscriptionUsagePage({
 }: {
   readonly onViewChange: (view: UsageView) => void;
 }) {
-  const { allowances, environments, isPending, isPartial, refresh } = useSubscriptionAllowance();
+  const { allowances, environments, isPending, isPartial, isRefreshing, refresh } =
+    useSubscriptionAllowance();
   const failedEnvironments = environments.filter((environment) => environment.error !== null);
   const settling = isPending || isPartial;
 
@@ -472,7 +474,9 @@ function SubscriptionUsagePage({
             type="button"
             onClick={refresh}
             aria-label="Refresh subscription usage"
-            className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground"
+            aria-busy={isRefreshing}
+            disabled={isRefreshing}
+            className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCwIcon className="size-3.5" />
           </button>
@@ -528,7 +532,17 @@ function SubscriptionAllowanceCard({
           <ProviderMark provider={allowance.provider} className="size-4" />
           {PROVIDER_LABEL[allowance.provider]}
         </h2>
-        <span className="text-xs text-muted-foreground">{environmentLabel}</span>
+        <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+          <span>{environmentLabel}</span>
+          <span className={allowance.freshness === "stale" ? "text-amber-600" : undefined}>
+            {allowance.freshness === "stale"
+              ? "Stale"
+              : (() => {
+                  const updatedAt = formatAllowanceUpdatedAt(allowance.updatedAt);
+                  return updatedAt === null ? "Updated time unavailable" : `Updated ${updatedAt}`;
+                })()}
+          </span>
+        </div>
       </div>
 
       {allowance.status === "unavailable" ? (

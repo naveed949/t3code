@@ -714,10 +714,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverGetUsageSummary,
       staleTimeMs: 60_000,
     }),
-    subscriptionAllowance: createEnvironmentRpcQueryAtomFamily(runtime, {
+    subscriptionAllowance: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:subscription-allowance",
-      tag: WS_METHODS.serverGetSubscriptionAllowance,
-      staleTimeMs: 60_000,
+      tag: WS_METHODS.subscribeSubscriptionAllowance,
+      idleTtlMs: 0,
     }),
     configProjection,
     welcome: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
@@ -731,6 +731,14 @@ export function createServerEnvironmentAtoms<R, E>(
     refreshProviders: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:refresh-providers",
       tag: WS_METHODS.serverRefreshProviders,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId }) => environmentId,
+      },
+    }),
+    refreshSubscriptionAllowance: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:refresh-subscription-allowance",
+      tag: WS_METHODS.serverRefreshSubscriptionAllowance,
       concurrency: {
         mode: "singleFlight",
         key: ({ environmentId }) => environmentId,

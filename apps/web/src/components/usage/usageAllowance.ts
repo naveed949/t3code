@@ -44,3 +44,13 @@ export function formatAllowanceResetAt(resetsAt: string): string {
     timeStyle: "short",
   }).format(new Date(resetsAt));
 }
+
+export function formatAllowanceUpdatedAt(updatedAt: string | null | undefined): string | null {
+  if (updatedAt === null || updatedAt === undefined) return null;
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}

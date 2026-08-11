@@ -4085,6 +4085,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes authenticated websocket rpc server.refreshSubscriptionAllowance", () =>
+    Effect.gen(function* () {
+      const snapshot = {
+        readAt: "2026-08-11T12:00:00.000Z",
+        allowances: [
+          {
+            provider: "codex" as const,
+            instanceId: ProviderInstanceId.make("codex"),
+            status: "available" as const,
+            freshness: "fresh" as const,
+            updatedAt: "2026-08-11T12:00:00.000Z",
+            windows: [{ scope: "primary" as const, usedPercent: 24 }],
+          },
+        ],
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          subscriptionAllowance: { refresh: Effect.succeed(snapshot) },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.serverRefreshSubscriptionAllowance]({}),
+        ),
+      );
+
+      assert.deepEqual(response, snapshot);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("does not block server config when editor discovery never resolves", () =>
     Effect.gen(function* () {
       const discoveryInterrupted = yield* Deferred.make<void>();
@@ -4671,6 +4703,41 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(Option.isSome(snapshot));
       assert.equal(snapshot.value.processes.length, 0);
       assert.equal(snapshot.value.groups.backend.processCount, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket subscription allowance snapshots through the subscription", () =>
+    Effect.gen(function* () {
+      const snapshot = {
+        readAt: "2026-08-11T12:00:00.000Z",
+        allowances: [
+          {
+            provider: "codex" as const,
+            instanceId: ProviderInstanceId.make("codex"),
+            status: "available" as const,
+            freshness: "fresh" as const,
+            updatedAt: "2026-08-11T12:00:00.000Z",
+            windows: [{ scope: "primary" as const, usedPercent: 24 }],
+          },
+        ],
+      };
+      yield* buildAppUnderTest({
+        layers: {
+          subscriptionAllowance: {
+            subscribe: Effect.succeed({ latest: snapshot, changes: Stream.empty }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeSubscriptionAllowance]({}).pipe(Stream.runHead),
+        ),
+      );
+
+      assertTrue(Option.isSome(response));
+      assert.deepEqual(response.value, snapshot);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

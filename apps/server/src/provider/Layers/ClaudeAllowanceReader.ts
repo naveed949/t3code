@@ -7,10 +7,12 @@ import {
 import type {
   ClaudeSettings,
   ProviderInstanceId,
+  ProviderRuntimeEvent,
   SubscriptionAllowance,
   SubscriptionAllowanceExtraUsage,
   SubscriptionAllowanceWindow,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -93,6 +95,55 @@ const mapExtraUsage = (
     ...(extraUsage.currency === undefined ? {} : { currency: extraUsage.currency }),
   };
 };
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === "object" && value !== null;
+
+const mapEpochSecondsOrMillis = (value: unknown): string | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const epochMillis = value > 10_000_000_000 ? value : value * 1_000;
+  return DateTime.formatIso(DateTime.makeUnsafe(epochMillis));
+};
+
+/** Maps Claude's sparse `rate_limit_event` into the common sparse allowance shape. */
+export function mapClaudeRateLimitEvent(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly event: ProviderRuntimeEvent;
+}): SubscriptionAllowance | undefined {
+  const { event } = input;
+  if (event.provider !== "claude" || event.type !== "account.rate-limits.updated") {
+    return undefined;
+  }
+  const payload = event.payload.rateLimits;
+  if (!isRecord(payload)) return undefined;
+  const info = isRecord(payload.rate_limit_info) ? payload.rate_limit_info : payload;
+  const rateLimitType = info.rateLimitType;
+  const scope =
+    rateLimitType === "five_hour" ||
+    rateLimitType === "seven_day" ||
+    rateLimitType === "seven_day_opus" ||
+    rateLimitType === "seven_day_sonnet" ||
+    rateLimitType === "overage"
+      ? rateLimitType
+      : undefined;
+  if (scope === undefined) return undefined;
+
+  const usedPercent = typeof info.utilization === "number" ? info.utilization : undefined;
+  const resetValue = scope === "overage" ? (info.overageResetsAt ?? info.resetsAt) : info.resetsAt;
+  const resetsAt = mapEpochSecondsOrMillis(resetValue);
+  return {
+    provider: "claude",
+    instanceId: input.instanceId,
+    status: "available",
+    windows: [
+      {
+        scope,
+        ...(usedPercent === undefined ? {} : { usedPercent }),
+        ...(resetsAt === undefined ? {} : { resetsAt }),
+      },
+    ],
+  } satisfies SubscriptionAllowance;
+}
 
 export function mapClaudeUsage(input: {
   readonly instanceId: ProviderInstanceId;
@@ -227,6 +278,7 @@ export const makeClaudeAllowanceReader = Effect.fn("makeClaudeAllowanceReader")(
   return {
     provider: "claude",
     read,
+    update: (event) => mapClaudeRateLimitEvent({ instanceId: input.instanceId, event }),
   } satisfies ProviderAllowanceReader;
 });
 

@@ -1,4 +1,8 @@
-import type { SubscriptionAllowance, SubscriptionAllowanceProviderKind } from "@t3tools/contracts";
+import type {
+  ProviderRuntimeEvent,
+  SubscriptionAllowance,
+  SubscriptionAllowanceProviderKind,
+} from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -21,4 +25,9 @@ export class ProviderAllowanceReadError extends Schema.TaggedErrorClass<Provider
 export interface ProviderAllowanceReader {
   readonly provider: SubscriptionAllowanceProviderKind;
   readonly read: Effect.Effect<SubscriptionAllowance, ProviderAllowanceReadError>;
+  /**
+   * Maps a provider-native runtime update into a sparse allowance observation.
+   * The lifecycle owns folding it into the last complete record.
+   */
+  readonly update?: (event: ProviderRuntimeEvent) => SubscriptionAllowance | undefined;
 }

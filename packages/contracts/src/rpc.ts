@@ -252,6 +252,7 @@ export const WS_METHODS = {
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
   serverGetSubscriptionAllowance: "server.getSubscriptionAllowance",
+  serverRefreshSubscriptionAllowance: "server.refreshSubscriptionAllowance",
 
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
@@ -273,6 +274,7 @@ export const WS_METHODS = {
   subscribeAuthAccess: "subscribeAuthAccess",
   subscribeBackgroundPolicy: "subscribeBackgroundPolicy",
   subscribeResourceTelemetry: "subscribeResourceTelemetry",
+  subscribeSubscriptionAllowance: "subscribeSubscriptionAllowance",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -397,6 +399,15 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
 
 export const WsServerGetSubscriptionAllowanceRpc = Rpc.make(
   WS_METHODS.serverGetSubscriptionAllowance,
+  {
+    payload: Schema.Struct({}),
+    success: SubscriptionAllowanceSnapshot,
+    error: EnvironmentAuthorizationError,
+  },
+);
+
+export const WsServerRefreshSubscriptionAllowanceRpc = Rpc.make(
+  WS_METHODS.serverRefreshSubscriptionAllowance,
   {
     payload: Schema.Struct({}),
     success: SubscriptionAllowanceSnapshot,
@@ -825,6 +836,16 @@ export const WsSubscribeResourceTelemetryRpc = Rpc.make(WS_METHODS.subscribeReso
   stream: true,
 });
 
+export const WsSubscribeSubscriptionAllowanceRpc = Rpc.make(
+  WS_METHODS.subscribeSubscriptionAllowance,
+  {
+    payload: Schema.Struct({}),
+    success: SubscriptionAllowanceSnapshot,
+    error: EnvironmentAuthorizationError,
+    stream: true,
+  },
+);
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -844,6 +865,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
   WsServerGetSubscriptionAllowanceRpc,
+  WsServerRefreshSubscriptionAllowanceRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,
   WsServerReportHostPowerStateRpc,
@@ -901,6 +923,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeAuthAccessRpc,
   WsSubscribeBackgroundPolicyRpc,
   WsSubscribeResourceTelemetryRpc,
+  WsSubscribeSubscriptionAllowanceRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetWorkflowScriptRpc,
   WsOrchestrationGetTurnDiffRpc,

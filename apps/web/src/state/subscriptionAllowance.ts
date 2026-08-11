@@ -1,3 +1,4 @@
+import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomValue } from "@effect/atom-react";
 import {
   type EnvironmentId,
@@ -6,9 +7,8 @@ import {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentPresentations } from "./presentation";
 import { serverEnvironment } from "./server";
 
@@ -67,23 +67,29 @@ export interface SubscriptionAllowanceView {
   readonly environments: readonly EnvironmentSubscriptionAllowanceStatus[];
   readonly isPending: boolean;
   readonly isPartial: boolean;
+  readonly isRefreshing: boolean;
   readonly refresh: () => void;
 }
 
 export function useSubscriptionAllowance(): SubscriptionAllowanceView {
   const environments = useAtomValue(subscriptionAllowanceByEnvironmentAtom);
   const allowances = useMemo(() => flattenSubscriptionAllowances(environments), [environments]);
+  const refreshAllowance = useAtomCommand(serverEnvironment.refreshSubscriptionAllowance, {
+    reportFailure: false,
+  });
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const refresh = useCallback(() => {
-    for (const environment of environments) {
-      appAtomRegistry.refresh(
-        serverEnvironment.subscriptionAllowance({
+    setIsRefreshing(true);
+    void Promise.all(
+      environments.map((environment) =>
+        refreshAllowance({
           environmentId: environment.environmentId,
           input: {},
         }),
-      );
-    }
-  }, [environments]);
+      ),
+    ).finally(() => setIsRefreshing(false));
+  }, [environments, refreshAllowance]);
 
   const answeredCount = environments.filter((environment) => environment.snapshot !== null).length;
   const stillReporting = environments.filter(
@@ -95,6 +101,7 @@ export function useSubscriptionAllowance(): SubscriptionAllowanceView {
     environments,
     isPending: answeredCount === 0 && stillReporting > 0,
     isPartial: answeredCount > 0 && stillReporting > 0,
+    isRefreshing,
     refresh,
   };
 }

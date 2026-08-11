@@ -6,11 +6,18 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
+import {
+  EventId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  type ProviderRuntimeEvent,
+} from "@t3tools/contracts";
 
 import {
   CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
   makeClaudeAllowanceReader,
+  mapClaudeRateLimitEvent,
   mapClaudeUsage,
 } from "./ClaudeAllowanceReader.ts";
 
@@ -99,6 +106,43 @@ describe("mapClaudeUsage", () => {
       status: "unavailable",
       windows: [],
       message: CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
+    });
+  });
+});
+
+describe("mapClaudeRateLimitEvent", () => {
+  it("maps the Claude SDK sparse rate-limit event", () => {
+    const event = {
+      type: "account.rate-limits.updated",
+      eventId: EventId.make("claude-rate-limit-event"),
+      provider: ProviderDriverKind.make("claude"),
+      providerInstanceId: instanceId,
+      threadId: ThreadId.make("thread-rate-limit"),
+      createdAt: "2026-08-11T12:00:00.000Z",
+      payload: {
+        rateLimits: {
+          type: "rate_limit_event",
+          rate_limit_info: {
+            status: "allowed",
+            rateLimitType: "five_hour",
+            utilization: 34,
+            resetsAt: Date.parse("2026-08-11T17:00:00.000Z"),
+          },
+        },
+      },
+    } satisfies Extract<ProviderRuntimeEvent, { type: "account.rate-limits.updated" }>;
+
+    expect(mapClaudeRateLimitEvent({ instanceId, event })).toEqual({
+      provider: "claude",
+      instanceId,
+      status: "available",
+      windows: [
+        {
+          scope: "five_hour",
+          usedPercent: 34,
+          resetsAt: "2026-08-11T17:00:00.000Z",
+        },
+      ],
     });
   });
 });

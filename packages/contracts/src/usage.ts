@@ -205,6 +205,10 @@ export type SubscriptionAllowanceProviderKind = typeof SubscriptionAllowanceProv
 export const SubscriptionAllowanceStatus = Schema.Literals(["available", "unavailable"]);
 export type SubscriptionAllowanceStatus = typeof SubscriptionAllowanceStatus.Type;
 
+/** Whether the provider observation is current or only retained after a failed refresh. */
+export const SubscriptionAllowanceFreshness = Schema.Literals(["fresh", "stale"]);
+export type SubscriptionAllowanceFreshness = typeof SubscriptionAllowanceFreshness.Type;
+
 /**
  * Provider-native allowance bucket identifiers. Codex currently uses the
  * generic primary/secondary names; Claude supplies names such as
@@ -252,6 +256,8 @@ export const SubscriptionAllowance = Schema.Struct({
   provider: SubscriptionAllowanceProviderKind,
   instanceId: ProviderInstanceId,
   status: SubscriptionAllowanceStatus,
+  freshness: Schema.optional(SubscriptionAllowanceFreshness),
+  updatedAt: Schema.optional(IsoDateTime),
   windows: Schema.Array(SubscriptionAllowanceWindow),
   credits: Schema.optionalKey(Schema.Union([SubscriptionAllowanceCredits, Schema.Null])),
   spendingControl: Schema.optionalKey(
