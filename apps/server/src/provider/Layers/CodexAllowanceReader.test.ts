@@ -1,8 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import * as CodexSchema from "effect-codex-app-server/schema";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { mapCodexRateLimits } from "./CodexAllowanceReader.ts";
+import {
+  EventId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  type ProviderRuntimeEvent,
+} from "@t3tools/contracts";
+import { mapCodexRateLimits, mapCodexRateLimitsUpdate } from "./CodexAllowanceReader.ts";
 
 const instanceId = ProviderInstanceId.make("codex");
 
@@ -97,6 +103,54 @@ describe("mapCodexRateLimits", () => {
       status: "unavailable",
       windows: [],
       message: "Codex did not provide subscription usage limits.",
+    });
+  });
+
+  it("maps sparse native rate-limit events for server-side folding", () => {
+    const event = {
+      type: "account.rate-limits.updated",
+      eventId: EventId.make("codex-rate-limit-event"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: instanceId,
+      threadId: ThreadId.make("thread-rate-limit"),
+      createdAt: "2026-08-11T12:00:00.000Z",
+      payload: {
+        rateLimits: {
+          primary: { usedPercent: 37 },
+        },
+      },
+    } satisfies Extract<ProviderRuntimeEvent, { type: "account.rate-limits.updated" }>;
+
+    expect(mapCodexRateLimitsUpdate({ instanceId, event })).toEqual({
+      provider: "codex",
+      instanceId,
+      status: "available",
+      windows: [{ scope: "primary", usedPercent: 37 }],
+    });
+  });
+
+  it("does not treat unavailable nullable rolling fields as clears", () => {
+    const event = {
+      type: "account.rate-limits.updated",
+      eventId: EventId.make("codex-nullable-rate-limit-event"),
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: instanceId,
+      threadId: ThreadId.make("thread-nullable-rate-limit"),
+      createdAt: "2026-08-11T12:00:00.000Z",
+      payload: {
+        rateLimits: {
+          primary: { usedPercent: 37, windowDurationMins: null, resetsAt: null },
+          credits: { balance: null, hasCredits: true, unlimited: false },
+        },
+      },
+    } satisfies Extract<ProviderRuntimeEvent, { type: "account.rate-limits.updated" }>;
+
+    expect(mapCodexRateLimitsUpdate({ instanceId, event })).toEqual({
+      provider: "codex",
+      instanceId,
+      status: "available",
+      windows: [{ scope: "primary", usedPercent: 37 }],
+      credits: { hasCredits: true, unlimited: false },
     });
   });
 });

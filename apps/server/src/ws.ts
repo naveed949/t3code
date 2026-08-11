@@ -1572,6 +1572,14 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetSubscriptionAllowance, subscriptionAllowance.read, {
             "rpc.aggregate": "server",
           }),
+        [WS_METHODS.serverRefreshSubscriptionAllowance]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverRefreshSubscriptionAllowance,
+            subscriptionAllowance.refresh,
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) =>
           observeRpcEffect(WS_METHODS.serverRetryResourceTelemetry, resourceTelemetry.retry, {
             "rpc.aggregate": "server",
@@ -2193,6 +2201,16 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeResourceTelemetry,
             Stream.unwrap(
               Effect.map(resourceTelemetry.subscribe, ({ latest, changes }) =>
+                Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeSubscriptionAllowance]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeSubscriptionAllowance,
+            Stream.unwrap(
+              Effect.map(subscriptionAllowance.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
               ),
             ),

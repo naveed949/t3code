@@ -5,9 +5,11 @@ import * as CodexSchema from "effect-codex-app-server/schema";
 
 import {
   type ProviderInstanceId,
+  type ProviderRuntimeEvent,
   type SubscriptionAllowance,
   type SubscriptionAllowanceWindow,
 } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 
 import type { ProviderAllowanceReader } from "../Services/ProviderAllowanceReader.ts";
 import { ProviderAllowanceReadError } from "../Services/ProviderAllowanceReader.ts";
@@ -31,6 +33,24 @@ const mapWindow = (
       ? {}
       : { windowDurationMins: window.windowDurationMins }),
     ...(window.resetsAt === undefined ? {} : { resetsAt: mapNativeEpochSeconds(window.resetsAt) }),
+  };
+};
+
+const mapSparseWindow = (
+  scope: SubscriptionAllowanceWindow["scope"],
+  window: CodexSchema.V2AccountRateLimitsUpdatedNotification__RateLimitWindow | null | undefined,
+): SubscriptionAllowanceWindow | undefined => {
+  if (window === null || window === undefined) return undefined;
+
+  return {
+    scope,
+    usedPercent: window.usedPercent,
+    ...(window.windowDurationMins === undefined || window.windowDurationMins === null
+      ? {}
+      : { windowDurationMins: window.windowDurationMins }),
+    ...(window.resetsAt === undefined || window.resetsAt === null
+      ? {}
+      : { resetsAt: mapNativeEpochSeconds(window.resetsAt) }),
   };
 };
 
@@ -89,6 +109,65 @@ export function mapCodexRateLimits(input: {
   } satisfies SubscriptionAllowance;
 }
 
+const isCodexRateLimitSnapshot = Schema.is(
+  CodexSchema.V2GetAccountRateLimitsResponse__RateLimitSnapshot,
+);
+
+export function mapCodexRateLimitsUpdate(input: {
+  readonly instanceId: ProviderInstanceId;
+  readonly event: ProviderRuntimeEvent;
+}): SubscriptionAllowance | undefined {
+  const { event } = input;
+  if (event.provider !== "codex" || event.type !== "account.rate-limits.updated") {
+    return undefined;
+  }
+  const rateLimits = event.payload.rateLimits;
+  if (!isCodexRateLimitSnapshot(rateLimits)) return undefined;
+
+  const windows = [
+    mapSparseWindow("primary", rateLimits.primary),
+    mapSparseWindow("secondary", rateLimits.secondary),
+  ].filter((window): window is SubscriptionAllowanceWindow => window !== undefined);
+  const credits =
+    rateLimits.credits === null || rateLimits.credits === undefined
+      ? undefined
+      : {
+          ...(rateLimits.credits.balance === undefined || rateLimits.credits.balance === null
+            ? {}
+            : { balance: rateLimits.credits.balance }),
+          hasCredits: rateLimits.credits.hasCredits,
+          unlimited: rateLimits.credits.unlimited,
+        };
+  const hasReachedState =
+    rateLimits.spendControlReached !== undefined && rateLimits.spendControlReached !== null;
+  const individualLimit = rateLimits.individualLimit;
+  const spendingControl =
+    individualLimit !== undefined && individualLimit !== null
+      ? {
+          ...(hasReachedState ? { reached: rateLimits.spendControlReached } : {}),
+          limit: individualLimit.limit,
+          remainingPercent: individualLimit.remainingPercent,
+          resetsAt: DateTime.formatIso(DateTime.makeUnsafe(individualLimit.resetsAt * 1_000)),
+          used: individualLimit.used,
+        }
+      : hasReachedState
+        ? { reached: rateLimits.spendControlReached }
+        : undefined;
+
+  if (windows.length === 0 && credits === undefined && spendingControl === undefined) {
+    return undefined;
+  }
+
+  return {
+    provider: "codex",
+    instanceId: input.instanceId,
+    status: "available",
+    windows,
+    ...(credits === undefined ? {} : { credits }),
+    ...(spendingControl === undefined ? {} : { spendingControl }),
+  } satisfies SubscriptionAllowance;
+}
+
 export interface CodexAllowanceReaderInput extends CodexAppServerClientInput {
   readonly instanceId: ProviderInstanceId;
   readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
@@ -119,5 +198,6 @@ export function makeCodexAllowanceReader(
   return {
     provider: "codex",
     read,
+    update: (event) => mapCodexRateLimitsUpdate({ instanceId: input.instanceId, event }),
   };
 }
