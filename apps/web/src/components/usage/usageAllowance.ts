@@ -1,7 +1,24 @@
 import type { SubscriptionAllowanceWindowScope } from "@t3tools/contracts";
 
 export function formatAllowanceWindowScope(scope: SubscriptionAllowanceWindowScope): string {
-  return scope === "primary" ? "Primary limit" : "Secondary limit";
+  switch (scope) {
+    case "primary":
+      return "Primary limit";
+    case "secondary":
+      return "Secondary limit";
+    case "five_hour":
+      return "5-hour limit";
+    case "seven_day":
+      return "7-day limit";
+    case "seven_day_oauth_apps":
+      return "7-day OAuth apps limit";
+    case "seven_day_opus":
+      return "7-day Opus limit";
+    case "seven_day_sonnet":
+      return "7-day Sonnet limit";
+    default:
+      return scope;
+  }
 }
 
 export function formatAllowanceDuration(minutes: number | null | undefined): string | null {
