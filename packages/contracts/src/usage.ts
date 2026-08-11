@@ -14,7 +14,8 @@
  */
 import * as Schema from "effect/Schema";
 
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 
 /**
  * Bumped whenever the shape of {@link UsageSummary} changes incompatibly. The
@@ -192,3 +193,60 @@ export class UsageReadError extends Schema.TaggedErrorClass<UsageReadError>()("U
     return `Usage read failed (${this.reason}): ${this.detail}`;
   }
 }
+
+/**
+ * Provider-native subscription allowance reporting. This is deliberately
+ * separate from {@link UsageSummary}: transcript history and live allowance
+ * snapshots have different sources, freshness, and failure semantics.
+ */
+export const SubscriptionAllowanceProviderKind = Schema.Literals(["claude", "codex"]);
+export type SubscriptionAllowanceProviderKind = typeof SubscriptionAllowanceProviderKind.Type;
+
+export const SubscriptionAllowanceStatus = Schema.Literals(["available", "unavailable"]);
+export type SubscriptionAllowanceStatus = typeof SubscriptionAllowanceStatus.Type;
+
+export const SubscriptionAllowanceWindowScope = Schema.Literals(["primary", "secondary"]);
+export type SubscriptionAllowanceWindowScope = typeof SubscriptionAllowanceWindowScope.Type;
+
+export const SubscriptionAllowanceWindow = Schema.Struct({
+  scope: SubscriptionAllowanceWindowScope,
+  usedPercent: Schema.Number,
+  windowDurationMins: Schema.optionalKey(Schema.Union([NonNegativeInt, Schema.Null])),
+  resetsAt: Schema.optionalKey(Schema.Union([IsoDateTime, Schema.Null])),
+});
+export type SubscriptionAllowanceWindow = typeof SubscriptionAllowanceWindow.Type;
+
+export const SubscriptionAllowanceCredits = Schema.Struct({
+  balance: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+  hasCredits: Schema.Boolean,
+  unlimited: Schema.Boolean,
+});
+export type SubscriptionAllowanceCredits = typeof SubscriptionAllowanceCredits.Type;
+
+export const SubscriptionAllowanceSpendingControl = Schema.Struct({
+  reached: Schema.optionalKey(Schema.Union([Schema.Boolean, Schema.Null])),
+  limit: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+  remainingPercent: Schema.optionalKey(Schema.Union([Schema.Number, Schema.Null])),
+  resetsAt: Schema.optionalKey(Schema.Union([IsoDateTime, Schema.Null])),
+  used: Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])),
+});
+export type SubscriptionAllowanceSpendingControl = typeof SubscriptionAllowanceSpendingControl.Type;
+
+export const SubscriptionAllowance = Schema.Struct({
+  provider: SubscriptionAllowanceProviderKind,
+  instanceId: ProviderInstanceId,
+  status: SubscriptionAllowanceStatus,
+  windows: Schema.Array(SubscriptionAllowanceWindow),
+  credits: Schema.optionalKey(Schema.Union([SubscriptionAllowanceCredits, Schema.Null])),
+  spendingControl: Schema.optionalKey(
+    Schema.Union([SubscriptionAllowanceSpendingControl, Schema.Null]),
+  ),
+  message: Schema.optionalKey(TrimmedNonEmptyString),
+});
+export type SubscriptionAllowance = typeof SubscriptionAllowance.Type;
+
+export const SubscriptionAllowanceSnapshot = Schema.Struct({
+  readAt: IsoDateTime,
+  allowances: Schema.Array(SubscriptionAllowance),
+});
+export type SubscriptionAllowanceSnapshot = typeof SubscriptionAllowanceSnapshot.Type;
