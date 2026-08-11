@@ -45,6 +45,14 @@ export interface SubscriptionAllowanceSource {
   readonly allowance: SubscriptionAllowance;
 }
 
+export function isSubscriptionAllowanceSourceCurrent(source: SubscriptionAllowanceSource): boolean {
+  return (
+    source.connectionPhase === "connected" &&
+    source.allowance.status === "available" &&
+    source.allowance.freshness !== "stale"
+  );
+}
+
 export interface SubscriptionAllowanceGroup {
   /** Opaque local key. Verified account ids are used only to derive this key. */
   readonly key: string;

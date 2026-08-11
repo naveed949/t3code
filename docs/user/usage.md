@@ -1,16 +1,37 @@
 # Usage
 
-Open **Settings** → **Usage** to switch between two views:
+Open **Settings** → **Usage**. The page opens on **Subscription**, and the segmented control lets
+you switch between two independent views:
 
-- **Historical** shows transcript-derived token activity, date windows, charts, and API-equivalent cost.
 - **Subscription** shows the current allowance windows reported by each enabled Codex or Claude provider.
+- **Historical** shows transcript-derived token activity, date windows, charts, and API-equivalent cost.
 
-Subscription allowance is kept separate for each provider and environment. T3 Code displays provider-reported percentages, window scopes, reset times, credits, and spending controls only when the provider supplies them. It does not infer a quota, reset, account status, or combined cross-provider total.
+Subscription allowance is kept separate from Historical usage, and each provider instance and
+environment remains inspectable. T3 Code displays provider-reported percentages, window scopes,
+reset times, credits, and spending controls only when the provider supplies them. It does not infer
+a quota, reset, account status, or combined cross-provider total.
 
-On mobile, use the **Refresh** button or pull down on the Usage screen to request a new observation. Leaving the Subscription view stops its live allowance demand; returning to it starts a fresh snapshot-first subscription. If an environment is offline, its last known reading remains identified by its connection state rather than being presented as current.
+Use **Refresh** on web or mobile to request a new provider observation. On mobile, you can also pull
+down on the Usage screen. A fresh reading is current provider data; a stale reading is retained
+data from before a failed refresh or a passed reset time. T3 Code does not reset percentages locally.
+
+Leaving the Subscription view stops its live allowance updates; returning to it requests a fresh
+reading. If an environment is offline or reconnecting, its last known reading remains identified
+by its connection state and is not presented as current. Multiple environments and provider
+instances are shown separately unless the provider supplies an exact, privacy-safe identity that
+proves they share one allowance account; even then, the displayed group uses one whole source and
+never blends windows from several sources.
 
 When Claude does not provide subscription limits, the Claude section remains visible with this explanation:
 
 > Claude subscription usage is unavailable. Claude did not provide usage limits.
 
-Historical usage remains available independently of subscription allowance reporting.
+This message does not diagnose the account, subscription, OAuth scope, or provider outage. If a
+newer client is connected to an older environment that does not support Subscription, the page
+shows an environment compatibility message while Historical remains available. Older clients can
+continue using Historical when connected to a newer environment because the new connection methods
+are additive.
+
+Historical usage remains available independently of subscription allowance reporting. Subscription
+allowance does not add a new analytics stream or expose credentials, raw provider payloads,
+transcripts, configuration paths, or unmasked account details.

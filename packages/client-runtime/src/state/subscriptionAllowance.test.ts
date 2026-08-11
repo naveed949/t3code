@@ -2,6 +2,7 @@ import { EnvironmentId, ProviderInstanceId, type SubscriptionAllowance } from "@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  isSubscriptionAllowanceSourceCurrent,
   reconcileSubscriptionAllowances,
   type EnvironmentSubscriptionAllowanceStatus,
 } from "./subscriptionAllowance.ts";
@@ -45,6 +46,20 @@ function environment(
 }
 
 describe("reconcileSubscriptionAllowances", () => {
+  it("does not call a disconnected last-known source current", () => {
+    const source = {
+      environmentId: EnvironmentId.make("offline"),
+      environmentLabel: "Offline",
+      connectionPhase: "offline" as const,
+      allowance: allowance("codex-offline"),
+    };
+
+    expect(isSubscriptionAllowanceSourceCurrent(source)).toBe(false);
+    expect(isSubscriptionAllowanceSourceCurrent({ ...source, connectionPhase: "connected" })).toBe(
+      true,
+    );
+  });
+
   it("keeps matching descriptors separate when no verified provider identity exists", () => {
     const result = reconcileSubscriptionAllowances([
       environment("environment-b", [

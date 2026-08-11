@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { subscriptionViewPhase, USAGE_VIEW_OPTIONS } from "./usageView";
+import { DEFAULT_USAGE_VIEW, subscriptionViewPhase, USAGE_VIEW_OPTIONS } from "./usageView";
 
 describe("mobile usage view state", () => {
+  it("opens on the Subscription view", () => {
+    expect(DEFAULT_USAGE_VIEW).toBe("subscription");
+  });
+
   it("keeps the Subscription/Historical labels stable for accessible controls", () => {
     expect(USAGE_VIEW_OPTIONS).toEqual([
       { value: "subscription", label: "Subscription" },

@@ -39,7 +39,12 @@ import {
   type MobileAllowanceCardModel,
 } from "./usageAllowance";
 import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
-import { subscriptionViewPhase, USAGE_VIEW_OPTIONS, type UsageView } from "./usageView";
+import {
+  DEFAULT_USAGE_VIEW,
+  subscriptionViewPhase,
+  USAGE_VIEW_OPTIONS,
+  type UsageView,
+} from "./usageView";
 
 const WINDOW_OPTIONS = [
   { days: 7, label: "7 days" },
@@ -53,7 +58,7 @@ export function UsageRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
-  const [view, setView] = useState<UsageView>("historical");
+  const [view, setView] = useState<UsageView>(DEFAULT_USAGE_VIEW);
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -464,7 +469,9 @@ function AllowanceSources(props: {
             ? " · unavailable"
             : source.freshness === "stale"
               ? " · stale"
-              : " · current"}
+              : source.isCurrent
+                ? " · current"
+                : " · not current"}
           {source.isEffective ? " · shown" : ""}
         </Text>
       ))}

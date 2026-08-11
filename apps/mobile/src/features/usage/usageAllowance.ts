@@ -6,7 +6,10 @@ import type {
   SubscriptionAllowanceSpendingControl,
   SubscriptionAllowanceWindow,
 } from "@t3tools/contracts";
-import { SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE } from "@t3tools/client-runtime/state/subscription-allowance";
+import {
+  isSubscriptionAllowanceSourceCurrent,
+  SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 
 import { PROVIDER_LABEL } from "./usageProviderLabels";
 
@@ -17,6 +20,7 @@ export interface MobileAllowanceSourceModel {
   readonly connectionLabel: string;
   readonly status: SubscriptionAllowance["status"];
   readonly freshness: "fresh" | "stale";
+  readonly isCurrent: boolean;
   readonly isEffective: boolean;
 }
 
@@ -174,6 +178,7 @@ export function presentAllowanceGroup(group: SubscriptionAllowanceGroup): Mobile
       connectionLabel: formatAllowanceConnectionPhase(source.connectionPhase),
       status: source.allowance.status,
       freshness: source.allowance.freshness ?? "fresh",
+      isCurrent: isSubscriptionAllowanceSourceCurrent(source),
       isEffective: source === displayedSource,
     })),
   };
