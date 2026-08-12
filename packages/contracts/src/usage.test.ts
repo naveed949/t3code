@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema";
 import { describe, expect, it } from "@effect/vitest";
 
-import { SubscriptionAllowanceSnapshot, USAGE_CONTRACT_VERSION } from "./usage.ts";
+import { SubscriptionAllowanceSnapshot } from "./usage.ts";
 
 const decodeSnapshot = Schema.decodeUnknownSync(SubscriptionAllowanceSnapshot);
 
@@ -58,8 +58,12 @@ describe("subscription allowance contract", () => {
     expect(snapshot.allowances[1]?.extraUsage?.usedCredits).toBe(2.5);
   });
 
-  it("keeps historical usage contract versioning independent", () => {
-    expect(USAGE_CONTRACT_VERSION).toBe(3);
-    expect(SubscriptionAllowanceSnapshot).toBeDefined();
+  it("keeps allowance snapshots independent from historical contract versioning", () => {
+    const snapshot = decodeSnapshot({
+      readAt: "2026-08-11T12:00:00.000Z",
+      allowances: [],
+    });
+
+    expect(snapshot).not.toHaveProperty("contractVersion");
   });
 });

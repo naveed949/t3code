@@ -11,6 +11,120 @@ import { isRpcMethodNotFoundError } from "../rpc/client.ts";
 export const SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE =
   "Subscription allowance reporting is not supported by this environment version.";
 
+export type UsageView = "subscription" | "historical";
+
+export const DEFAULT_USAGE_VIEW: UsageView = "subscription";
+
+export const USAGE_VIEW_OPTIONS = [
+  { value: "subscription" as const, label: "Subscription" },
+  { value: "historical" as const, label: "Historical" },
+] as const;
+
+export type SubscriptionViewPhase = "loading" | "partial" | "ready";
+
+export function subscriptionViewPhase(input: {
+  readonly isPending: boolean;
+  readonly isPartial: boolean;
+  readonly groupCount: number;
+}): SubscriptionViewPhase {
+  if (input.isPending || (input.isPartial && input.groupCount === 0)) return "loading";
+  return input.isPartial ? "partial" : "ready";
+}
+
+export function formatAllowanceWindowScope(scope: string): string {
+  switch (scope) {
+    case "primary":
+      return "Primary limit";
+    case "secondary":
+      return "Secondary limit";
+    case "five_hour":
+      return "5-hour limit";
+    case "seven_day":
+      return "7-day limit";
+    case "seven_day_oauth_apps":
+      return "7-day OAuth apps limit";
+    case "seven_day_opus":
+      return "7-day Opus limit";
+    case "seven_day_sonnet":
+      return "7-day Sonnet limit";
+    default:
+      return scope;
+  }
+}
+
+export function formatAllowanceDuration(minutes: number | null | undefined): string | null {
+  if (minutes === null || minutes === undefined) return null;
+  if (minutes % (24 * 60) === 0) {
+    const days = minutes / (24 * 60);
+    return `${days} ${days === 1 ? "day" : "days"}`;
+  }
+  if (minutes % 60 === 0) {
+    const hours = minutes / 60;
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`;
+  }
+  return `${minutes} minutes`;
+}
+
+export function progressWidthForAllowance(usedPercent: number): number {
+  return Math.min(100, Math.max(0, usedPercent));
+}
+
+export function formatAllowanceResetAt(resetsAt: string): string {
+  // @effect-diagnostics-next-line globalDate:off
+  const date = new Date(resetsAt);
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
+export function formatAllowanceUpdatedAt(
+  updatedAt: string | null | undefined,
+  // UI formatting is intentionally wall-clock relative and remains a pure helper for both clients.
+  // @effect-diagnostics-next-line globalDate:off
+  now = Date.now(),
+): string | null {
+  if (updatedAt === null || updatedAt === undefined) return null;
+  // @effect-diagnostics-next-line globalDate:off
+  const date = new Date(updatedAt);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const elapsedMinutes = Math.max(0, Math.floor((now - date.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Updated just now";
+  if (elapsedMinutes < 60) return `Updated ${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Updated ${elapsedHours}h ago`;
+  return `Updated ${Math.floor(elapsedHours / 24)}d ago`;
+}
+
+export function formatAllowanceConnectionPhase(phase: EnvironmentConnectionPhase): string {
+  switch (phase) {
+    case "available":
+      return "Available";
+    case "offline":
+      return "Offline";
+    case "connecting":
+      return "Connecting";
+    case "reconnecting":
+      return "Reconnecting";
+    case "connected":
+      return "Connected";
+    case "error":
+      return "Connection failed";
+  }
+}
+
+export function formatAllowanceUnavailableMessage(
+  provider: SubscriptionAllowance["provider"],
+  message: string | undefined,
+): string {
+  if (message !== undefined) return message;
+  return provider === "claude"
+    ? "Claude subscription usage is unavailable. Claude did not provide usage limits."
+    : "Subscription usage is unavailable.";
+}
+
 /**
  * The allowance state owned by one connected environment.
  *
@@ -64,6 +178,87 @@ export interface SubscriptionAllowanceGroup {
   /** One whole provider observation; never a field-by-field merge. */
   readonly effectiveSource: SubscriptionAllowanceSource | null;
   readonly hasMultipleReadings: boolean;
+}
+
+export interface SubscriptionAllowanceSourceModel {
+  readonly key: string;
+  readonly environmentLabel: string;
+  readonly instanceId: string;
+  readonly connectionLabel: string;
+  readonly status: SubscriptionAllowance["status"];
+  readonly freshness: "fresh" | "stale";
+  readonly isCurrent: boolean;
+  readonly isEffective: boolean;
+}
+
+export interface SubscriptionAllowanceCardModel {
+  readonly key: string;
+  readonly provider: SubscriptionAllowance["provider"];
+  readonly accountLabel: string | null;
+  readonly status: SubscriptionAllowance["status"];
+  readonly message: string;
+  readonly freshness: "fresh" | "stale";
+  readonly updatedAt: string | null;
+  readonly windows: SubscriptionAllowance["windows"];
+  readonly credits: NonNullable<SubscriptionAllowance["credits"]> | null;
+  readonly spendingControl: NonNullable<SubscriptionAllowance["spendingControl"]> | null;
+  readonly extraUsage: NonNullable<SubscriptionAllowance["extraUsage"]> | null;
+  readonly hasMultipleReadings: boolean;
+  readonly sources: readonly SubscriptionAllowanceSourceModel[];
+}
+
+export function formatAllowanceEnvironmentNotice(environment: {
+  readonly label: string;
+  readonly connectionPhase: EnvironmentConnectionPhase;
+  readonly compatibility?: boolean;
+  readonly error: string | null;
+  readonly snapshot: unknown;
+}): string | null {
+  if (environment.compatibility === true) {
+    return `${environment.label}: ${SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE}`;
+  }
+  if (environment.error !== null) {
+    return `${environment.label} could not report subscription usage.`;
+  }
+  if (environment.snapshot === null && environment.connectionPhase !== "connected") {
+    return `${environment.label} is ${formatAllowanceConnectionPhase(environment.connectionPhase).toLowerCase()}; subscription usage will return when it reconnects.`;
+  }
+  return null;
+}
+
+export function presentSubscriptionAllowanceGroup(
+  group: SubscriptionAllowanceGroup,
+): SubscriptionAllowanceCardModel {
+  const displayedSource = group.effectiveSource ?? group.sources[0];
+  if (displayedSource === undefined) {
+    throw new Error("Subscription allowance groups must contain a source");
+  }
+
+  const allowance = displayedSource.allowance;
+  return {
+    key: group.key,
+    provider: allowance.provider,
+    accountLabel: group.accountLabel,
+    status: allowance.status,
+    message: formatAllowanceUnavailableMessage(allowance.provider, allowance.message),
+    freshness: allowance.freshness ?? "fresh",
+    updatedAt: allowance.updatedAt ?? null,
+    windows: allowance.windows,
+    credits: allowance.credits ?? null,
+    spendingControl: allowance.spendingControl ?? null,
+    extraUsage: allowance.extraUsage ?? null,
+    hasMultipleReadings: group.hasMultipleReadings,
+    sources: group.sources.map((source, index) => ({
+      key: `${source.environmentId}:${source.allowance.instanceId}:${index}`,
+      environmentLabel: source.environmentLabel,
+      instanceId: source.allowance.instanceId,
+      connectionLabel: formatAllowanceConnectionPhase(source.connectionPhase),
+      status: source.allowance.status,
+      freshness: source.allowance.freshness ?? "fresh",
+      isCurrent: isSubscriptionAllowanceSourceCurrent(source),
+      isEffective: source === displayedSource,
+    })),
+  };
 }
 
 export interface SubscriptionAllowanceProjection {

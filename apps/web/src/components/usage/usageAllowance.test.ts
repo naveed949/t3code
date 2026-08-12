@@ -5,7 +5,7 @@ import {
   formatAllowanceUpdatedAt,
   formatAllowanceWindowScope,
   progressWidthForAllowance,
-} from "./usageAllowance";
+} from "@t3tools/client-runtime/state/subscription-allowance";
 
 describe("usage allowance presentation", () => {
   it("uses the provider scope and duration without deriving missing values", () => {

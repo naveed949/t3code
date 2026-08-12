@@ -272,7 +272,6 @@ export const WS_METHODS = {
   serverReportHostPowerState: "server.reportHostPowerState",
   serverGetBackgroundPolicy: "server.getBackgroundPolicy",
   serverGetUsageSummary: "server.getUsageSummary",
-  serverGetSubscriptionAllowance: "server.getSubscriptionAllowance",
   serverRefreshSubscriptionAllowance: "server.refreshSubscriptionAllowance",
 
   // Cloud environment methods
@@ -432,15 +431,6 @@ export const WsServerGetUsageSummaryRpc = Rpc.make(WS_METHODS.serverGetUsageSumm
   success: UsageSummary,
   error: Schema.Union([EnvironmentAuthorizationError, UsageReadError]),
 });
-
-export const WsServerGetSubscriptionAllowanceRpc = Rpc.make(
-  WS_METHODS.serverGetSubscriptionAllowance,
-  {
-    payload: Schema.Struct({}),
-    success: SubscriptionAllowanceSnapshot,
-    error: EnvironmentAuthorizationError,
-  },
-);
 
 export const WsServerRefreshSubscriptionAllowanceRpc = Rpc.make(
   WS_METHODS.serverRefreshSubscriptionAllowance,
@@ -1000,7 +990,6 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetResourceTelemetryHistoryRpc,
   WsServerRetryResourceTelemetryRpc,
   WsServerGetUsageSummaryRpc,
-  WsServerGetSubscriptionAllowanceRpc,
   WsServerRefreshSubscriptionAllowanceRpc,
   WsServerSignalProcessRpc,
   WsServerReportClientActivityRpc,

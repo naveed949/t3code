@@ -1,5 +1,18 @@
-import type { SubscriptionAllowanceGroup } from "@t3tools/client-runtime/state/subscription-allowance";
-import type { EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
+import {
+  DEFAULT_USAGE_VIEW,
+  formatAllowanceConnectionPhase,
+  formatAllowanceDuration,
+  formatAllowanceEnvironmentNotice,
+  formatAllowanceResetAt,
+  formatAllowanceUpdatedAt,
+  formatAllowanceWindowScope,
+  presentSubscriptionAllowanceGroup,
+  progressWidthForAllowance,
+  subscriptionViewPhase,
+  USAGE_VIEW_OPTIONS,
+  type SubscriptionAllowanceCardModel,
+  type UsageView,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -9,10 +22,6 @@ import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
 import { useSubscriptionAllowance } from "../../state/subscriptionAllowance";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
-import {
-  isSubscriptionAllowanceSourceCurrent,
-  SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE,
-} from "@t3tools/client-runtime/state/subscription-allowance";
 import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
@@ -31,13 +40,6 @@ import { SidebarInset } from "../ui/sidebar";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
-import {
-  formatAllowanceDuration,
-  formatAllowanceResetAt,
-  formatAllowanceUpdatedAt,
-  formatAllowanceWindowScope,
-  progressWidthForAllowance,
-} from "./usageAllowance";
 import { PROVIDER_COLOR, PROVIDER_LABEL, PROVIDER_MARK, PROVIDER_ORDER } from "./usageProviders";
 
 const WINDOW_OPTIONS = [
@@ -46,18 +48,6 @@ const WINDOW_OPTIONS = [
   { days: 30, label: "30 days" },
   { days: 90, label: "90 days" },
 ] as const;
-
-export type UsageView = "subscription" | "historical";
-
-export const USAGE_VIEW_OPTIONS: ReadonlyArray<{
-  readonly value: UsageView;
-  readonly label: string;
-}> = [
-  { value: "subscription", label: "Subscription" },
-  { value: "historical", label: "Historical" },
-];
-
-export const DEFAULT_USAGE_VIEW: UsageView = "subscription";
 
 export function UsagePage() {
   const [view, setView] = useState<UsageView>(DEFAULT_USAGE_VIEW);
@@ -559,33 +549,14 @@ function SubscriptionUsagePage({
   const { groups, environments, isPending, isPartial, isRefreshing, refresh } =
     useSubscriptionAllowance();
   const environmentNotices = environments.flatMap((environment) => {
-    if (environment.compatibility) {
-      return [
-        {
-          environmentId: environment.environmentId,
-          message: `${environment.label}: ${SUBSCRIPTION_ALLOWANCE_COMPATIBILITY_MESSAGE}`,
-        },
-      ];
-    }
-    if (environment.error !== null) {
-      return [
-        {
-          environmentId: environment.environmentId,
-          message: `${environment.label} could not report subscription usage.`,
-        },
-      ];
-    }
-    if (environment.snapshot === null && environment.connectionPhase !== "connected") {
-      return [
-        {
-          environmentId: environment.environmentId,
-          message: `${environment.label} is ${formatAllowanceConnectionPhase(environment.connectionPhase).toLowerCase()}; subscription usage will return when it reconnects.`,
-        },
-      ];
-    }
-    return [];
+    const message = formatAllowanceEnvironmentNotice(environment);
+    return message === null ? [] : [{ environmentId: environment.environmentId, message }];
   });
-  const settling = isPending || isPartial;
+  const phase = subscriptionViewPhase({
+    isPending,
+    isPartial,
+    groupCount: groups.length,
+  });
 
   return (
     <UsagePageFrame>
@@ -612,7 +583,7 @@ function SubscriptionUsagePage({
           </button>
         </div>
 
-        {settling ? (
+        {phase === "loading" ? (
           <div className="border border-border px-4 py-6 text-sm text-muted-foreground">
             Reading provider allowance…
           </div>
@@ -635,14 +606,17 @@ function SubscriptionUsagePage({
                 ))}
               </div>
             ) : null}
-            {isPartial ? (
+            {phase === "partial" ? (
               <p className="text-xs text-muted-foreground">
                 Some environments are still reporting.
               </p>
             ) : null}
             <section className="grid gap-4 lg:grid-cols-2">
               {groups.map((group) => (
-                <SubscriptionAllowanceCard key={group.key} group={group} />
+                <SubscriptionAllowanceCard
+                  key={group.key}
+                  model={presentSubscriptionAllowanceGroup(group)}
+                />
               ))}
             </section>
           </>
@@ -652,9 +626,11 @@ function SubscriptionUsagePage({
   );
 }
 
-function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllowanceGroup }) {
-  const displayedSource = group.effectiveSource ?? group.sources[0]!;
-  const { allowance } = displayedSource;
+function SubscriptionAllowanceCard({
+  model: allowance,
+}: {
+  readonly model: SubscriptionAllowanceCardModel;
+}) {
   const updatedAt = formatAllowanceUpdatedAt(allowance.updatedAt);
 
   return (
@@ -663,8 +639,8 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
         <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
           <ProviderMark provider={allowance.provider} className="size-4" />
           {PROVIDER_LABEL[allowance.provider]}
-          {group.accountLabel !== null ? (
-            <span className="font-normal text-muted-foreground">{group.accountLabel}</span>
+          {allowance.accountLabel !== null ? (
+            <span className="font-normal text-muted-foreground">{allowance.accountLabel}</span>
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
@@ -741,6 +717,30 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
             </div>
           ) : null}
 
+          {allowance.spendingControl !== undefined && allowance.spendingControl !== null ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+              <span>Spending control</span>
+              {allowance.spendingControl.limit !== undefined &&
+              allowance.spendingControl.limit !== null ? (
+                <span>Limit {allowance.spendingControl.limit}</span>
+              ) : null}
+              {allowance.spendingControl.used !== undefined &&
+              allowance.spendingControl.used !== null ? (
+                <span>Used {allowance.spendingControl.used}</span>
+              ) : null}
+              {allowance.spendingControl.remainingPercent !== undefined &&
+              allowance.spendingControl.remainingPercent !== null ? (
+                <span>{allowance.spendingControl.remainingPercent}% remaining</span>
+              ) : null}
+              {allowance.spendingControl.reached !== undefined &&
+              allowance.spendingControl.reached !== null ? (
+                <span>
+                  {allowance.spendingControl.reached ? "Limit reached" : "Limit not reached"}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
           {allowance.extraUsage !== undefined && allowance.extraUsage !== null ? (
             <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
               <span>Extra usage</span>
@@ -762,51 +762,32 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
           ) : null}
         </>
       )}
-      {group.hasMultipleReadings ? (
+      {allowance.hasMultipleReadings ? (
         <p className="border-t border-border pt-3 text-xs text-muted-foreground">
           Multiple readings are available; showing one whole provider source.
         </p>
       ) : null}
-      {group.sources.length > 1 ? (
+      {allowance.sources.length > 1 ? (
         <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
           <span>Sources</span>
-          {group.sources.map((source, index) => (
-            <span key={`${source.environmentId}:${source.allowance.instanceId}:${index}`}>
-              {source.environmentLabel} · {source.allowance.instanceId}
-              {formatAllowanceConnectionPhase(source.connectionPhase) === null
-                ? ""
-                : ` · ${formatAllowanceConnectionPhase(source.connectionPhase)?.toLowerCase()}`}
-              {source.allowance.status === "unavailable"
+          {allowance.sources.map((source) => (
+            <span key={source.key}>
+              {source.environmentLabel} · {source.instanceId} ·{" "}
+              {source.connectionLabel.toLowerCase()}
+              {source.status === "unavailable"
                 ? " · unavailable"
-                : source.allowance.freshness === "stale"
+                : source.freshness === "stale"
                   ? " · stale"
-                  : isSubscriptionAllowanceSourceCurrent(source)
+                  : source.isCurrent
                     ? " · current"
                     : " · not current"}
-              {group.effectiveSource === source ? " · shown" : ""}
+              {source.isEffective ? " · shown" : ""}
             </span>
           ))}
         </div>
       ) : null}
     </article>
   );
-}
-
-function formatAllowanceConnectionPhase(phase: EnvironmentConnectionPhase): string {
-  switch (phase) {
-    case "available":
-      return "Available";
-    case "offline":
-      return "Offline";
-    case "connecting":
-      return "Connecting";
-    case "reconnecting":
-      return "Reconnecting";
-    case "connected":
-      return "Connected";
-    case "error":
-      return "Connection failed";
-  }
 }
 
 /** Brand mark for the harness a row belongs to. */

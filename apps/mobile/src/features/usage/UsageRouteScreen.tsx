@@ -1,4 +1,18 @@
 import { useIsFocused, useNavigation } from "@react-navigation/native";
+import {
+  DEFAULT_USAGE_VIEW,
+  formatAllowanceDuration,
+  formatAllowanceEnvironmentNotice,
+  formatAllowanceResetAt,
+  formatAllowanceUpdatedAt,
+  formatAllowanceWindowScope,
+  presentSubscriptionAllowanceGroup,
+  progressWidthForAllowance,
+  subscriptionViewPhase,
+  USAGE_VIEW_OPTIONS,
+  type SubscriptionAllowanceCardModel,
+  type UsageView,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 import type { DailyTotals, MergedUsage } from "@t3tools/shared/usageMerge";
 import {
   enumerateDays,
@@ -30,23 +44,7 @@ import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
 import { SettingsSection } from "../settings/components/SettingsSection";
 import { UsageDailyChart } from "./UsageDailyChart";
 import type { UsageChartMetric } from "./usageChartData";
-import {
-  formatAllowanceDuration,
-  formatAllowanceEnvironmentNotice,
-  formatAllowanceResetAt,
-  formatAllowanceUpdatedAt,
-  formatAllowanceWindowScope,
-  presentAllowanceGroup,
-  progressWidthForAllowance,
-  type MobileAllowanceCardModel,
-} from "./usageAllowance";
 import { PROVIDER_LABEL, useProviderColors } from "./usageProviders";
-import {
-  DEFAULT_USAGE_VIEW,
-  subscriptionViewPhase,
-  USAGE_VIEW_OPTIONS,
-  type UsageView,
-} from "./usageView";
 
 const WINDOW_OPTIONS = [
   { days: 1, label: "Past 24h" },
@@ -315,7 +313,10 @@ function SubscriptionUsageContent(props: {
           ) : null}
           <View className="gap-4">
             {groups.map((group) => (
-              <SubscriptionAllowanceCard key={group.key} model={presentAllowanceGroup(group)} />
+              <SubscriptionAllowanceCard
+                key={group.key}
+                model={presentSubscriptionAllowanceGroup(group)}
+              />
             ))}
           </View>
         </>
@@ -324,7 +325,7 @@ function SubscriptionUsageContent(props: {
   );
 }
 
-function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardModel }) {
+function SubscriptionAllowanceCard(props: { readonly model: SubscriptionAllowanceCardModel }) {
   const { model } = props;
   const updatedAt = formatAllowanceUpdatedAt(model.updatedAt);
   const providerColors = useProviderColors();
@@ -334,7 +335,7 @@ function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardM
       <View className="gap-1">
         <View className="flex-row items-baseline gap-2">
           <Text accessibilityRole="header" className="text-lg font-t3-medium text-foreground">
-            {model.providerLabel}
+            {PROVIDER_LABEL[model.provider]}
           </Text>
           {model.accountLabel !== null ? (
             <Text className="min-w-0 flex-1 text-sm text-foreground-muted" numberOfLines={1}>
@@ -389,7 +390,7 @@ function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardM
 }
 
 function AllowanceWindowRow(props: {
-  readonly window: MobileAllowanceCardModel["windows"][number];
+  readonly window: SubscriptionAllowanceCardModel["windows"][number];
   readonly progressColor: string;
 }) {
   const { window, progressColor } = props;
@@ -430,9 +431,10 @@ function AllowanceWindowRow(props: {
   );
 }
 
-function AllowanceMetadata(props: { readonly model: MobileAllowanceCardModel }) {
+function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardModel }) {
   const { model } = props;
   const credits = model.credits;
+  const spendingControl = model.spendingControl;
   const extraUsage = model.extraUsage;
 
   return (
@@ -446,6 +448,29 @@ function AllowanceMetadata(props: { readonly model: MobileAllowanceCardModel }) 
           <Text className="text-xs text-foreground-muted">
             {credits.unlimited ? "Unlimited" : credits.hasCredits ? "Available" : "No credits"}
           </Text>
+        </View>
+      ) : null}
+
+      {spendingControl !== null ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Spending control</Text>
+          {spendingControl.limit !== undefined && spendingControl.limit !== null ? (
+            <Text className="text-xs text-foreground-muted">Limit {spendingControl.limit}</Text>
+          ) : null}
+          {spendingControl.used !== undefined && spendingControl.used !== null ? (
+            <Text className="text-xs text-foreground-muted">Used {spendingControl.used}</Text>
+          ) : null}
+          {spendingControl.remainingPercent !== undefined &&
+          spendingControl.remainingPercent !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              {spendingControl.remainingPercent}% remaining
+            </Text>
+          ) : null}
+          {spendingControl.reached !== undefined && spendingControl.reached !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              {spendingControl.reached ? "Limit reached" : "Limit not reached"}
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -478,7 +503,7 @@ function AllowanceMetadata(props: { readonly model: MobileAllowanceCardModel }) 
 }
 
 function AllowanceSources(props: {
-  readonly sources: readonly MobileAllowanceCardModel["sources"][number][];
+  readonly sources: readonly SubscriptionAllowanceCardModel["sources"][number][];
 }) {
   return (
     <View className="gap-1 border-t border-border-subtle pt-3">

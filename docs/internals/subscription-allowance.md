@@ -61,6 +61,11 @@ through the existing Agent SDK query. The allowance probe:
 - applies a bounded deadline; and
 - aborts and closes the query on success, unavailable response, error, timeout, or cancellation.
 
+The provider session interface does not expose account-control requests, so the snapshot reader uses
+the bounded no-turn query rather than reaching through an active conversation session. Compatible
+runtime rate-limit events are reused as live updates. Cursor, Grok, and OpenCode do not currently
+provide an allowance reader and are explicitly unsupported by this feature.
+
 When Claude reports no limits, lacks the experimental method, or returns a response that cannot
 provide limits, the adapter returns the stable unavailable presentation:
 
@@ -72,13 +77,12 @@ not Anthropic approval and is not a compliance determination.
 
 ## Transport and compatibility
 
-The server exposes three additive methods in [`rpc.ts`][rpc]:
+The server exposes two additive methods in [`rpc.ts`][rpc]:
 
-- `server.getSubscriptionAllowance` for a one-shot compatibility read;
 - `server.refreshSubscriptionAllowance` for explicit refresh demand; and
 - `subscribeSubscriptionAllowance` for snapshot-first live delivery.
 
-All three use the same authenticated environment access as Historical usage. The wire shape
+Both use the same authenticated environment access as Historical usage. The wire shape
 contains allowance observations only; credentials, raw native payloads, transcripts, unmasked
 emails, local configuration paths, and Claude behavior data remain inside the owning environment.
 

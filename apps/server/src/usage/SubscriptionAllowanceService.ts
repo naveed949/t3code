@@ -72,15 +72,31 @@ const unavailableMessage = (provider: ProviderAllowanceReader["provider"]): stri
 const isUsableAllowance = (allowance: SubscriptionAllowance | undefined): boolean =>
   allowance?.status === "available";
 
-const markFresh = (allowance: SubscriptionAllowance, updatedAt: string): SubscriptionAllowance => ({
+const markFreshSnapshot = (
+  allowance: SubscriptionAllowance,
+  updatedAt: string,
+): SubscriptionAllowance => ({
   ...allowance,
   freshness: "fresh",
+  completeness: "complete",
+  observationSource: "snapshot",
+  deliverySource: "live",
   updatedAt,
 });
 
 const markStale = (allowance: SubscriptionAllowance): SubscriptionAllowance => ({
   ...allowance,
   freshness: "stale",
+});
+
+const markSnapshotDeliveredFromCache = (
+  snapshot: SubscriptionAllowanceSnapshot,
+): SubscriptionAllowanceSnapshot => ({
+  ...snapshot,
+  allowances: snapshot.allowances.map((allowance) => ({
+    ...allowance,
+    deliverySource: "cache",
+  })),
 });
 
 const hasPassedReset = (
@@ -139,56 +155,9 @@ export function foldSubscriptionAllowance(
   };
 }
 
-/**
- * Reads the enabled materialized provider readers in settings order. A broken
- * provider read becomes an explicit unavailable allowance so one provider
- * cannot turn a multi-provider snapshot into a misleading empty response.
- */
-export const readSubscriptionAllowances = Effect.fn("readSubscriptionAllowances")(function* (
-  instances: ReadonlyArray<SubscriptionAllowanceProviderInstance>,
-  readAt: string,
-) {
-  const allowances = yield* Effect.forEach(
-    instances.filter(
-      (instance): instance is ReadableSubscriptionAllowanceProviderInstance =>
-        instance.enabled && instance.allowanceReader !== undefined,
-    ),
-    (instance) => {
-      const reader = instance.allowanceReader;
-      return reader.read.pipe(
-        Effect.catchCause(() =>
-          Effect.logWarning("Provider allowance read failed", {
-            provider: reader.provider,
-            instanceId: instance.instanceId,
-          }).pipe(
-            Effect.andThen(
-              Effect.succeed(
-                unavailableAllowance({
-                  provider: reader.provider,
-                  instanceId: instance.instanceId,
-                  message: unavailableMessage(reader.provider),
-                }),
-              ),
-            ),
-          ),
-        ),
-      );
-    },
-  );
-
-  return {
-    readAt,
-    allowances,
-  } satisfies SubscriptionAllowanceSnapshot;
-});
-
 export class SubscriptionAllowanceService extends Context.Service<
   SubscriptionAllowanceService,
   {
-    /** One-shot compatibility read. It also updates the server-owned cache. */
-    readonly read: Effect.Effect<SubscriptionAllowanceSnapshot>;
-    readonly latest: Effect.Effect<SubscriptionAllowanceSnapshot>;
-    readonly changes: Stream.Stream<SubscriptionAllowanceSnapshot>;
     readonly subscribe: Effect.Effect<
       {
         readonly latest: SubscriptionAllowanceSnapshot;
@@ -255,13 +224,13 @@ export const make = Effect.gen(function* () {
           Effect.result,
           Effect.map((result) => {
             if (Result.isSuccess(result)) {
-              return markFresh(result.success, readAt);
+              return markFreshSnapshot(result.success, readAt);
             }
 
             const previousAllowance = previousByInstance.get(instance.instanceId);
             return previousAllowance !== undefined && isUsableAllowance(previousAllowance)
               ? markStale(previousAllowance)
-              : markFresh(
+              : markFreshSnapshot(
                   unavailableAllowance({
                     provider: instance.allowanceReader.provider,
                     instanceId: instance.instanceId,
@@ -357,6 +326,25 @@ export const make = Effect.gen(function* () {
       }),
   );
 
+  const refreshAfterRegistryChange = Effect.gen(function* () {
+    yield* refresh;
+    const needsReplacementRead = yield* stateMutex.withPermits(1)(
+      Effect.gen(function* () {
+        const current = yield* Ref.get(state);
+        const publishedInstanceIds = new Set(
+          current.snapshot.allowances.map((allowance) => allowance.instanceId),
+        );
+        return Array.from(current.instances.values()).some(
+          (instance) =>
+            instance.enabled &&
+            instance.allowanceReader !== undefined &&
+            !publishedInstanceIds.has(instance.instanceId),
+        );
+      }),
+    );
+    if (needsReplacementRead) yield* refresh;
+  });
+
   const handleProviderUpdate = (event: ProviderRuntimeEvent) =>
     stateMutex.withPermits(1)(
       Effect.gen(function* () {
@@ -381,7 +369,14 @@ export const make = Effect.gen(function* () {
           return;
         }
         const updatedAt = event.createdAt;
-        const folded = markFresh(foldSubscriptionAllowance(previous, update), updatedAt);
+        const folded = {
+          ...foldSubscriptionAllowance(previous, update),
+          freshness: "fresh" as const,
+          completeness: "complete" as const,
+          observationSource: "liveUpdate" as const,
+          deliverySource: "live" as const,
+          updatedAt,
+        };
         const allowances = current.snapshot.allowances.some(
           (allowance) => allowance.instanceId === instanceId,
         )
@@ -418,7 +413,7 @@ export const make = Effect.gen(function* () {
       }),
     );
     if (Option.isSome(refreshScope)) {
-      yield* refresh.pipe(Effect.ignore, Effect.forkIn(refreshScope.value));
+      yield* refreshAfterRegistryChange.pipe(Effect.ignore, Effect.forkIn(refreshScope.value));
     }
   });
 
@@ -479,13 +474,6 @@ export const make = Effect.gen(function* () {
     }),
   );
 
-  const read = Effect.scoped(
-    Effect.gen(function* () {
-      yield* Effect.acquireRelease(acquireDemand, () => releaseDemand);
-      return yield* refresh;
-    }),
-  );
-
   const latestUnlocked = Effect.gen(function* () {
     const current = yield* Ref.get(state);
     const nextSnapshot = markSubscriptionAllowanceSnapshotStale(
@@ -497,20 +485,16 @@ export const make = Effect.gen(function* () {
     }
     return nextSnapshot;
   });
-  const latest = stateMutex.withPermits(1)(latestUnlocked);
   const subscribe = subscribeBeforeSnapshot(
     changes,
     Effect.gen(function* () {
       yield* Effect.acquireRelease(acquireDemand, () => releaseDemand);
-      return yield* latestUnlocked;
+      return markSnapshotDeliveredFromCache(yield* latestUnlocked);
     }),
     stateMutex,
   );
 
   return SubscriptionAllowanceService.of({
-    read,
-    latest,
-    changes: Stream.fromPubSub(changes),
     subscribe,
     refresh,
   });
@@ -526,9 +510,6 @@ const emptySnapshot: SubscriptionAllowanceSnapshot = {
 export const layerTest = Layer.succeed(
   SubscriptionAllowanceService,
   SubscriptionAllowanceService.of({
-    read: Effect.succeed(emptySnapshot),
-    latest: Effect.succeed(emptySnapshot),
-    changes: Stream.empty,
     subscribe: Effect.succeed({ latest: emptySnapshot, changes: Stream.empty }),
     refresh: Effect.succeed(emptySnapshot),
   }),

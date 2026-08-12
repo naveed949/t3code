@@ -4,24 +4,21 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ProviderInstanceId } from "@t3tools/contracts";
 
-import {
-  CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
-  ProviderAllowanceReadError,
-  type ProviderAllowanceReader,
-} from "../provider/Services/ProviderAllowanceReader.ts";
+import type { ProviderAllowanceReader } from "../provider/Services/ProviderAllowanceReader.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import {
   foldSubscriptionAllowance,
   make,
   markSubscriptionAllowanceSnapshotStale,
-  readSubscriptionAllowances,
   type SubscriptionAllowanceProviderInstance,
 } from "./SubscriptionAllowanceService.ts";
 
@@ -63,67 +60,6 @@ const registryLayerFor = (providerInstance: SubscriptionAllowanceProviderInstanc
       PubSub.subscribe(pubsub),
     ),
   });
-
-describe("readSubscriptionAllowances", () => {
-  it.effect("omits disabled instances and contains an unavailable receipt for a failed read", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* readSubscriptionAllowances(
-        [
-          instance({ allowanceReader: reader(Effect.succeed(allowance)) }),
-          instance({ enabled: false, allowanceReader: reader(Effect.succeed(allowance)) }),
-          instance({
-            instanceId: ProviderInstanceId.make("codex-failing"),
-            allowanceReader: reader(
-              Effect.fail(new ProviderAllowanceReadError({ detail: "provider failure" })),
-            ),
-          }),
-        ],
-        readAt,
-      );
-
-      expect(snapshot).toEqual({
-        readAt,
-        allowances: [
-          allowance,
-          {
-            provider: "codex",
-            instanceId: ProviderInstanceId.make("codex-failing"),
-            status: "unavailable",
-            windows: [],
-            message: "Codex subscription usage is unavailable.",
-          },
-        ],
-      });
-    }),
-  );
-
-  it.effect("keeps the Claude unavailable presentation stable when acquisition fails", () =>
-    Effect.gen(function* () {
-      const snapshot = yield* readSubscriptionAllowances(
-        [
-          instance({
-            instanceId: ProviderInstanceId.make("claude"),
-            allowanceReader: reader(
-              Effect.fail(new ProviderAllowanceReadError({ detail: "provider failure" })),
-              "claude",
-            ),
-          }),
-        ],
-        readAt,
-      );
-
-      expect(snapshot.allowances).toEqual([
-        {
-          provider: "claude",
-          instanceId: ProviderInstanceId.make("claude"),
-          status: "unavailable",
-          windows: [],
-          message: CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE,
-        },
-      ]);
-    }),
-  );
-});
 
 describe("subscription allowance lifecycle helpers", () => {
   it("folds sparse windows without dropping a previously complete record", () => {
@@ -194,6 +130,51 @@ describe("subscription allowance lifecycle helpers", () => {
 });
 
 describe("SubscriptionAllowanceService", () => {
+  it.effect("publishes complete snapshot provenance through the subscription seam", () =>
+    Effect.gen(function* () {
+      const providerInstance = instance({
+        allowanceReader: reader(Effect.succeed(allowance)),
+      });
+      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          const published = yield* Stream.runHead(subscription.changes);
+
+          expect(Option.getOrThrow(published).allowances[0]).toMatchObject({
+            completeness: "complete",
+            observationSource: "snapshot",
+            deliverySource: "live",
+          });
+        }),
+      );
+    }),
+  );
+
+  it.effect("identifies a retained reconnect snapshot as cache delivery", () =>
+    Effect.gen(function* () {
+      const providerInstance = instance({
+        allowanceReader: reader(Effect.succeed(allowance)),
+      });
+      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          yield* Stream.runHead(subscription.changes);
+        }),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          expect(subscription.latest.allowances[0]?.deliverySource).toBe("cache");
+        }),
+      );
+    }),
+  );
+
   it.effect("starts one demand-scoped acquisition and shares concurrent refreshes", () =>
     Effect.gen(function* () {
       const readStarted = yield* Deferred.make<void>();
@@ -226,6 +207,75 @@ describe("SubscriptionAllowanceService", () => {
           expect(readCount).toBe(1);
           expect(snapshot.allowances[0]).toMatchObject(allowance);
           expect(snapshot.allowances[0]?.freshness).toBe("fresh");
+        }),
+      );
+    }),
+  );
+
+  it.effect("acquires a replacement provider generation immediately", () =>
+    Effect.gen(function* () {
+      const oldReadStarted = yield* Deferred.make<void>();
+      const releaseOldRead = yield* Deferred.make<void>();
+      const registryObservedReplacement = yield* Deferred.make<void>();
+      const newReadStarted = yield* Deferred.make<void>();
+      const changes = yield* PubSub.unbounded<void>();
+      const oldInstance = instance({
+        allowanceReader: reader(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(oldReadStarted, undefined);
+            yield* Deferred.await(releaseOldRead);
+            return allowance;
+          }),
+        ),
+      }) as ProviderInstance;
+      const replacementAllowance = {
+        ...allowance,
+        windows: [{ scope: "primary" as const, usedPercent: 90 }],
+      };
+      const newInstance = instance({
+        allowanceReader: reader(
+          Effect.gen(function* () {
+            yield* Deferred.succeed(newReadStarted, undefined);
+            return replacementAllowance;
+          }),
+        ),
+      }) as ProviderInstance;
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([oldInstance]);
+      const registryLayer = Layer.succeed(ProviderInstanceRegistry, {
+        getInstance: () => Effect.succeed(undefined),
+        listInstances: Ref.get(instances).pipe(
+          Effect.tap((current) =>
+            current[0] === newInstance
+              ? Deferred.succeed(registryObservedReplacement, undefined)
+              : Effect.void,
+          ),
+        ),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.fromPubSub(changes),
+        subscribeChanges: PubSub.subscribe(changes),
+      });
+      const service = yield* make.pipe(Effect.provide(registryLayer));
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          yield* Deferred.await(oldReadStarted);
+          const replacementSnapshot = yield* subscription.changes.pipe(
+            Stream.filter((snapshot) =>
+              snapshot.allowances.some((item) => item.windows[0]?.usedPercent === 90),
+            ),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+
+          yield* Ref.set(instances, [newInstance]);
+          yield* PubSub.publish(changes, undefined);
+          yield* Deferred.await(registryObservedReplacement);
+          yield* Deferred.succeed(releaseOldRead, undefined);
+          const published = Option.getOrThrow(yield* Fiber.join(replacementSnapshot));
+
+          expect(Option.isSome(yield* Deferred.poll(newReadStarted))).toBe(true);
+          expect(published.allowances[0]?.windows[0]?.usedPercent).toBe(90);
         }),
       );
     }),

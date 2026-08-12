@@ -1,7 +1,11 @@
 import { Children, type ReactElement, type ReactNode } from "react";
 import { describe, expect, it } from "vite-plus/test";
+import {
+  DEFAULT_USAGE_VIEW,
+  type UsageView,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 
-import { DEFAULT_USAGE_VIEW, UsageViewTabs, type UsageView } from "./UsagePage";
+import { UsageViewTabs } from "./UsagePage";
 
 describe("UsagePage defaults", () => {
   it("opens on the Subscription view", () => {

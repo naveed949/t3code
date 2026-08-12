@@ -1,14 +1,13 @@
-import type { SubscriptionAllowanceGroup } from "@t3tools/client-runtime/state/subscription-allowance";
-import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
-
 import {
   formatAllowanceEnvironmentNotice,
   formatAllowanceUpdatedAt,
   formatAllowanceWindowScope,
-  presentAllowanceGroup,
+  presentSubscriptionAllowanceGroup,
   progressWidthForAllowance,
-} from "./usageAllowance";
+  type SubscriptionAllowanceGroup,
+} from "@t3tools/client-runtime/state/subscription-allowance";
+import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
 
 const readAt = "2026-08-11T12:00:00.000Z";
 
@@ -41,15 +40,41 @@ function group(overrides: Partial<SubscriptionAllowanceGroup> = {}): Subscriptio
 
 describe("mobile subscription allowance presentation", () => {
   it("keeps provider-native windows and optional values intact", () => {
-    const model = presentAllowanceGroup(
+    const source = group().effectiveSource!;
+    const model = presentSubscriptionAllowanceGroup(
       group({
         accountLabel: "n•••@example.com",
+        sources: [
+          {
+            ...source,
+            allowance: {
+              ...source.allowance,
+              spendingControl: {
+                reached: false,
+                limit: "100",
+                remainingPercent: 75,
+                used: "25",
+              },
+            },
+          },
+        ],
+        effectiveSource: {
+          ...source,
+          allowance: {
+            ...source.allowance,
+            spendingControl: {
+              reached: false,
+              limit: "100",
+              remainingPercent: 75,
+              used: "25",
+            },
+          },
+        },
       }),
     );
 
     expect(model).toMatchObject({
       provider: "codex",
-      providerLabel: "Codex",
       accountLabel: "n•••@example.com",
       status: "available",
       freshness: "fresh",
@@ -62,6 +87,12 @@ describe("mobile subscription allowance presentation", () => {
           resetsAt: readAt,
         },
       ],
+      spendingControl: {
+        reached: false,
+        limit: "100",
+        remainingPercent: 75,
+        used: "25",
+      },
     });
   });
 
@@ -80,7 +111,7 @@ describe("mobile subscription allowance presentation", () => {
       },
     };
 
-    const model = presentAllowanceGroup(
+    const model = presentSubscriptionAllowanceGroup(
       group({
         provider: "claude",
         status: "unavailable",
@@ -107,7 +138,7 @@ describe("mobile subscription allowance presentation", () => {
       },
     };
 
-    const model = presentAllowanceGroup(
+    const model = presentSubscriptionAllowanceGroup(
       group({
         sources: [staleSource],
         effectiveSource: staleSource,
@@ -133,7 +164,7 @@ describe("mobile subscription allowance presentation", () => {
       },
     };
 
-    const model = presentAllowanceGroup(
+    const model = presentSubscriptionAllowanceGroup(
       group({
         sources: [source, secondSource],
         effectiveSource: source,

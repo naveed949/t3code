@@ -1,6 +1,5 @@
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomValue } from "@effect/atom-react";
-import { type EnvironmentId, type SubscriptionAllowance } from "@t3tools/contracts";
 import {
   isSubscriptionAllowanceCompatibilityCause,
   reconcileSubscriptionAllowances,
@@ -45,33 +44,6 @@ const subscriptionAllowanceByEnvironmentAtom = Atom.make(
     return statuses;
   },
 ).pipe(Atom.withLabel("web-usage:subscription-allowance"));
-
-/** Backward-compatible web helper; reconciliation uses the shared source model below. */
-export interface EnvironmentSubscriptionAllowance {
-  readonly environmentId: EnvironmentId;
-  readonly environmentLabel: string;
-  readonly allowance: SubscriptionAllowance;
-}
-
-export function flattenSubscriptionAllowances(
-  environments: readonly (Pick<
-    EnvironmentSubscriptionAllowanceStatus,
-    "environmentId" | "snapshot"
-  > & {
-    readonly label: string;
-    readonly isPending?: boolean;
-    readonly error?: string | null;
-  })[],
-): readonly EnvironmentSubscriptionAllowance[] {
-  return environments.flatMap(
-    (environment) =>
-      environment.snapshot?.allowances.map((allowance) => ({
-        environmentId: environment.environmentId,
-        environmentLabel: environment.label,
-        allowance,
-      })) ?? [],
-  );
-}
 
 export interface SubscriptionAllowanceView extends SubscriptionAllowanceProjection {
   readonly isRefreshing: boolean;

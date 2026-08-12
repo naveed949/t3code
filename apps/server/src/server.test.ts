@@ -833,7 +833,11 @@ const buildAppUnderTest = (options?: {
       Layer.provide(UsageService.layerTest),
       Layer.provide(
         Layer.mock(SubscriptionAllowanceService.SubscriptionAllowanceService)({
-          read: Effect.succeed({
+          subscribe: Effect.succeed({
+            latest: { readAt: "1970-01-01T00:00:00.000Z", allowances: [] },
+            changes: Stream.empty,
+          }),
+          refresh: Effect.succeed({
             readAt: "1970-01-01T00:00:00.000Z",
             allowances: [],
           }),
@@ -4021,67 +4025,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.auth.policy, "desktop-managed-local");
       assert.equal(response.shellResumeCompletionMarker, true);
       assert.equal(response.threadResumeCompletionMarker, true);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("routes authenticated websocket rpc server.getSubscriptionAllowance", () =>
-    Effect.gen(function* () {
-      const snapshot = {
-        readAt: "2026-08-11T12:00:00.000Z",
-        allowances: [
-          {
-            provider: "codex" as const,
-            instanceId: ProviderInstanceId.make("codex"),
-            status: "available" as const,
-            windows: [{ scope: "primary" as const, usedPercent: 23 }],
-          },
-        ],
-      };
-      yield* buildAppUnderTest({
-        layers: {
-          subscriptionAllowance: { read: Effect.succeed(snapshot) },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetSubscriptionAllowance]({})),
-      );
-
-      assert.deepEqual(response, snapshot);
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("requires orchestration read scope for server.getSubscriptionAllowance", () =>
-    Effect.gen(function* () {
-      yield* buildAppUnderTest();
-
-      const { response: tokenResponse, body: tokenBody } = yield* exchangeAccessToken(
-        defaultDesktopBootstrapToken,
-        { scope: "access:write" },
-      );
-      assert.equal(tokenResponse.status, 200);
-      assert.isDefined(tokenBody.access_token);
-
-      const wsTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
-        headers: {
-          authorization: `Bearer ${tokenBody.access_token ?? ""}`,
-        },
-      });
-      const wsTicketBody = (yield* wsTicketResponse.json) as { readonly ticket: string };
-      assert.equal(wsTicketResponse.status, 200);
-
-      const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
-      const rpcError = yield* Effect.flip(
-        Effect.scoped(
-          withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetSubscriptionAllowance]({})),
-        ),
-      );
-
-      assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
-      if (rpcError._tag === "EnvironmentAuthorizationError") {
-        assert.equal(rpcError.requiredScope, "orchestration:read");
-      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

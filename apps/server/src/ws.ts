@@ -1570,10 +1570,6 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.serverGetUsageSummary, usage.readSummary(input), {
             "rpc.aggregate": "server",
           }),
-        [WS_METHODS.serverGetSubscriptionAllowance]: (_input) =>
-          observeRpcEffect(WS_METHODS.serverGetSubscriptionAllowance, subscriptionAllowance.read, {
-            "rpc.aggregate": "server",
-          }),
         [WS_METHODS.serverRefreshSubscriptionAllowance]: (_input) =>
           observeRpcEffect(
             WS_METHODS.serverRefreshSubscriptionAllowance,

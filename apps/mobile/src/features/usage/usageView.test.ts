@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { DEFAULT_USAGE_VIEW, subscriptionViewPhase, USAGE_VIEW_OPTIONS } from "./usageView";
+import {
+  DEFAULT_USAGE_VIEW,
+  subscriptionViewPhase,
+  USAGE_VIEW_OPTIONS,
+} from "@t3tools/client-runtime/state/subscription-allowance";
 
 describe("mobile usage view state", () => {
   it("opens on the Subscription view", () => {
