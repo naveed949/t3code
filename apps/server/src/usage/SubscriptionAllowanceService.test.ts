@@ -130,6 +130,34 @@ describe("subscription allowance lifecycle helpers", () => {
 });
 
 describe("SubscriptionAllowanceService", () => {
+  it.effect("acquires providers materialized before first demand", () =>
+    Effect.gen(function* () {
+      const changes = yield* PubSub.unbounded<void>();
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([]);
+      const registryLayer = Layer.succeed(ProviderInstanceRegistry, {
+        getInstance: () => Effect.succeed(undefined),
+        listInstances: Ref.get(instances),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.fromPubSub(changes),
+        subscribeChanges: PubSub.subscribe(changes),
+      });
+      const service = yield* make.pipe(Effect.provide(registryLayer));
+      yield* Ref.set(instances, [
+        instance({ allowanceReader: reader(Effect.succeed(allowance)) }) as ProviderInstance,
+      ]);
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          const published = Option.getOrThrow(yield* Stream.runHead(subscription.changes));
+
+          expect(published.allowances).toHaveLength(1);
+          expect(published.allowances[0]?.instanceId).toBe(allowance.instanceId);
+        }),
+      );
+    }),
+  );
+
   it.effect("publishes complete snapshot provenance through the subscription seam", () =>
     Effect.gen(function* () {
       const providerInstance = instance({

@@ -71,7 +71,7 @@ local behavior data. Keep only provider-reported fields needed to prove the UI.
 ### Claude unavailable path
 
 - [ ] An authenticated response with unavailable limits renders the exact placeholder:
-      `Claude subscription usage is unavailable. Claude did not provide usage limits.`
+      `Claude did not report subscription usage limits.`
 - [ ] The evidence does not claim why limits were absent.
 
 ## Integrated acceptance

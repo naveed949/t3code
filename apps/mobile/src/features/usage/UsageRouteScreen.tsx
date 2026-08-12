@@ -255,7 +255,7 @@ function SubscriptionUsageContent(props: {
             Subscription allowance
           </Text>
           <Text className="text-sm text-foreground-muted">
-            Current provider-reported limits and reset windows.
+            Usage limits and reset times from your provider.
           </Text>
         </View>
         <Pressable

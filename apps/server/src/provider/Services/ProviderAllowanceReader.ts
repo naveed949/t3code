@@ -7,7 +7,7 @@ import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 export const CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE =
-  "Claude subscription usage is unavailable. Claude did not provide usage limits.";
+  "Claude did not report subscription usage limits.";
 
 export class ProviderAllowanceReadError extends Schema.TaggedErrorClass<ProviderAllowanceReadError>()(
   "ProviderAllowanceReadError",

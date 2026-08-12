@@ -128,9 +128,7 @@ describe("mobile subscription allowance presentation", () => {
       }),
     );
 
-    expect(model.message).toBe(
-      "Claude subscription usage is unavailable. Claude did not provide usage limits.",
-    );
+    expect(model.message).toBe("Claude did not report subscription usage limits.");
     expect(model.windows).toEqual([]);
     expect(model.accountLabel).toBeNull();
   });

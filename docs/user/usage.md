@@ -24,7 +24,7 @@ never blends windows from several sources.
 
 When Claude does not provide subscription limits, the Claude section remains visible with this explanation:
 
-> Claude subscription usage is unavailable. Claude did not provide usage limits.
+> Claude did not report subscription usage limits.
 
 This message does not diagnose the account, subscription, OAuth scope, or provider outage. If a
 newer client is connected to an older environment that does not support Subscription, the page

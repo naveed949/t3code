@@ -69,7 +69,7 @@ provide an allowance reader and are explicitly unsupported by this feature.
 When Claude reports no limits, lacks the experimental method, or returns a response that cannot
 provide limits, the adapter returns the stable unavailable presentation:
 
-> Claude subscription usage is unavailable. Claude did not provide usage limits.
+> Claude did not report subscription usage limits.
 
 That result does not infer whether the account lacks a subscription, uses an API key, lacks a
 scope, or encountered an outage. The owner-selected rollout of this existing configured path is

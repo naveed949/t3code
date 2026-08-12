@@ -29,7 +29,7 @@ import {
 } from "../provider/Services/ProviderService.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
-import { subscribeBeforeSnapshot } from "../utils/subscribeBeforeSnapshot.ts";
+import { subscribeBeforeSnapshotWithoutMutex } from "../utils/subscribeBeforeSnapshot.ts";
 
 export const SUBSCRIPTION_ALLOWANCE_REFRESH_INTERVAL_MS = 5 * 60_000;
 
@@ -451,6 +451,7 @@ export const make = Effect.gen(function* () {
         ),
         Effect.forkIn(liveScope),
       );
+      yield* syncInstances;
       yield* Effect.forever(
         Effect.sleep(`${SUBSCRIPTION_ALLOWANCE_REFRESH_INTERVAL_MS} millis`).pipe(
           Effect.andThen(refresh.pipe(Effect.ignore)),
@@ -485,13 +486,12 @@ export const make = Effect.gen(function* () {
     }
     return nextSnapshot;
   });
-  const subscribe = subscribeBeforeSnapshot(
+  const subscribe = subscribeBeforeSnapshotWithoutMutex(
     changes,
     Effect.gen(function* () {
       yield* Effect.acquireRelease(acquireDemand, () => releaseDemand);
       return markSnapshotDeliveredFromCache(yield* latestUnlocked);
     }),
-    stateMutex,
   );
 
   return SubscriptionAllowanceService.of({

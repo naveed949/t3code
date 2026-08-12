@@ -121,7 +121,7 @@ export function formatAllowanceUnavailableMessage(
 ): string {
   if (message !== undefined) return message;
   return provider === "claude"
-    ? "Claude subscription usage is unavailable. Claude did not provide usage limits."
+    ? "Claude did not report subscription usage limits."
     : "Subscription usage is unavailable.";
 }
 

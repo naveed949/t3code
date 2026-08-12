@@ -568,7 +568,7 @@ function SubscriptionUsagePage({
           <div>
             <h1 className="text-sm font-medium text-foreground">Subscription allowance</h1>
             <p className="text-sm text-muted-foreground">
-              Current provider-reported limits and reset windows.
+              Usage limits and reset times from your provider.
             </p>
           </div>
           <button
@@ -611,7 +611,7 @@ function SubscriptionUsagePage({
                 Some environments are still reporting.
               </p>
             ) : null}
-            <section className="grid gap-4 lg:grid-cols-2">
+            <section className={cn("grid gap-4", groups.length > 1 && "lg:grid-cols-2")}>
               {groups.map((group) => (
                 <SubscriptionAllowanceCard
                   key={group.key}
