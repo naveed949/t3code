@@ -282,6 +282,7 @@ function SubscriptionUsageContent(props: {
 function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardModel }) {
   const { model } = props;
   const updatedAt = formatAllowanceUpdatedAt(model.updatedAt);
+  const providerColors = useProviderColors();
 
   return (
     <View className="gap-5 rounded-[24px] border-continuous bg-card p-4">
@@ -321,7 +322,11 @@ function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardM
         <>
           <View className="gap-4">
             {model.windows.map((window) => (
-              <AllowanceWindowRow key={window.scope} window={window} />
+              <AllowanceWindowRow
+                key={window.scope}
+                window={window}
+                progressColor={providerColors[model.provider]}
+              />
             ))}
           </View>
           <AllowanceMetadata model={model} />
@@ -340,8 +345,9 @@ function SubscriptionAllowanceCard(props: { readonly model: MobileAllowanceCardM
 
 function AllowanceWindowRow(props: {
   readonly window: MobileAllowanceCardModel["windows"][number];
+  readonly progressColor: string;
 }) {
-  const { window } = props;
+  const { window, progressColor } = props;
   const hasUsage = window.usedPercent !== undefined && window.usedPercent !== null;
   const duration = formatAllowanceDuration(window.windowDurationMins);
   const reset =
@@ -362,8 +368,11 @@ function AllowanceWindowRow(props: {
       {hasUsage ? (
         <View className="h-1.5 flex-row overflow-hidden rounded-full bg-subtle">
           <View
-            className="h-full rounded-full bg-foreground"
-            style={{ width: `${progressWidthForAllowance(window.usedPercent)}%` }}
+            className="h-full rounded-full"
+            style={{
+              width: `${progressWidthForAllowance(window.usedPercent)}%`,
+              backgroundColor: progressColor,
+            }}
           />
         </View>
       ) : null}

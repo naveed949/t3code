@@ -106,7 +106,9 @@ function HistoricalUsagePage({
   return (
     <UsagePageFrame>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-6">
-        <UsageViewTabs value="historical" onChange={onViewChange} />
+        <div className="flex justify-center">
+          <UsageViewTabs value="historical" onChange={onViewChange} />
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <p className="text-sm text-muted-foreground">
             {formatDayShort(window.sinceDay)} to {formatDayShort(window.untilDay)}
@@ -496,7 +498,9 @@ function SubscriptionUsagePage({
   return (
     <UsagePageFrame>
       <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-6 py-6">
-        <UsageViewTabs value="subscription" onChange={onViewChange} />
+        <div className="flex justify-center">
+          <UsageViewTabs value="subscription" onChange={onViewChange} />
+        </div>
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-sm font-medium text-foreground">Subscription allowance</h1>
@@ -609,8 +613,11 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
                   {hasUsage ? (
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div
-                        className="h-full bg-foreground"
-                        style={{ width: `${progressWidthForAllowance(window.usedPercent)}%` }}
+                        className="h-full"
+                        style={{
+                          width: `${progressWidthForAllowance(window.usedPercent)}%`,
+                          backgroundColor: PROVIDER_COLOR[allowance.provider],
+                        }}
                       />
                     </div>
                   ) : null}
