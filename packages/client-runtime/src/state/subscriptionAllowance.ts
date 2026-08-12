@@ -201,8 +201,6 @@ export interface SubscriptionAllowanceCardModel {
   readonly updatedAt: string | null;
   readonly windows: SubscriptionAllowance["windows"];
   readonly credits: NonNullable<SubscriptionAllowance["credits"]> | null;
-  readonly spendingControl: NonNullable<SubscriptionAllowance["spendingControl"]> | null;
-  readonly extraUsage: NonNullable<SubscriptionAllowance["extraUsage"]> | null;
   readonly hasMultipleReadings: boolean;
   readonly sources: readonly SubscriptionAllowanceSourceModel[];
 }
@@ -245,8 +243,6 @@ export function presentSubscriptionAllowanceGroup(
     updatedAt: allowance.updatedAt ?? null,
     windows: allowance.windows,
     credits: allowance.credits ?? null,
-    spendingControl: allowance.spendingControl ?? null,
-    extraUsage: allowance.extraUsage ?? null,
     hasMultipleReadings: group.hasMultipleReadings,
     sources: group.sources.map((source, index) => ({
       key: `${source.environmentId}:${source.allowance.instanceId}:${index}`,

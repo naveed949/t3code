@@ -55,6 +55,12 @@ describe("mobile subscription allowance presentation", () => {
                 remainingPercent: 75,
                 used: "25",
               },
+              extraUsage: {
+                isEnabled: true,
+                monthlyLimit: 100,
+                usedCredits: 25,
+                utilization: 25,
+              },
             },
           },
         ],
@@ -67,6 +73,12 @@ describe("mobile subscription allowance presentation", () => {
               limit: "100",
               remainingPercent: 75,
               used: "25",
+            },
+            extraUsage: {
+              isEnabled: true,
+              monthlyLimit: 100,
+              usedCredits: 25,
+              utilization: 25,
             },
           },
         },
@@ -87,13 +99,9 @@ describe("mobile subscription allowance presentation", () => {
           resetsAt: readAt,
         },
       ],
-      spendingControl: {
-        reached: false,
-        limit: "100",
-        remainingPercent: 75,
-        used: "25",
-      },
     });
+    expect(model).not.toHaveProperty("spendingControl");
+    expect(model).not.toHaveProperty("extraUsage");
   });
 
   it("uses the stable Claude placeholder without inferring account state", () => {

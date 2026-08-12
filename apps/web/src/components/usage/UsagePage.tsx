@@ -716,50 +716,6 @@ function SubscriptionAllowanceCard({
               </span>
             </div>
           ) : null}
-
-          {allowance.spendingControl !== undefined && allowance.spendingControl !== null ? (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
-              <span>Spending control</span>
-              {allowance.spendingControl.limit !== undefined &&
-              allowance.spendingControl.limit !== null ? (
-                <span>Limit {allowance.spendingControl.limit}</span>
-              ) : null}
-              {allowance.spendingControl.used !== undefined &&
-              allowance.spendingControl.used !== null ? (
-                <span>Used {allowance.spendingControl.used}</span>
-              ) : null}
-              {allowance.spendingControl.remainingPercent !== undefined &&
-              allowance.spendingControl.remainingPercent !== null ? (
-                <span>{allowance.spendingControl.remainingPercent}% remaining</span>
-              ) : null}
-              {allowance.spendingControl.reached !== undefined &&
-              allowance.spendingControl.reached !== null ? (
-                <span>
-                  {allowance.spendingControl.reached ? "Limit reached" : "Limit not reached"}
-                </span>
-              ) : null}
-            </div>
-          ) : null}
-
-          {allowance.extraUsage !== undefined && allowance.extraUsage !== null ? (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
-              <span>Extra usage</span>
-              <span>{allowance.extraUsage.isEnabled ? "Enabled" : "Disabled"}</span>
-              {allowance.extraUsage.monthlyLimit !== null ? (
-                <span>Monthly limit {allowance.extraUsage.monthlyLimit}</span>
-              ) : null}
-              {allowance.extraUsage.usedCredits !== null ? (
-                <span>Used credits {allowance.extraUsage.usedCredits}</span>
-              ) : null}
-              {allowance.extraUsage.utilization !== null ? (
-                <span>{allowance.extraUsage.utilization}% used</span>
-              ) : null}
-              {allowance.extraUsage.currency !== undefined &&
-              allowance.extraUsage.currency !== null ? (
-                <span>{allowance.extraUsage.currency}</span>
-              ) : null}
-            </div>
-          ) : null}
         </>
       )}
       {allowance.hasMultipleReadings ? (
