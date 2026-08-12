@@ -3,7 +3,6 @@ import type { SubscriptionAllowanceGroup } from "@t3tools/client-runtime/state/s
 import type {
   SubscriptionAllowance,
   SubscriptionAllowanceProviderKind,
-  SubscriptionAllowanceSpendingControl,
   SubscriptionAllowanceWindow,
 } from "@t3tools/contracts";
 import {
@@ -29,14 +28,12 @@ export interface MobileAllowanceCardModel {
   readonly provider: SubscriptionAllowanceProviderKind;
   readonly providerLabel: string;
   readonly accountLabel: string | null;
-  readonly sourceLabel: string;
   readonly status: SubscriptionAllowance["status"];
   readonly message: string;
   readonly freshness: "fresh" | "stale";
   readonly updatedAt: string | null;
   readonly windows: readonly SubscriptionAllowanceWindow[];
   readonly credits: NonNullable<SubscriptionAllowance["credits"]> | null;
-  readonly spendingControl: SubscriptionAllowanceSpendingControl | null;
   readonly extraUsage: NonNullable<SubscriptionAllowance["extraUsage"]> | null;
   readonly hasMultipleReadings: boolean;
   readonly sources: readonly MobileAllowanceSourceModel[];
@@ -87,14 +84,22 @@ export function formatAllowanceResetAt(resetsAt: string): string {
   }).format(new Date(resetsAt));
 }
 
-export function formatAllowanceUpdatedAt(updatedAt: string | null | undefined): string | null {
+export function formatAllowanceUpdatedAt(
+  updatedAt: string | null | undefined,
+  now = Date.now(),
+): string | null {
   if (updatedAt === null || updatedAt === undefined) return null;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+
+  const elapsedMinutes = Math.max(0, Math.floor((now - date.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Updated just now";
+  if (elapsedMinutes < 60) return `Updated ${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Updated ${elapsedHours}h ago`;
+
+  return `Updated ${Math.floor(elapsedHours / 24)}d ago`;
 }
 
 export function formatAllowanceConnectionPhase(phase: EnvironmentConnectionPhase): string {
@@ -150,25 +155,17 @@ export function presentAllowanceGroup(group: SubscriptionAllowanceGroup): Mobile
   }
 
   const allowance = displayedSource.allowance;
-  const sourceLabel = [
-    displayedSource.environmentLabel,
-    allowance.instanceId,
-    formatAllowanceConnectionPhase(displayedSource.connectionPhase),
-  ].join(" · ");
-
   return {
     key: group.key,
     provider: allowance.provider,
     providerLabel: PROVIDER_LABEL[allowance.provider],
     accountLabel: group.accountLabel,
-    sourceLabel,
     status: allowance.status,
     message: formatAllowanceUnavailableMessage(allowance.provider, allowance.message),
     freshness: allowance.freshness ?? "fresh",
     updatedAt: allowance.updatedAt ?? null,
     windows: allowance.windows,
     credits: allowance.credits ?? null,
-    spendingControl: allowance.spendingControl ?? null,
     extraUsage: allowance.extraUsage ?? null,
     hasMultipleReadings: group.hasMultipleReadings,
     sources: group.sources.map((source, index) => ({

@@ -559,14 +559,7 @@ function SubscriptionUsagePage({
 function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllowanceGroup }) {
   const displayedSource = group.effectiveSource ?? group.sources[0]!;
   const { allowance } = displayedSource;
-  const sourceConnectionLabel = formatAllowanceConnectionPhase(displayedSource.connectionPhase);
-  const sourceLabel = [
-    displayedSource.environmentLabel,
-    allowance.instanceId,
-    sourceConnectionLabel,
-  ]
-    .filter((part) => part !== null)
-    .join(" · ");
+  const updatedAt = formatAllowanceUpdatedAt(allowance.updatedAt);
 
   return (
     <article className="flex flex-col gap-5 border border-border p-5">
@@ -579,14 +572,12 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span>{sourceLabel}</span>
           <span className={allowance.freshness === "stale" ? "text-amber-600" : undefined}>
             {allowance.freshness === "stale"
-              ? "Stale"
-              : (() => {
-                  const updatedAt = formatAllowanceUpdatedAt(allowance.updatedAt);
-                  return updatedAt === null ? "Updated time unavailable" : `Updated ${updatedAt}`;
-                })()}
+              ? updatedAt === null
+                ? "Stale"
+                : `Stale · ${updatedAt}`
+              : (updatedAt ?? "Updated time unavailable")}
           </span>
         </div>
       </div>
@@ -648,32 +639,6 @@ function SubscriptionAllowanceCard({ group }: { readonly group: SubscriptionAllo
                     ? "Available"
                     : "No credits"}
               </span>
-            </div>
-          ) : null}
-
-          {allowance.spendingControl !== undefined && allowance.spendingControl !== null ? (
-            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
-              <span>Spending control</span>
-              {allowance.spendingControl.reached !== undefined &&
-              allowance.spendingControl.reached !== null ? (
-                <span>{allowance.spendingControl.reached ? "Reached" : "Not reached"}</span>
-              ) : null}
-              {allowance.spendingControl.used !== undefined &&
-              allowance.spendingControl.used !== null &&
-              allowance.spendingControl.limit !== undefined &&
-              allowance.spendingControl.limit !== null ? (
-                <span>
-                  Used {allowance.spendingControl.used} / {allowance.spendingControl.limit}
-                </span>
-              ) : null}
-              {allowance.spendingControl.remainingPercent !== undefined &&
-              allowance.spendingControl.remainingPercent !== null ? (
-                <span>{allowance.spendingControl.remainingPercent}% remaining</span>
-              ) : null}
-              {allowance.spendingControl.resetsAt !== undefined &&
-              allowance.spendingControl.resetsAt !== null ? (
-                <span>Resets {formatAllowanceResetAt(allowance.spendingControl.resetsAt)}</span>
-              ) : null}
             </div>
           ) : null}
 

@@ -45,12 +45,20 @@ export function formatAllowanceResetAt(resetsAt: string): string {
   }).format(new Date(resetsAt));
 }
 
-export function formatAllowanceUpdatedAt(updatedAt: string | null | undefined): string | null {
+export function formatAllowanceUpdatedAt(
+  updatedAt: string | null | undefined,
+  now = Date.now(),
+): string | null {
   if (updatedAt === null || updatedAt === undefined) return null;
   const date = new Date(updatedAt);
   if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+
+  const elapsedMinutes = Math.max(0, Math.floor((now - date.getTime()) / 60_000));
+  if (elapsedMinutes < 1) return "Updated just now";
+  if (elapsedMinutes < 60) return `Updated ${elapsedMinutes}m ago`;
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 24) return `Updated ${elapsedHours}h ago`;
+
+  return `Updated ${Math.floor(elapsedHours / 24)}d ago`;
 }

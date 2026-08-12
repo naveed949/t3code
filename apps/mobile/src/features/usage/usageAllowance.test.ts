@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   formatAllowanceEnvironmentNotice,
+  formatAllowanceUpdatedAt,
   formatAllowanceWindowScope,
   presentAllowanceGroup,
   progressWidthForAllowance,
@@ -115,9 +116,6 @@ describe("mobile subscription allowance presentation", () => {
     );
 
     expect(model.freshness).toBe("stale");
-    expect(model.sourceLabel).toContain("Phone");
-    expect(model.sourceLabel).toContain("codex-personal");
-    expect(model.sourceLabel).toContain("Offline");
     expect(model.hasMultipleReadings).toBe(true);
     expect(model.sources[0]?.isCurrent).toBe(false);
   });
@@ -179,5 +177,13 @@ describe("mobile subscription allowance presentation", () => {
         snapshot: null,
       }),
     ).toBe("Desktop could not report subscription usage.");
+  });
+
+  it("shows relative freshness without exposing a local timestamp", () => {
+    const now = Date.parse("2026-08-12T12:00:00.000Z");
+
+    expect(formatAllowanceUpdatedAt("2026-08-12T12:00:00.000Z", now)).toBe("Updated just now");
+    expect(formatAllowanceUpdatedAt("2026-08-12T11:57:00.000Z", now)).toBe("Updated 3m ago");
+    expect(formatAllowanceUpdatedAt("2026-08-12T10:00:00.000Z", now)).toBe("Updated 2h ago");
   });
 });

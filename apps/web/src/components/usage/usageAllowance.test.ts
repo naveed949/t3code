@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   formatAllowanceDuration,
+  formatAllowanceUpdatedAt,
   formatAllowanceWindowScope,
   progressWidthForAllowance,
 } from "./usageAllowance";
@@ -22,5 +23,14 @@ describe("usage allowance presentation", () => {
     expect(progressWidthForAllowance(-1)).toBe(0);
     expect(progressWidthForAllowance(42)).toBe(42);
     expect(progressWidthForAllowance(101)).toBe(100);
+  });
+
+  it("shows relative freshness without exposing a local timestamp", () => {
+    const now = Date.parse("2026-08-12T12:00:00.000Z");
+
+    expect(formatAllowanceUpdatedAt("2026-08-12T12:00:00.000Z", now)).toBe("Updated just now");
+    expect(formatAllowanceUpdatedAt("2026-08-12T11:57:00.000Z", now)).toBe("Updated 3m ago");
+    expect(formatAllowanceUpdatedAt("2026-08-12T10:00:00.000Z", now)).toBe("Updated 2h ago");
+    expect(formatAllowanceUpdatedAt("2026-08-10T12:00:00.000Z", now)).toBe("Updated 2d ago");
   });
 });
