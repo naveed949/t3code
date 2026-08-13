@@ -2,7 +2,6 @@ import { describe, expect, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { SDKControlGetUsageResponse, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
@@ -239,9 +238,14 @@ describe("makeClaudeAllowanceReader", () => {
           }),
         });
 
-        const result = yield* Effect.exit(reader.read);
+        const error = yield* Effect.flip(reader.read);
 
-        expect(Exit.isFailure(result)).toBe(true);
+        expect(error).toMatchObject({
+          provider: "claude",
+          instanceId,
+          operation: "read",
+        });
+        expect(error.message).toContain(`instance '${instanceId}'`);
         expect(closed).toBe(true);
       }),
     );
@@ -264,9 +268,13 @@ describe("makeClaudeAllowanceReader", () => {
           }),
         });
 
-        const result = yield* Effect.exit(reader.read);
+        const error = yield* Effect.flip(reader.read);
 
-        expect(Exit.isFailure(result)).toBe(true);
+        expect(error).toMatchObject({
+          provider: "claude",
+          instanceId,
+          operation: "timeout",
+        });
         expect(closed).toBe(true);
       }),
     );

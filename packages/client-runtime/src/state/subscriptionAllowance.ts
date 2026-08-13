@@ -368,7 +368,7 @@ function stableJson(value: unknown): string {
   if (value === undefined) return "undefined";
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   return `{${Object.entries(value)
-    .toSorted(([left], [right]) => compareStrings(left, right))
+    .sort(([left], [right]) => compareStrings(left, right))
     .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
     .join(",")}}`;
 }
@@ -422,11 +422,11 @@ function makeGroups(
   }
 
   const groups = [...grouped.entries()].map(([key, groupedSources]) => {
-    const sortedSources = groupedSources.toSorted(compareSources);
+    const sortedSources = [...groupedSources].sort(compareSources);
     const effectiveSource =
       sortedSources
         .filter((source) => source.allowance.status === "available")
-        .toSorted(compareEffectiveSources)[0] ?? null;
+        .sort(compareEffectiveSources)[0] ?? null;
     return {
       key,
       provider: sortedSources[0]!.allowance.provider,
@@ -459,7 +459,7 @@ function makeGroups(
         accountLabel: `${group.accountLabel} · ${source.environmentLabel} · ${source.allowance.instanceId}`,
       };
     })
-    .toSorted((left, right) => {
+    .sort((left, right) => {
       const providerOrder = PROVIDER_ORDER[left.provider] - PROVIDER_ORDER[right.provider];
       return providerOrder === 0 ? compareStrings(left.key, right.key) : providerOrder;
     })
@@ -484,13 +484,13 @@ function projectSources(
           allowance,
         })) ?? [],
     )
-    .toSorted(compareSources);
+    .sort(compareSources);
 }
 
 export function reconcileSubscriptionAllowances(
   input: readonly EnvironmentSubscriptionAllowanceStatus[],
 ): SubscriptionAllowanceProjection {
-  const environments = input.toSorted(compareEnvironments);
+  const environments = [...input].sort(compareEnvironments);
   const connected = environments.filter(isConnected);
   const answeredCount = connected.filter((environment) => environment.snapshot !== null).length;
   const stillReporting = connected.filter(

@@ -170,12 +170,12 @@ export function mapCodexRateLimitsUpdate(input: {
 
 export interface CodexAllowanceReaderInput extends CodexAppServerClientInput {
   readonly instanceId: ProviderInstanceId;
-  readonly spawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
 }
 
-export function makeCodexAllowanceReader(
+export const makeCodexAllowanceReader = Effect.fn("makeCodexAllowanceReader")(function* (
   input: CodexAllowanceReaderInput,
-): ProviderAllowanceReader {
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const read = withCodexAppServerClient(input, ({ client }) =>
     client
       .request("account/rateLimits/read", undefined)
@@ -183,15 +183,27 @@ export function makeCodexAllowanceReader(
         Effect.map((response) => mapCodexRateLimits({ instanceId: input.instanceId, response })),
       ),
   ).pipe(
-    Effect.timeout(CODEX_ALLOWANCE_READ_TIMEOUT),
     Effect.mapError(
       (cause) =>
         new ProviderAllowanceReadError({
-          detail: "Codex app-server did not return subscription usage limits in time.",
+          provider: "codex",
+          instanceId: input.instanceId,
+          operation: "read",
           cause,
         }),
     ),
-    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, input.spawner),
+    Effect.timeout(CODEX_ALLOWANCE_READ_TIMEOUT),
+    Effect.catchTag("TimeoutError", (cause) =>
+      Effect.fail(
+        new ProviderAllowanceReadError({
+          provider: "codex",
+          instanceId: input.instanceId,
+          operation: "timeout",
+          cause,
+        }),
+      ),
+    ),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     Effect.scoped,
   );
 
@@ -199,5 +211,5 @@ export function makeCodexAllowanceReader(
     provider: "codex",
     read,
     update: (event) => mapCodexRateLimitsUpdate({ instanceId: input.instanceId, event }),
-  };
-}
+  } satisfies ProviderAllowanceReader;
+});

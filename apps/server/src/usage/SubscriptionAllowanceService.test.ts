@@ -6,13 +6,21 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
-import { ProviderInstanceId } from "@t3tools/contracts";
+import {
+  EventId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  type ProviderRuntimeEvent,
+} from "@t3tools/contracts";
 
 import type { ProviderAllowanceReader } from "../provider/Services/ProviderAllowanceReader.ts";
+import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import {
@@ -60,6 +68,14 @@ const registryLayerFor = (providerInstance: SubscriptionAllowanceProviderInstanc
       PubSub.subscribe(pubsub),
     ),
   });
+
+const providerServiceLayerFor = (events: Stream.Stream<ProviderRuntimeEvent> = Stream.empty) =>
+  Layer.succeed(ProviderService, { streamEvents: events } as ProviderService["Service"]);
+
+const makeService = (
+  registryLayer: Layer.Layer<ProviderInstanceRegistry>,
+  events: Stream.Stream<ProviderRuntimeEvent> = Stream.empty,
+) => make.pipe(Effect.provide(Layer.mergeAll(registryLayer, providerServiceLayerFor(events))));
 
 describe("subscription allowance lifecycle helpers", () => {
   it("folds sparse windows without dropping a previously complete record", () => {
@@ -141,7 +157,7 @@ describe("SubscriptionAllowanceService", () => {
         streamChanges: Stream.fromPubSub(changes),
         subscribeChanges: PubSub.subscribe(changes),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayer));
+      const service = yield* makeService(registryLayer);
       yield* Ref.set(instances, [
         instance({ allowanceReader: reader(Effect.succeed(allowance)) }) as ProviderInstance,
       ]);
@@ -163,7 +179,7 @@ describe("SubscriptionAllowanceService", () => {
       const providerInstance = instance({
         allowanceReader: reader(Effect.succeed(allowance)),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+      const service = yield* makeService(registryLayerFor(providerInstance));
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -185,7 +201,7 @@ describe("SubscriptionAllowanceService", () => {
       const providerInstance = instance({
         allowanceReader: reader(Effect.succeed(allowance)),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+      const service = yield* makeService(registryLayerFor(providerInstance));
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -218,7 +234,7 @@ describe("SubscriptionAllowanceService", () => {
           }),
         ),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+      const service = yield* makeService(registryLayerFor(providerInstance));
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -282,7 +298,7 @@ describe("SubscriptionAllowanceService", () => {
         streamChanges: Stream.fromPubSub(changes),
         subscribeChanges: PubSub.subscribe(changes),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayer));
+      const service = yield* makeService(registryLayer);
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -326,7 +342,7 @@ describe("SubscriptionAllowanceService", () => {
           ),
         ),
       });
-      const service = yield* make.pipe(Effect.provide(registryLayerFor(providerInstance)));
+      const service = yield* makeService(registryLayerFor(providerInstance));
 
       yield* Effect.scoped(
         Effect.gen(function* () {
@@ -343,5 +359,53 @@ describe("SubscriptionAllowanceService", () => {
       yield* TestClock.adjust(Duration.minutes(5));
       expect(readCount).toBe(afterTeardown);
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect("attaches the demand-scoped provider event stream", () =>
+    Effect.gen(function* () {
+      const providerEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const eventStream = Stream.fromQueue(providerEvents);
+      const providerInstance = instance({
+        allowanceReader: {
+          provider: "codex",
+          read: Effect.succeed(allowance),
+          update: () => ({
+            ...allowance,
+            windows: [{ scope: "primary", usedPercent: 55 }],
+          }),
+        },
+      });
+      const service = yield* makeService(registryLayerFor(providerInstance), eventStream);
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          yield* Stream.runHead(subscription.changes);
+          const liveUpdate = yield* subscription.changes.pipe(
+            Stream.filter((snapshot) => snapshot.allowances[0]?.observationSource === "liveUpdate"),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          const event = {
+            type: "account.rate-limits.updated",
+            eventId: EventId.make("allowance-live-update"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: instanceId,
+            threadId: ThreadId.make("allowance-thread"),
+            createdAt: "2026-08-11T13:00:00.000Z",
+            payload: { rateLimits: {} },
+          } satisfies Extract<ProviderRuntimeEvent, { type: "account.rate-limits.updated" }>;
+
+          yield* Queue.offer(providerEvents, event);
+          const published = Option.getOrThrow(yield* Fiber.join(liveUpdate));
+
+          expect(published.allowances[0]).toMatchObject({
+            observationSource: "liveUpdate",
+            deliverySource: "live",
+            windows: [{ scope: "primary", usedPercent: 55 }],
+          });
+        }),
+      );
+    }),
   );
 });

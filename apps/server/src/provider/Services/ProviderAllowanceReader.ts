@@ -1,8 +1,5 @@
-import type {
-  ProviderRuntimeEvent,
-  SubscriptionAllowance,
-  SubscriptionAllowanceProviderKind,
-} from "@t3tools/contracts";
+import type { ProviderRuntimeEvent, SubscriptionAllowance } from "@t3tools/contracts";
+import { SubscriptionAllowanceProviderKind } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -12,10 +9,16 @@ export const CLAUDE_SUBSCRIPTION_ALLOWANCE_UNAVAILABLE_MESSAGE =
 export class ProviderAllowanceReadError extends Schema.TaggedErrorClass<ProviderAllowanceReadError>()(
   "ProviderAllowanceReadError",
   {
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect()),
+    provider: SubscriptionAllowanceProviderKind,
+    instanceId: Schema.String,
+    operation: Schema.Literals(["read", "timeout"]),
+    cause: Schema.Defect(),
   },
-) {}
+) {
+  override get message(): string {
+    return `Provider allowance ${this.operation} failed (${this.provider}) for instance '${this.instanceId}'.`;
+  }
+}
 
 /**
  * Optional live subscription reader owned by a materialized provider

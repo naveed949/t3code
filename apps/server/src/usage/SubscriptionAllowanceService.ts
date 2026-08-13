@@ -173,7 +173,7 @@ export class SubscriptionAllowanceService extends Context.Service<
 
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry;
-  const providerService = yield* Effect.serviceOption(ProviderService);
+  const providerService = yield* ProviderService;
   const stateMutex = yield* Semaphore.make(1);
   const liveMutex = yield* Semaphore.make(1);
   const changes = yield* PubSub.sliding<SubscriptionAllowanceSnapshot>(8);
@@ -202,9 +202,6 @@ export const make = Effect.gen(function* () {
       }
       return nextSnapshot;
     });
-  const publish = (snapshot: SubscriptionAllowanceSnapshot) =>
-    stateMutex.withPermits(1)(publishUnlocked(snapshot));
-
   const readCurrentSnapshot = Effect.fn("SubscriptionAllowanceService.readCurrentSnapshot")(
     function* (
       instances: ReadonlyArray<SubscriptionAllowanceProviderInstance>,
@@ -263,33 +260,37 @@ export const make = Effect.gen(function* () {
     const capturedById = new Map(
       instances.map((instance) => [instance.instanceId, instance] as const),
     );
-    const currentState = yield* Ref.get(state);
     const allowancesById = new Map(
       candidate.allowances.map((allowance) => [allowance.instanceId, allowance]),
     );
-    const acceptedAllowances = currentInstances.flatMap((instance) => {
-      const candidateInstance = capturedById.get(instance.instanceId);
-      if (
-        candidateInstance === instance &&
-        currentState.instances.get(instance.instanceId) === instance
-      ) {
-        const allowance = allowancesById.get(instance.instanceId);
-        return allowance === undefined ? [] : [allowance];
-      }
+    return yield* stateMutex.withPermits(1)(
+      Effect.gen(function* () {
+        const currentState = yield* Ref.get(state);
+        const acceptedAllowances = currentInstances.flatMap((instance) => {
+          const candidateInstance = capturedById.get(instance.instanceId);
+          if (
+            candidateInstance === instance &&
+            currentState.instances.get(instance.instanceId) === instance
+          ) {
+            const allowance = allowancesById.get(instance.instanceId);
+            return allowance === undefined ? [] : [allowance];
+          }
 
-      // A provider instance was replaced while the read was in flight. Do not
-      // let the old generation publish into the new one; its registry change
-      // will trigger a new demand-scoped refresh.
-      const previousInstance = currentState.instances.get(instance.instanceId);
-      if (previousInstance === instance) {
-        const allowance = currentState.snapshot.allowances.find(
-          (candidateAllowance) => candidateAllowance.instanceId === instance.instanceId,
-        );
-        return allowance === undefined ? [] : [allowance];
-      }
-      return [];
-    });
-    return yield* publish({ readAt, allowances: acceptedAllowances });
+          // A provider instance was replaced while the read was in flight. Do not
+          // let the old generation publish into the new one; its registry change
+          // will trigger a new demand-scoped refresh.
+          const previousInstance = currentState.instances.get(instance.instanceId);
+          if (previousInstance === instance) {
+            const allowance = currentState.snapshot.allowances.find(
+              (candidateAllowance) => candidateAllowance.instanceId === instance.instanceId,
+            );
+            return allowance === undefined ? [] : [allowance];
+          }
+          return [];
+        });
+        return yield* publishUnlocked({ readAt, allowances: acceptedAllowances });
+      }),
+    );
   });
 
   const refresh: Effect.Effect<SubscriptionAllowanceSnapshot> = Effect.uninterruptibleMask(
@@ -432,16 +433,14 @@ export const make = Effect.gen(function* () {
         liveScope: Option.some(liveScope),
       });
 
-      if (Option.isSome(providerService)) {
-        yield* providerService.value.streamEvents.pipe(
-          Stream.filter((event) => event.type === "account.rate-limits.updated"),
-          Stream.runForEach(handleProviderUpdate),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Subscription allowance provider update stream stopped", { cause }),
-          ),
-          Effect.forkIn(liveScope),
-        );
-      }
+      yield* providerService.streamEvents.pipe(
+        Stream.filter((event) => event.type === "account.rate-limits.updated"),
+        Stream.runForEach(handleProviderUpdate),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Subscription allowance provider update stream stopped", { cause }),
+        ),
+        Effect.forkIn(liveScope),
+      );
       const registryChanges = yield* registry.subscribeChanges.pipe(
         Effect.provideService(Scope.Scope, liveScope),
       );

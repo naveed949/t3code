@@ -46,6 +46,21 @@ function environment(
 }
 
 describe("reconcileSubscriptionAllowances", () => {
+  it("sorts without mutating the caller's environment array", () => {
+    const input = [environment("environment-b", []), environment("environment-a", [])];
+
+    const result = reconcileSubscriptionAllowances(input);
+
+    expect(result.environments.map((entry) => entry.environmentId)).toEqual([
+      EnvironmentId.make("environment-a"),
+      EnvironmentId.make("environment-b"),
+    ]);
+    expect(input.map((entry) => entry.environmentId)).toEqual([
+      EnvironmentId.make("environment-b"),
+      EnvironmentId.make("environment-a"),
+    ]);
+  });
+
   it("does not call a disconnected last-known source current", () => {
     const source = {
       environmentId: EnvironmentId.make("offline"),

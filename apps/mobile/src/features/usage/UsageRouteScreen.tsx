@@ -55,11 +55,21 @@ const WINDOW_OPTIONS = [
 
 const CHART_HEIGHT = 180;
 
+type HistoricalWindowSelection = {
+  readonly days: number;
+  readonly window: ReturnType<typeof makeWindow>;
+};
+
 export function UsageRouteScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const isFocused = useIsFocused();
   const [view, setView] = useState<UsageView>(DEFAULT_USAGE_VIEW);
+  const [windowSelection, setWindowSelection] = useState(() => ({
+    days: 30,
+    window: makeWindow(30),
+  }));
+  const [metric, setMetric] = useState<UsageChartMetric>("cost");
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -74,6 +84,10 @@ export function UsageRouteScreen() {
         isFocused={isFocused}
         onViewChange={setView}
         insetsBottom={insets.bottom}
+        windowSelection={windowSelection}
+        onWindowSelectionChange={setWindowSelection}
+        metric={metric}
+        onMetricChange={setMetric}
       />
     </View>
   );
@@ -84,6 +98,10 @@ function UsageContent(props: {
   readonly isFocused: boolean;
   readonly onViewChange: (view: UsageView) => void;
   readonly insetsBottom: number;
+  readonly windowSelection: HistoricalWindowSelection;
+  readonly onWindowSelectionChange: (selection: HistoricalWindowSelection) => void;
+  readonly metric: UsageChartMetric;
+  readonly onMetricChange: (metric: UsageChartMetric) => void;
 }) {
   // Mount only the selected data source so leaving Subscription tears down its
   // allowance stream and leaving Historical releases its transcript query.
@@ -92,20 +110,26 @@ function UsageContent(props: {
   return props.view === "subscription" ? (
     <SubscriptionUsageContent onViewChange={props.onViewChange} insetsBottom={props.insetsBottom} />
   ) : (
-    <HistoricalUsageContent onViewChange={props.onViewChange} insetsBottom={props.insetsBottom} />
+    <HistoricalUsageContent
+      onViewChange={props.onViewChange}
+      insetsBottom={props.insetsBottom}
+      windowSelection={props.windowSelection}
+      onWindowSelectionChange={props.onWindowSelectionChange}
+      metric={props.metric}
+      onMetricChange={props.onMetricChange}
+    />
   );
 }
 
 function HistoricalUsageContent(props: {
   readonly onViewChange: (view: UsageView) => void;
   readonly insetsBottom: number;
+  readonly windowSelection: HistoricalWindowSelection;
+  readonly onWindowSelectionChange: (selection: HistoricalWindowSelection) => void;
+  readonly metric: UsageChartMetric;
+  readonly onMetricChange: (metric: UsageChartMetric) => void;
 }) {
-  const [windowSelection, setWindowSelection] = useState(() => ({
-    days: 30,
-    window: makeWindow(30),
-  }));
-  const [metric, setMetric] = useState<UsageChartMetric>("cost");
-  const { days: windowDays, window } = windowSelection;
+  const { days: windowDays, window } = props.windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
 
@@ -138,7 +162,7 @@ function HistoricalUsageContent(props: {
   // environment stays pending forever — neither may pin the spinner on.
   const refreshing = environments.some((entry) => entry.isPending && entry.summary !== null);
   const selectWindow = (days: number) => {
-    setWindowSelection({
+    props.onWindowSelectionChange({
       days,
       window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
     });
@@ -153,7 +177,7 @@ function HistoricalUsageContent(props: {
     ) {
       refresh();
     } else {
-      setWindowSelection({ days: windowDays, window: nextWindow });
+      props.onWindowSelectionChange({ days: windowDays, window: nextWindow });
     }
   };
 
@@ -190,14 +214,14 @@ function HistoricalUsageContent(props: {
             merged={merged}
             days={chartDays}
             daily={chartTotals}
-            metric={metric}
-            onMetricChange={setMetric}
+            metric={props.metric}
+            onMetricChange={props.onMetricChange}
             sinceDay={window.sinceDay}
             untilDay={window.untilDay}
             isPast24Hours={isPast24Hours}
             timeZone={window.timeZone}
           />
-          <ProviderSection merged={merged} metric={metric} />
+          <ProviderSection merged={merged} metric={props.metric} />
           <TotalsSection merged={merged} isPast24Hours={isPast24Hours} />
           <ModelsSection merged={merged} />
         </>
@@ -463,7 +487,7 @@ function AllowanceSources(props: {
           {source.environmentLabel} · {source.instanceId} · {source.connectionLabel} ·{" "}
           {source.status}
           {source.status === "unavailable"
-            ? " · unavailable"
+            ? ""
             : source.freshness === "stale"
               ? " · stale"
               : source.isCurrent

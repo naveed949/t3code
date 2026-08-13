@@ -188,9 +188,16 @@ const neverYieldingPrompt = (signal: AbortSignal): AsyncIterable<SDKUserMessage>
     });
   })();
 
-const makeReadError = (cause: unknown): ProviderAllowanceReadError =>
+class ClaudeAllowanceReadTimeoutError extends Error {}
+
+const makeReadError = (
+  input: ClaudeAllowanceReaderInput,
+  cause: unknown,
+): ProviderAllowanceReadError =>
   new ProviderAllowanceReadError({
-    detail: "Claude Agent SDK did not return subscription usage limits.",
+    provider: "claude",
+    instanceId: input.instanceId,
+    operation: cause instanceof ClaudeAllowanceReadTimeoutError ? "timeout" : "read",
     cause,
   });
 
@@ -206,7 +213,8 @@ const withTimeout = <A>(promise: Promise<A>, timeout: Duration.Input): Promise<A
     // adapter needs a real deadline before its cleanup runs.
     // @effect-diagnostics-next-line globalTimers:off
     timer = setTimeout(
-      () => reject(new Error("Claude Agent SDK allowance read timed out.")),
+      () =>
+        reject(new ClaudeAllowanceReadTimeoutError("Claude Agent SDK allowance read timed out.")),
       timeoutMs,
     );
     promise.then(resolve, reject);
@@ -261,7 +269,7 @@ export const makeClaudeAllowanceReader = Effect.fn("makeClaudeAllowanceReader")(
           })(),
           input.timeout ?? CLAUDE_ALLOWANCE_READ_TIMEOUT,
         ),
-      catch: makeReadError,
+      catch: (cause) => makeReadError(input, cause),
     }).pipe(
       Effect.ensuring(
         Effect.sync(() => {
@@ -270,7 +278,7 @@ export const makeClaudeAllowanceReader = Effect.fn("makeClaudeAllowanceReader")(
         }),
       ),
       Effect.mapError((cause) =>
-        isProviderAllowanceReadError(cause) ? cause : makeReadError(cause),
+        isProviderAllowanceReadError(cause) ? cause : makeReadError(input, cause),
       ),
     );
   });

@@ -147,14 +147,13 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         enabled,
         homePath: homeLayout.effectiveHomePath ?? "",
       } satisfies CodexSettings;
-      const allowanceReader = makeCodexAllowanceReader({
+      const allowanceReader = yield* makeCodexAllowanceReader({
         instanceId,
         binaryPath: effectiveConfig.binaryPath,
         homePath: effectiveConfig.homePath,
         launchArgs: resolveCodexLaunchArgs(effectiveConfig.launchArgs, processEnv),
         cwd,
         environment: processEnv,
-        spawner,
       });
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
