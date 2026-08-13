@@ -311,7 +311,7 @@ function SubscriptionUsageContent(props: {
             ))
           ) : environments.length === 0 ? (
             <Text className="text-sm text-foreground-muted">
-              Connect an environment to see subscription allowance.
+              Connect an environment to see subscription allowance data.
             </Text>
           ) : (
             <Text className="text-sm text-foreground-muted">

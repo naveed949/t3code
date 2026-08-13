@@ -89,7 +89,6 @@ describe("mobile subscription allowance presentation", () => {
       provider: "codex",
       accountLabel: "n•••@example.com",
       status: "available",
-      freshness: "fresh",
       updatedAt: readAt,
       windows: [
         {
@@ -133,7 +132,7 @@ describe("mobile subscription allowance presentation", () => {
     expect(model.accountLabel).toBeNull();
   });
 
-  it("retains stale state, source identity, and multiple-reading context", () => {
+  it("derives source currentness without exposing raw freshness to the UI", () => {
     const source = group().effectiveSource!;
     const staleSource = {
       ...source,
@@ -152,8 +151,9 @@ describe("mobile subscription allowance presentation", () => {
       }),
     );
 
-    expect(model.freshness).toBe("stale");
+    expect(model).not.toHaveProperty("freshness");
     expect(model.hasMultipleReadings).toBe(true);
+    expect(model.sources[0]).not.toHaveProperty("freshness");
     expect(model.sources[0]?.isCurrent).toBe(false);
   });
 
@@ -216,7 +216,7 @@ describe("mobile subscription allowance presentation", () => {
     ).toBe("Desktop could not report subscription usage.");
   });
 
-  it("shows relative freshness without exposing a local timestamp", () => {
+  it("shows relative observation age without exposing a local timestamp", () => {
     const now = Date.parse("2026-08-12T12:00:00.000Z");
 
     expect(formatAllowanceUpdatedAt("2026-08-12T12:00:00.000Z", now)).toBe("Updated just now");

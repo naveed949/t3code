@@ -186,7 +186,7 @@ export interface SubscriptionAllowanceSourceModel {
   readonly instanceId: string;
   readonly connectionLabel: string;
   readonly status: SubscriptionAllowance["status"];
-  readonly freshness: "fresh" | "stale";
+  /** Derived from connection, availability, and freshness for UI presentation. */
   readonly isCurrent: boolean;
   readonly isEffective: boolean;
 }
@@ -197,7 +197,6 @@ export interface SubscriptionAllowanceCardModel {
   readonly accountLabel: string | null;
   readonly status: SubscriptionAllowance["status"];
   readonly message: string;
-  readonly freshness: "fresh" | "stale";
   readonly updatedAt: string | null;
   readonly windows: SubscriptionAllowance["windows"];
   readonly credits: NonNullable<SubscriptionAllowance["credits"]> | null;
@@ -239,7 +238,6 @@ export function presentSubscriptionAllowanceGroup(
     accountLabel: group.accountLabel,
     status: allowance.status,
     message: formatAllowanceUnavailableMessage(allowance.provider, allowance.message),
-    freshness: allowance.freshness ?? "fresh",
     updatedAt: allowance.updatedAt ?? null,
     windows: allowance.windows,
     credits: allowance.credits ?? null,
@@ -250,7 +248,6 @@ export function presentSubscriptionAllowanceGroup(
       instanceId: source.allowance.instanceId,
       connectionLabel: formatAllowanceConnectionPhase(source.connectionPhase),
       status: source.allowance.status,
-      freshness: source.allowance.freshness ?? "fresh",
       isCurrent: isSubscriptionAllowanceSourceCurrent(source),
       isEffective: source === displayedSource,
     })),

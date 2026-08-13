@@ -101,9 +101,11 @@ not prove identity.
 
 Grouping is a presentation view, not a merge. The projection chooses one complete whole-source
 observation by deterministic freshness, completeness, delivery, connection, and source ordering;
-it never combines one environment’s windows with another environment’s credits. The web and mobile
-surfaces render that same projection in their native layouts. Leaving Subscription unmounts the
-allowance consumer, which releases demand while leaving Historical independent.
+it never combines one environment’s windows with another environment’s credits. Freshness remains
+an internal selection input: card presentation models expose the observation timestamp and derived
+source currentness, not raw freshness. Web and mobile communicate age with **Updated** and do not
+render a separate stale badge. Leaving Subscription unmounts the allowance consumer, which releases
+demand while leaving Historical independent.
 
 ## Evidence and release boundary
 

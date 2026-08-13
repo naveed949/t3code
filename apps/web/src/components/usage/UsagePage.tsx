@@ -607,6 +607,8 @@ function SubscriptionUsagePage({
               environmentNotices.map((notice) => (
                 <span key={notice.environmentId}>{notice.message}</span>
               ))
+            ) : environments.length === 0 ? (
+              <span>Connect an environment to see subscription allowance data.</span>
             ) : (
               <span>No enabled provider reports subscription allowance data.</span>
             )}

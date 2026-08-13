@@ -11,9 +11,10 @@ environment remains inspectable. T3 Code displays provider-reported percentages,
 reset times, credits, and spending controls only when the provider supplies them. It does not infer
 a quota, reset, account status, or combined cross-provider total.
 
-Use **Refresh** on web or mobile to request a new provider observation. On mobile, you can also pull
-down on the Usage screen. A fresh reading is current provider data; a stale reading is retained
-data from before a failed refresh or a passed reset time. T3 Code does not reset percentages locally.
+Use **Refresh** on web or pull down on the mobile Usage screen to request a new provider observation.
+The **Updated** timestamp communicates the age of the displayed observation instead of adding a
+separate stale badge. Data retained after a failed refresh or a passed reset time is not treated as
+current when selecting among provider sources. T3 Code does not reset percentages locally.
 
 Leaving the Subscription view stops its live allowance updates; returning to it requests a fresh
 reading. If an environment is offline or reconnecting, its last known reading remains identified

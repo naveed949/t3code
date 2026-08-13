@@ -39,8 +39,8 @@ Record these states separately in the release record:
       refresh bounds, sparse folding, stale transitions, generation safety, reconnect, demand
       teardown, and cleanup.
 - [ ] Shared projection and web/mobile presentation tests cover multiple sources, exact identity
-      grouping, whole-source selection, provider placeholders, stale/refreshing/loading states,
-      accessibility, and unchanged Historical controls.
+      grouping, whole-source selection, provider placeholders, observation age, derived source
+      currentness, refreshing/loading states, accessibility, and unchanged Historical controls.
 - [ ] Focused tests, targeted formatting/linting, and scoped typechecks pass for every changed
       package. Repository-wide checks are CI-owned unless separately requested.
 
@@ -79,8 +79,8 @@ local behavior data. Keep only provider-reported fields needed to prove the UI.
 ### Web and desktop
 
 - [ ] One integrated pass covers Subscription/Historical switching, both providers, manual refresh,
-      loading/refreshing/stale/unavailable states, multiple instances/environments, accessibility,
-      unchanged Historical content, and desktop parity.
+      loading/refreshing/unavailable states, observation-age updates, non-current source selection,
+      multiple instances/environments, accessibility, unchanged Historical content, and desktop parity.
 - [ ] Remote disconnect/reconnect and newer-client/older-server compatibility are observed.
 - [ ] Before/after images are captured; capture a short recording when refresh or live-update timing
       is material.

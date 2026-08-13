@@ -25,7 +25,7 @@ describe("usage allowance presentation", () => {
     expect(progressWidthForAllowance(101)).toBe(100);
   });
 
-  it("shows relative freshness without exposing a local timestamp", () => {
+  it("shows relative observation age without exposing a local timestamp", () => {
     const now = Date.parse("2026-08-12T12:00:00.000Z");
 
     expect(formatAllowanceUpdatedAt("2026-08-12T12:00:00.000Z", now)).toBe("Updated just now");
