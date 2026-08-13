@@ -104,7 +104,7 @@ observation by deterministic freshness, completeness, delivery, connection, and 
 it never combines one environment’s windows with another environment’s credits. Freshness remains
 an internal selection input: card presentation models expose the observation timestamp and derived
 source currentness, not raw freshness. Web and mobile communicate age with **Updated** and mark
-retained available data **Not current**. Leaving Subscription unmounts the allowance consumer,
+do not expose a second currentness label. Leaving Subscription unmounts the allowance consumer,
 which releases demand while leaving Historical independent.
 
 ## Evidence and release boundary

@@ -374,18 +374,8 @@ function SubscriptionAllowanceCard(props: {
           ) : null}
         </View>
         <View className="flex-row items-baseline justify-end gap-2">
-          <Text
-            className={
-              model.status === "available" && !model.isCurrent
-                ? "text-xs font-t3-medium text-amber-600"
-                : "text-xs text-foreground-muted"
-            }
-          >
-            {model.status === "available" && !model.isCurrent
-              ? updatedAt === null
-                ? "Not current"
-                : `Not current · ${updatedAt}`
-              : (updatedAt ?? "Updated time unavailable")}
+          <Text className="text-xs text-foreground-muted">
+            {updatedAt ?? "Updated time unavailable"}
           </Text>
         </View>
       </View>
@@ -538,11 +528,6 @@ function AllowanceSources(props: {
         <Text key={source.key} className="text-xs text-foreground-muted">
           {source.environmentLabel} · {source.instanceId} · {source.connectionLabel} ·{" "}
           {source.status}
-          {source.status === "unavailable"
-            ? ""
-            : source.isCurrent
-              ? " · current"
-              : " · not current"}
           {source.isEffective ? " · shown" : ""}
         </Text>
       ))}

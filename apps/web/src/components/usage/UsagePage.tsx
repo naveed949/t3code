@@ -666,19 +666,7 @@ function SubscriptionAllowanceCard({
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span
-            className={
-              allowance.status === "available" && !allowance.isCurrent
-                ? "text-amber-600"
-                : undefined
-            }
-          >
-            {allowance.status === "available" && !allowance.isCurrent
-              ? updatedAt === null
-                ? "Not current"
-                : `Not current · ${updatedAt}`
-              : (updatedAt ?? "Updated time unavailable")}
-          </span>
+          <span>{updatedAt ?? "Updated time unavailable"}</span>
         </div>
       </div>
 
@@ -798,11 +786,7 @@ function SubscriptionAllowanceCard({
             <span key={source.key}>
               {source.environmentLabel} · {source.instanceId} ·{" "}
               {source.connectionLabel.toLowerCase()}
-              {source.status === "unavailable"
-                ? " · unavailable"
-                : source.isCurrent
-                  ? " · current"
-                  : " · not current"}
+              {source.status === "unavailable" ? " · unavailable" : ""}
               {source.isEffective ? " · shown" : ""}
             </span>
           ))}
