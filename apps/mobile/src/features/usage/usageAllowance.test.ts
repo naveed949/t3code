@@ -4,6 +4,8 @@ import {
   formatAllowanceWindowScope,
   presentSubscriptionAllowanceGroup,
   progressWidthForAllowance,
+  shouldShowExtraUsage,
+  shouldShowSpendingControl,
   type SubscriptionAllowanceGroup,
 } from "@t3tools/client-runtime/state/subscription-allowance";
 import { EnvironmentId, ProviderInstanceId } from "@t3tools/contracts";
@@ -39,6 +41,37 @@ function group(overrides: Partial<SubscriptionAllowanceGroup> = {}): Subscriptio
 }
 
 describe("mobile subscription allowance presentation", () => {
+  it("hides non-actionable provider control states", () => {
+    expect(shouldShowSpendingControl({ reached: false })).toBe(false);
+    expect(shouldShowSpendingControl({ reached: true })).toBe(true);
+    expect(shouldShowSpendingControl({ reached: false, limit: "100" })).toBe(true);
+
+    expect(
+      shouldShowExtraUsage({
+        isEnabled: false,
+        monthlyLimit: null,
+        usedCredits: null,
+        utilization: null,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowExtraUsage({
+        isEnabled: true,
+        monthlyLimit: null,
+        usedCredits: null,
+        utilization: null,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowExtraUsage({
+        isEnabled: false,
+        monthlyLimit: 0,
+        usedCredits: null,
+        utilization: null,
+      }),
+    ).toBe(true);
+  });
+
   it("keeps provider-native windows and optional values intact", () => {
     const source = group().effectiveSource!;
     const model = presentSubscriptionAllowanceGroup(
@@ -90,6 +123,7 @@ describe("mobile subscription allowance presentation", () => {
       accountLabel: "n•••@example.com",
       status: "available",
       updatedAt: readAt,
+      isCurrent: true,
       windows: [
         {
           scope: "primary",
@@ -98,9 +132,19 @@ describe("mobile subscription allowance presentation", () => {
           resetsAt: readAt,
         },
       ],
+      spendingControl: {
+        reached: false,
+        limit: "100",
+        remainingPercent: 75,
+        used: "25",
+      },
+      extraUsage: {
+        isEnabled: true,
+        monthlyLimit: 100,
+        usedCredits: 25,
+        utilization: 25,
+      },
     });
-    expect(model).not.toHaveProperty("spendingControl");
-    expect(model).not.toHaveProperty("extraUsage");
   });
 
   it("uses the stable Claude placeholder without inferring account state", () => {
@@ -136,7 +180,6 @@ describe("mobile subscription allowance presentation", () => {
     const source = group().effectiveSource!;
     const staleSource = {
       ...source,
-      connectionPhase: "offline" as const,
       allowance: {
         ...source.allowance,
         freshness: "stale" as const,
@@ -152,6 +195,7 @@ describe("mobile subscription allowance presentation", () => {
     );
 
     expect(model).not.toHaveProperty("freshness");
+    expect(model.isCurrent).toBe(false);
     expect(model.hasMultipleReadings).toBe(true);
     expect(model.sources[0]).not.toHaveProperty("freshness");
     expect(model.sources[0]?.isCurrent).toBe(false);

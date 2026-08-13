@@ -12,9 +12,9 @@ reset times, credits, and spending controls only when the provider supplies them
 a quota, reset, account status, or combined cross-provider total.
 
 Use **Refresh** on web or pull down on the mobile Usage screen to request a new provider observation.
-The **Updated** timestamp communicates the age of the displayed observation instead of adding a
-separate stale badge. Data retained after a failed refresh or a passed reset time is not treated as
-current when selecting among provider sources. T3 Code does not reset percentages locally.
+The **Updated** timestamp communicates the age of the displayed observation. Data retained after a
+failed refresh, a passed reset time, or a disconnected environment is marked **Not current** while
+it remains visible. T3 Code does not reset percentages locally.
 
 Leaving the Subscription view stops its live allowance updates; returning to it requests a fresh
 reading. If an environment is offline or reconnecting, its last known reading remains identified

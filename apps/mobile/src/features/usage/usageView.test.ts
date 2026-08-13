@@ -28,6 +28,9 @@ describe("mobile usage view state", () => {
     expect(subscriptionViewPhase({ isPending: false, isPartial: true, groupCount: 1 })).toBe(
       "partial",
     );
+    expect(subscriptionViewPhase({ isPending: true, isPartial: false, groupCount: 1 })).toBe(
+      "partial",
+    );
     expect(subscriptionViewPhase({ isPending: false, isPartial: false, groupCount: 2 })).toBe(
       "ready",
     );

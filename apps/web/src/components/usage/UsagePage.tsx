@@ -7,6 +7,8 @@ import {
   formatAllowanceWindowScope,
   presentSubscriptionAllowanceGroup,
   progressWidthForAllowance,
+  shouldShowExtraUsage,
+  shouldShowSpendingControl,
   subscriptionViewPhase,
   USAGE_VIEW_OPTIONS,
   type SubscriptionAllowanceCardModel,
@@ -664,7 +666,19 @@ function SubscriptionAllowanceCard({
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span>{updatedAt ?? "Updated time unavailable"}</span>
+          <span
+            className={
+              allowance.status === "available" && !allowance.isCurrent
+                ? "text-amber-600"
+                : undefined
+            }
+          >
+            {allowance.status === "available" && !allowance.isCurrent
+              ? updatedAt === null
+                ? "Not current"
+                : `Not current · ${updatedAt}`
+              : (updatedAt ?? "Updated time unavailable")}
+          </span>
         </div>
       </div>
 
@@ -728,6 +742,46 @@ function SubscriptionAllowanceCard({
                     ? "Available"
                     : "No credits"}
               </span>
+            </div>
+          ) : null}
+
+          {allowance.spendingControl !== null &&
+          shouldShowSpendingControl(allowance.spendingControl) ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+              <span>Spending control</span>
+              {allowance.spendingControl.limit !== undefined &&
+              allowance.spendingControl.limit !== null ? (
+                <span>Limit {allowance.spendingControl.limit}</span>
+              ) : null}
+              {allowance.spendingControl.used !== undefined &&
+              allowance.spendingControl.used !== null ? (
+                <span>Used {allowance.spendingControl.used}</span>
+              ) : null}
+              {allowance.spendingControl.remainingPercent !== undefined &&
+              allowance.spendingControl.remainingPercent !== null ? (
+                <span>{allowance.spendingControl.remainingPercent}% remaining</span>
+              ) : null}
+              {allowance.spendingControl.reached === true ? <span>Limit reached</span> : null}
+            </div>
+          ) : null}
+
+          {allowance.extraUsage !== null && shouldShowExtraUsage(allowance.extraUsage) ? (
+            <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border pt-3 text-xs text-muted-foreground">
+              <span>Extra usage</span>
+              <span>{allowance.extraUsage.isEnabled ? "Enabled" : "Disabled"}</span>
+              {allowance.extraUsage.monthlyLimit !== null ? (
+                <span>Monthly limit {allowance.extraUsage.monthlyLimit}</span>
+              ) : null}
+              {allowance.extraUsage.usedCredits !== null ? (
+                <span>Used credits {allowance.extraUsage.usedCredits}</span>
+              ) : null}
+              {allowance.extraUsage.utilization !== null ? (
+                <span>{allowance.extraUsage.utilization}% used</span>
+              ) : null}
+              {allowance.extraUsage.currency !== undefined &&
+              allowance.extraUsage.currency !== null ? (
+                <span>{allowance.extraUsage.currency}</span>
+              ) : null}
             </div>
           ) : null}
         </>

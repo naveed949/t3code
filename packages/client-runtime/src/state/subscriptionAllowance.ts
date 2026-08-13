@@ -27,8 +27,8 @@ export function subscriptionViewPhase(input: {
   readonly isPartial: boolean;
   readonly groupCount: number;
 }): SubscriptionViewPhase {
-  if (input.isPending || (input.isPartial && input.groupCount === 0)) return "loading";
-  return input.isPartial ? "partial" : "ready";
+  if (input.groupCount === 0 && (input.isPending || input.isPartial)) return "loading";
+  return input.isPending || input.isPartial ? "partial" : "ready";
 }
 
 export function formatAllowanceWindowScope(scope: string): string {
@@ -67,6 +67,31 @@ export function formatAllowanceDuration(minutes: number | null | undefined): str
 
 export function progressWidthForAllowance(usedPercent: number): number {
   return Math.min(100, Math.max(0, usedPercent));
+}
+
+const isReported = (value: unknown): boolean => value !== undefined && value !== null;
+
+export function shouldShowSpendingControl(
+  spendingControl: NonNullable<SubscriptionAllowance["spendingControl"]>,
+): boolean {
+  return (
+    spendingControl.reached === true ||
+    isReported(spendingControl.limit) ||
+    isReported(spendingControl.remainingPercent) ||
+    isReported(spendingControl.resetsAt) ||
+    isReported(spendingControl.used)
+  );
+}
+
+export function shouldShowExtraUsage(
+  extraUsage: NonNullable<SubscriptionAllowance["extraUsage"]>,
+): boolean {
+  return (
+    extraUsage.isEnabled ||
+    isReported(extraUsage.monthlyLimit) ||
+    isReported(extraUsage.usedCredits) ||
+    isReported(extraUsage.utilization)
+  );
 }
 
 export function formatAllowanceResetAt(resetsAt: string): string {
@@ -197,9 +222,13 @@ export interface SubscriptionAllowanceCardModel {
   readonly accountLabel: string | null;
   readonly status: SubscriptionAllowance["status"];
   readonly message: string;
+  /** Derived from connection, availability, and freshness for UI presentation. */
+  readonly isCurrent: boolean;
   readonly updatedAt: string | null;
   readonly windows: SubscriptionAllowance["windows"];
   readonly credits: NonNullable<SubscriptionAllowance["credits"]> | null;
+  readonly spendingControl: NonNullable<SubscriptionAllowance["spendingControl"]> | null;
+  readonly extraUsage: NonNullable<SubscriptionAllowance["extraUsage"]> | null;
   readonly hasMultipleReadings: boolean;
   readonly sources: readonly SubscriptionAllowanceSourceModel[];
 }
@@ -238,9 +267,12 @@ export function presentSubscriptionAllowanceGroup(
     accountLabel: group.accountLabel,
     status: allowance.status,
     message: formatAllowanceUnavailableMessage(allowance.provider, allowance.message),
+    isCurrent: isSubscriptionAllowanceSourceCurrent(displayedSource),
     updatedAt: allowance.updatedAt ?? null,
     windows: allowance.windows,
     credits: allowance.credits ?? null,
+    spendingControl: allowance.spendingControl ?? null,
+    extraUsage: allowance.extraUsage ?? null,
     hasMultipleReadings: group.hasMultipleReadings,
     sources: group.sources.map((source, index) => ({
       key: `${source.environmentId}:${source.allowance.instanceId}:${index}`,

@@ -8,6 +8,8 @@ import {
   formatAllowanceWindowScope,
   presentSubscriptionAllowanceGroup,
   progressWidthForAllowance,
+  shouldShowExtraUsage,
+  shouldShowSpendingControl,
   subscriptionViewPhase,
   USAGE_VIEW_OPTIONS,
   type SubscriptionAllowanceCardModel,
@@ -372,8 +374,18 @@ function SubscriptionAllowanceCard(props: {
           ) : null}
         </View>
         <View className="flex-row items-baseline justify-end gap-2">
-          <Text className="text-xs text-foreground-muted">
-            {updatedAt ?? "Updated time unavailable"}
+          <Text
+            className={
+              model.status === "available" && !model.isCurrent
+                ? "text-xs font-t3-medium text-amber-600"
+                : "text-xs text-foreground-muted"
+            }
+          >
+            {model.status === "available" && !model.isCurrent
+              ? updatedAt === null
+                ? "Not current"
+                : `Not current · ${updatedAt}`
+              : (updatedAt ?? "Updated time unavailable")}
           </Text>
         </View>
       </View>
@@ -450,6 +462,8 @@ function AllowanceWindowRow(props: {
 function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardModel }) {
   const { model } = props;
   const credits = model.credits;
+  const spendingControl = model.spendingControl;
+  const extraUsage = model.extraUsage;
 
   return (
     <>
@@ -462,6 +476,52 @@ function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardMod
           <Text className="text-xs text-foreground-muted">
             {credits.unlimited ? "Unlimited" : credits.hasCredits ? "Available" : "No credits"}
           </Text>
+        </View>
+      ) : null}
+
+      {spendingControl !== null && shouldShowSpendingControl(spendingControl) ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Spending control</Text>
+          {spendingControl.limit !== undefined && spendingControl.limit !== null ? (
+            <Text className="text-xs text-foreground-muted">Limit {spendingControl.limit}</Text>
+          ) : null}
+          {spendingControl.used !== undefined && spendingControl.used !== null ? (
+            <Text className="text-xs text-foreground-muted">Used {spendingControl.used}</Text>
+          ) : null}
+          {spendingControl.remainingPercent !== undefined &&
+          spendingControl.remainingPercent !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              {spendingControl.remainingPercent}% remaining
+            </Text>
+          ) : null}
+          {spendingControl.reached === true ? (
+            <Text className="text-xs text-foreground-muted">Limit reached</Text>
+          ) : null}
+        </View>
+      ) : null}
+
+      {extraUsage !== null && shouldShowExtraUsage(extraUsage) ? (
+        <View className="flex-row flex-wrap gap-x-4 gap-y-1 border-t border-border-subtle pt-3">
+          <Text className="text-xs text-foreground-muted">Extra usage</Text>
+          <Text className="text-xs text-foreground-muted">
+            {extraUsage.isEnabled ? "Enabled" : "Disabled"}
+          </Text>
+          {extraUsage.monthlyLimit !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Monthly limit {extraUsage.monthlyLimit}
+            </Text>
+          ) : null}
+          {extraUsage.usedCredits !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Used credits {extraUsage.usedCredits}
+            </Text>
+          ) : null}
+          {extraUsage.utilization !== null ? (
+            <Text className="text-xs text-foreground-muted">{extraUsage.utilization}% used</Text>
+          ) : null}
+          {extraUsage.currency !== undefined && extraUsage.currency !== null ? (
+            <Text className="text-xs text-foreground-muted">{extraUsage.currency}</Text>
+          ) : null}
         </View>
       ) : null}
     </>
