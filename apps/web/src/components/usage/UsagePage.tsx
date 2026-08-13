@@ -53,11 +53,32 @@ const WINDOW_OPTIONS = [
   { days: 90, label: "90 days" },
 ] as const;
 
+type HistoricalWindowSelection = {
+  readonly days: number;
+  readonly window: ReturnType<typeof makeWindow>;
+};
+
+type HistoricalBreakdown = "model" | "time";
+
 export function UsagePage() {
   const [view, setView] = useState<UsageView>(DEFAULT_USAGE_VIEW);
+  const [windowSelection, setWindowSelection] = useState<HistoricalWindowSelection>(() => ({
+    days: 30,
+    window: makeWindow(30),
+  }));
+  const [metric, setMetric] = useState<UsageChartMetric>("cost");
+  const [breakdown, setBreakdown] = useState<HistoricalBreakdown>("model");
 
   return view === "historical" ? (
-    <HistoricalUsagePage onViewChange={setView} />
+    <HistoricalUsagePage
+      onViewChange={setView}
+      windowSelection={windowSelection}
+      onWindowSelectionChange={setWindowSelection}
+      metric={metric}
+      onMetricChange={setMetric}
+      breakdown={breakdown}
+      onBreakdownChange={setBreakdown}
+    />
   ) : (
     <SubscriptionUsagePage onViewChange={setView} />
   );
@@ -65,15 +86,21 @@ export function UsagePage() {
 
 function HistoricalUsagePage({
   onViewChange,
+  windowSelection,
+  onWindowSelectionChange,
+  metric,
+  onMetricChange,
+  breakdown,
+  onBreakdownChange,
 }: {
   readonly onViewChange: (view: UsageView) => void;
+  readonly windowSelection: HistoricalWindowSelection;
+  readonly onWindowSelectionChange: (selection: HistoricalWindowSelection) => void;
+  readonly metric: UsageChartMetric;
+  readonly onMetricChange: (metric: UsageChartMetric) => void;
+  readonly breakdown: HistoricalBreakdown;
+  readonly onBreakdownChange: (breakdown: HistoricalBreakdown) => void;
 }) {
-  const [windowSelection, setWindowSelection] = useState(() => ({
-    days: 30,
-    window: makeWindow(30),
-  }));
-  const [metric, setMetric] = useState<UsageChartMetric>("cost");
-  const [breakdown, setBreakdown] = useState<"model" | "time">("model");
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
@@ -115,7 +142,7 @@ function HistoricalUsagePage({
   const observedInput = merged.uncachedInputTokens + merged.cachedInputTokens;
   const cachedShare = observedInput === 0 ? 0 : merged.cachedInputTokens / observedInput;
   const selectWindow = (days: number) => {
-    setWindowSelection({
+    onWindowSelectionChange({
       days,
       window: makeWindow(days, undefined, days === 1 ? "hour" : "day"),
     });
@@ -130,7 +157,7 @@ function HistoricalUsagePage({
     ) {
       refresh();
     } else {
-      setWindowSelection({ days: windowDays, window: nextWindow });
+      onWindowSelectionChange({ days: windowDays, window: nextWindow });
     }
   };
 
@@ -284,7 +311,7 @@ function HistoricalUsagePage({
                             <button
                               key={option}
                               type="button"
-                              onClick={() => setMetric(option)}
+                              onClick={() => onMetricChange(option)}
                               className={cn(
                                 "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
                                 option === metric
@@ -357,7 +384,7 @@ function HistoricalUsagePage({
                         <button
                           key={option.value}
                           type="button"
-                          onClick={() => setBreakdown(option.value)}
+                          onClick={() => onBreakdownChange(option.value)}
                           className={cn(
                             "cursor-pointer px-2.5 py-1 text-[10px] tracking-wide uppercase",
                             option.value === breakdown
@@ -666,7 +693,13 @@ function SubscriptionAllowanceCard({
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span>{updatedAt ?? "Updated time unavailable"}</span>
+          <span className={allowance.isStale ? "text-amber-600" : undefined}>
+            {allowance.isStale
+              ? updatedAt === null
+                ? "Stale"
+                : `Stale · ${updatedAt}`
+              : (updatedAt ?? "Updated time unavailable")}
+          </span>
         </div>
       </div>
 
@@ -749,6 +782,10 @@ function SubscriptionAllowanceCard({
               allowance.spendingControl.remainingPercent !== null ? (
                 <span>{allowance.spendingControl.remainingPercent}% remaining</span>
               ) : null}
+              {allowance.spendingControl.resetsAt !== undefined &&
+              allowance.spendingControl.resetsAt !== null ? (
+                <span>Resets {formatAllowanceResetAt(allowance.spendingControl.resetsAt)}</span>
+              ) : null}
               {allowance.spendingControl.reached === true ? <span>Limit reached</span> : null}
             </div>
           ) : null}
@@ -787,6 +824,7 @@ function SubscriptionAllowanceCard({
               {source.environmentLabel} · {source.instanceId} ·{" "}
               {source.connectionLabel.toLowerCase()}
               {source.status === "unavailable" ? " · unavailable" : ""}
+              {source.isStale ? " · stale" : ""}
               {source.isEffective ? " · shown" : ""}
             </span>
           ))}

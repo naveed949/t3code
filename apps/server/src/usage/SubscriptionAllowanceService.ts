@@ -162,10 +162,29 @@ export function foldSubscriptionAllowance(
   }
   const windows = Array.from(windowsByScope.values());
 
+  const foldNested = <Value extends object>(
+    previousValue: Value | null | undefined,
+    updateValue: Value | null,
+  ): Value | null =>
+    updateValue === null || previousValue === null || previousValue === undefined
+      ? updateValue
+      : { ...previousValue, ...updateValue };
+
   return {
     ...previous,
     ...update,
     windows,
+    ...(update.credits === undefined
+      ? {}
+      : { credits: foldNested(previous.credits, update.credits) }),
+    ...(update.spendingControl === undefined
+      ? {}
+      : {
+          spendingControl: foldNested(previous.spendingControl, update.spendingControl),
+        }),
+    ...(update.extraUsage === undefined
+      ? {}
+      : { extraUsage: foldNested(previous.extraUsage, update.extraUsage) }),
   };
 }
 

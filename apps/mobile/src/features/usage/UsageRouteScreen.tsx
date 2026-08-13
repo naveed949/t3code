@@ -374,8 +374,18 @@ function SubscriptionAllowanceCard(props: {
           ) : null}
         </View>
         <View className="flex-row items-baseline justify-end gap-2">
-          <Text className="text-xs text-foreground-muted">
-            {updatedAt ?? "Updated time unavailable"}
+          <Text
+            className={
+              model.isStale
+                ? "text-xs font-t3-medium text-amber-600"
+                : "text-xs text-foreground-muted"
+            }
+          >
+            {model.isStale
+              ? updatedAt === null
+                ? "Stale"
+                : `Stale · ${updatedAt}`
+              : (updatedAt ?? "Updated time unavailable")}
           </Text>
         </View>
       </View>
@@ -484,6 +494,11 @@ function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardMod
               {spendingControl.remainingPercent}% remaining
             </Text>
           ) : null}
+          {spendingControl.resetsAt !== undefined && spendingControl.resetsAt !== null ? (
+            <Text className="text-xs text-foreground-muted">
+              Resets {formatAllowanceResetAt(spendingControl.resetsAt)}
+            </Text>
+          ) : null}
           {spendingControl.reached === true ? (
             <Text className="text-xs text-foreground-muted">Limit reached</Text>
           ) : null}
@@ -528,6 +543,7 @@ function AllowanceSources(props: {
         <Text key={source.key} className="text-xs text-foreground-muted">
           {source.environmentLabel} · {source.instanceId} · {source.connectionLabel} ·{" "}
           {source.status}
+          {source.isStale ? " · stale" : ""}
           {source.isEffective ? " · shown" : ""}
         </Text>
       ))}

@@ -211,6 +211,8 @@ export interface SubscriptionAllowanceSourceModel {
   readonly instanceId: string;
   readonly connectionLabel: string;
   readonly status: SubscriptionAllowance["status"];
+  /** Retained provider data from before a failed refresh or passed reset. */
+  readonly isStale: boolean;
   /** Derived from connection, availability, and freshness for UI presentation. */
   readonly isCurrent: boolean;
   readonly isEffective: boolean;
@@ -222,6 +224,8 @@ export interface SubscriptionAllowanceCardModel {
   readonly accountLabel: string | null;
   readonly status: SubscriptionAllowance["status"];
   readonly message: string;
+  /** Retained provider data from before a failed refresh or passed reset. */
+  readonly isStale: boolean;
   /** Derived from connection, availability, and freshness for UI presentation. */
   readonly isCurrent: boolean;
   readonly updatedAt: string | null;
@@ -267,6 +271,7 @@ export function presentSubscriptionAllowanceGroup(
     accountLabel: group.accountLabel,
     status: allowance.status,
     message: formatAllowanceUnavailableMessage(allowance.provider, allowance.message),
+    isStale: allowance.freshness === "stale",
     isCurrent: isSubscriptionAllowanceSourceCurrent(displayedSource),
     updatedAt: allowance.updatedAt ?? null,
     windows: allowance.windows,
@@ -280,6 +285,7 @@ export function presentSubscriptionAllowanceGroup(
       instanceId: source.allowance.instanceId,
       connectionLabel: formatAllowanceConnectionPhase(source.connectionPhase),
       status: source.allowance.status,
+      isStale: source.allowance.freshness === "stale",
       isCurrent: isSubscriptionAllowanceSourceCurrent(source),
       isEffective: source === displayedSource,
     })),

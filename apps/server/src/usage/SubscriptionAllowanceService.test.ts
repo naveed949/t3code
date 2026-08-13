@@ -90,13 +90,34 @@ describe("subscription allowance lifecycle helpers", () => {
         { scope: "secondary" as const, usedPercent: 5, windowDurationMins: 1_440 },
       ],
       credits: { balance: "10", hasCredits: true, unlimited: false },
+      spendingControl: {
+        reached: false,
+        limit: "100",
+        remainingPercent: 90,
+        resetsAt: readAt,
+        used: "10",
+      },
+      extraUsage: {
+        isEnabled: true,
+        monthlyLimit: 100,
+        usedCredits: 10,
+        utilization: 10,
+        currency: "USD",
+      },
     };
     const update = {
       provider: "codex" as const,
       instanceId,
       status: "available" as const,
       windows: [{ scope: "primary" as const, usedPercent: 31 }],
-      credits: null,
+      credits: { hasCredits: false, unlimited: false },
+      spendingControl: { reached: true },
+      extraUsage: {
+        isEnabled: true,
+        monthlyLimit: 100,
+        usedCredits: 20,
+        utilization: 20,
+      },
     };
 
     expect(foldSubscriptionAllowance(previous, update)).toEqual({
@@ -107,8 +128,32 @@ describe("subscription allowance lifecycle helpers", () => {
         { scope: "primary", usedPercent: 31, windowDurationMins: 300 },
         { scope: "secondary", usedPercent: 5, windowDurationMins: 1_440 },
       ],
-      credits: null,
+      credits: { balance: "10", hasCredits: false, unlimited: false },
+      spendingControl: {
+        reached: true,
+        limit: "100",
+        remainingPercent: 90,
+        resetsAt: readAt,
+        used: "10",
+      },
+      extraUsage: {
+        isEnabled: true,
+        monthlyLimit: 100,
+        usedCredits: 20,
+        utilization: 20,
+        currency: "USD",
+      },
     });
+  });
+
+  it("lets explicit null clear a previously reported nested allowance field", () => {
+    const previous = {
+      ...allowance,
+      credits: { balance: "10", hasCredits: true, unlimited: false },
+    };
+    const update = { ...allowance, credits: null };
+
+    expect(foldSubscriptionAllowance(previous, update).credits).toBeNull();
   });
 
   it("marks a usable record stale after its provider reset without changing utilization", () => {

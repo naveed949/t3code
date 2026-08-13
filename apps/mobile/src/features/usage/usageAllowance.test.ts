@@ -176,7 +176,7 @@ describe("mobile subscription allowance presentation", () => {
     expect(model.accountLabel).toBeNull();
   });
 
-  it("derives source currentness without exposing raw freshness to the UI", () => {
+  it("derives stale and current presentation state without exposing raw freshness", () => {
     const source = group().effectiveSource!;
     const staleSource = {
       ...source,
@@ -195,9 +195,11 @@ describe("mobile subscription allowance presentation", () => {
     );
 
     expect(model).not.toHaveProperty("freshness");
+    expect(model.isStale).toBe(true);
     expect(model.isCurrent).toBe(false);
     expect(model.hasMultipleReadings).toBe(true);
     expect(model.sources[0]).not.toHaveProperty("freshness");
+    expect(model.sources[0]?.isStale).toBe(true);
     expect(model.sources[0]?.isCurrent).toBe(false);
   });
 
