@@ -72,6 +72,20 @@ const unavailableMessage = (provider: ProviderAllowanceReader["provider"]): stri
 const isUsableAllowance = (allowance: SubscriptionAllowance | undefined): boolean =>
   allowance?.status === "available";
 
+const isLiveObservationAtLeastAsRecent = (
+  current: SubscriptionAllowance | undefined,
+  candidate: SubscriptionAllowance,
+): boolean => {
+  if (current?.observationSource !== "liveUpdate") return false;
+  const currentUpdatedAt = Date.parse(current.updatedAt ?? "");
+  const candidateUpdatedAt = Date.parse(candidate.updatedAt ?? "");
+  return (
+    Number.isFinite(currentUpdatedAt) &&
+    Number.isFinite(candidateUpdatedAt) &&
+    currentUpdatedAt >= candidateUpdatedAt
+  );
+};
+
 const markFreshSnapshot = (
   allowance: SubscriptionAllowance,
   updatedAt: string,
@@ -273,7 +287,16 @@ export const make = Effect.gen(function* () {
             currentState.instances.get(instance.instanceId) === instance
           ) {
             const allowance = allowancesById.get(instance.instanceId);
-            return allowance === undefined ? [] : [allowance];
+            if (allowance === undefined) return [];
+            const currentAllowance = currentState.snapshot.allowances.find(
+              (candidateAllowance) => candidateAllowance.instanceId === instance.instanceId,
+            );
+            return [
+              currentAllowance !== undefined &&
+              isLiveObservationAtLeastAsRecent(currentAllowance, allowance)
+                ? currentAllowance
+                : allowance,
+            ];
           }
 
           // A provider instance was replaced while the read was in flight. Do not

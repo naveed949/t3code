@@ -260,6 +260,79 @@ describe("SubscriptionAllowanceService", () => {
     }),
   );
 
+  it.effect("does not let a slow refresh overwrite a newer live observation", () =>
+    Effect.gen(function* () {
+      const slowReadStarted = yield* Deferred.make<void>();
+      const releaseSlowRead = yield* Deferred.make<void>();
+      const providerEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const slowCandidate = {
+        ...allowance,
+        windows: [{ scope: "primary" as const, usedPercent: 35 }],
+      };
+      const liveAllowance = {
+        ...allowance,
+        windows: [{ scope: "primary" as const, usedPercent: 80 }],
+      };
+      let useSlowRead = false;
+      const providerInstance = instance({
+        allowanceReader: {
+          provider: "codex",
+          read: Effect.suspend(() =>
+            useSlowRead
+              ? Effect.gen(function* () {
+                  yield* Deferred.succeed(slowReadStarted, undefined);
+                  yield* Deferred.await(releaseSlowRead);
+                  return slowCandidate;
+                })
+              : Effect.succeed(allowance),
+          ),
+          update: () => liveAllowance,
+        },
+      });
+      const service = yield* makeService(
+        registryLayerFor(providerInstance),
+        Stream.fromQueue(providerEvents),
+      );
+
+      yield* service.refresh;
+      useSlowRead = true;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          yield* Deferred.await(slowReadStarted);
+          const liveUpdate = yield* subscription.changes.pipe(
+            Stream.filter((snapshot) => snapshot.allowances[0]?.observationSource === "liveUpdate"),
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* Queue.offer(providerEvents, {
+            type: "account.rate-limits.updated",
+            eventId: EventId.make("allowance-live-during-refresh"),
+            provider: ProviderDriverKind.make("codex"),
+            providerInstanceId: instanceId,
+            threadId: ThreadId.make("allowance-thread"),
+            createdAt: "2026-08-11T13:00:00.000Z",
+            payload: { rateLimits: {} },
+          });
+          const liveSnapshot = Option.getOrThrow(yield* Fiber.join(liveUpdate));
+          expect(liveSnapshot.allowances[0]?.windows[0]?.usedPercent).toBe(80);
+
+          const refreshCommit = yield* subscription.changes.pipe(
+            Stream.runHead,
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* Deferred.succeed(releaseSlowRead, undefined);
+          const committed = Option.getOrThrow(yield* Fiber.join(refreshCommit));
+
+          expect(committed.allowances[0]).toMatchObject({
+            observationSource: "liveUpdate",
+            windows: [{ scope: "primary", usedPercent: 80 }],
+          });
+        }),
+      );
+    }).pipe(Effect.provide(TestClock.layer())),
+  );
+
   it.effect("keeps shared live demand active when refresh overlaps a second subscriber", () =>
     Effect.gen(function* () {
       const publishBlocked = yield* Deferred.make<void>();
