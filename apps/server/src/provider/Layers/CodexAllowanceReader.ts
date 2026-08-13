@@ -193,16 +193,17 @@ export const makeCodexAllowanceReader = Effect.fn("makeCodexAllowanceReader")(fu
         }),
     ),
     Effect.timeout(CODEX_ALLOWANCE_READ_TIMEOUT),
-    Effect.catchTag("TimeoutError", (cause) =>
-      Effect.fail(
-        new ProviderAllowanceReadError({
-          provider: "codex",
-          instanceId: input.instanceId,
-          operation: "timeout",
-          cause,
-        }),
-      ),
-    ),
+    Effect.catchTags({
+      TimeoutError: (cause) =>
+        Effect.fail(
+          new ProviderAllowanceReadError({
+            provider: "codex",
+            instanceId: input.instanceId,
+            operation: "timeout",
+            cause,
+          }),
+        ),
+    }),
     Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     Effect.scoped,
   );

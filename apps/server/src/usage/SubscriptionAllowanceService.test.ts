@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -19,7 +20,10 @@ import {
   type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 
-import type { ProviderAllowanceReader } from "../provider/Services/ProviderAllowanceReader.ts";
+import {
+  ProviderAllowanceReadError,
+  type ProviderAllowanceReader,
+} from "../provider/Services/ProviderAllowanceReader.ts";
 import { ProviderService } from "../provider/Services/ProviderService.ts";
 import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
 import type { ProviderInstance } from "../provider/ProviderDriver.ts";
@@ -256,6 +260,93 @@ describe("SubscriptionAllowanceService", () => {
     }),
   );
 
+  it.effect("keeps shared live demand active when refresh overlaps a second subscriber", () =>
+    Effect.gen(function* () {
+      const publishBlocked = yield* Deferred.make<void>();
+      const releasePublish = yield* Deferred.make<void>();
+      const providerEventHandled = yield* Deferred.make<void>();
+      const providerEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
+      const firstReady = yield* Deferred.make<void>();
+      const releaseFirst = yield* Deferred.make<void>();
+      const secondReady = yield* Deferred.make<void>();
+      const releaseSecond = yield* Deferred.make<void>();
+      let callsUntilBlock: number | undefined;
+      const now = Date.parse(readAt);
+      const controlledClock: Clock.Clock = {
+        currentTimeMillisUnsafe: () => now,
+        currentTimeMillis: Effect.suspend(() => {
+          if (callsUntilBlock === undefined) return Effect.succeed(now);
+          callsUntilBlock -= 1;
+          if (callsUntilBlock > 0) return Effect.succeed(now);
+          callsUntilBlock = undefined;
+          return Deferred.succeed(publishBlocked, undefined).pipe(
+            Effect.andThen(Deferred.await(releasePublish)),
+            Effect.as(now),
+          );
+        }),
+        currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        currentTimeNanos: Effect.succeed(BigInt(now) * 1_000_000n),
+        monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        monotonicTimeNanos: Effect.succeed(BigInt(now) * 1_000_000n),
+        sleep: () => Effect.never,
+      };
+      yield* Effect.gen(function* () {
+        const providerInstance = instance({
+          allowanceReader: {
+            provider: "codex",
+            read: Effect.succeed(allowance),
+            update: () => allowance,
+          },
+        });
+        const service = yield* makeService(
+          registryLayerFor(providerInstance),
+          Stream.fromQueue(providerEvents).pipe(
+            Stream.tap(() => Deferred.succeed(providerEventHandled, undefined)),
+          ),
+        );
+        const first = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const subscription = yield* service.subscribe;
+            yield* Stream.runHead(subscription.changes);
+            yield* Deferred.succeed(firstReady, undefined);
+            yield* Deferred.await(releaseFirst);
+          }),
+        ).pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.await(firstReady);
+
+        callsUntilBlock = 2;
+        const refresh = yield* service.refresh.pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.await(publishBlocked);
+        const second = yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* service.subscribe;
+            yield* Deferred.succeed(secondReady, undefined);
+            yield* Deferred.await(releaseSecond);
+          }),
+        ).pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Effect.yieldNow;
+        yield* Deferred.succeed(releasePublish, undefined);
+        yield* Fiber.join(refresh);
+        yield* Deferred.await(secondReady);
+
+        yield* Deferred.succeed(releaseFirst, undefined);
+        yield* Fiber.join(first);
+        yield* Queue.offer(providerEvents, {
+          type: "account.rate-limits.updated",
+          eventId: EventId.make("allowance-live-demand-overlap"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: instanceId,
+          threadId: ThreadId.make("allowance-thread"),
+          createdAt: "2026-08-11T13:00:00.000Z",
+          payload: { rateLimits: {} },
+        });
+        yield* Deferred.await(providerEventHandled);
+        yield* Deferred.succeed(releaseSecond, undefined);
+        yield* Fiber.join(second);
+      }).pipe(Effect.provideService(Clock.Clock, controlledClock));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("acquires a replacement provider generation immediately", () =>
     Effect.gen(function* () {
       const oldReadStarted = yield* Deferred.make<void>();
@@ -404,6 +495,58 @@ describe("SubscriptionAllowanceService", () => {
             deliverySource: "live",
             windows: [{ scope: "primary", usedPercent: 55 }],
           });
+        }),
+      );
+    }),
+  );
+
+  it.effect("does not seed an available allowance from a sparse update after failure", () =>
+    Effect.gen(function* () {
+      const emitUpdate = yield* Deferred.make<void>();
+      const updateHandled = yield* Deferred.make<void>();
+      const event = {
+        type: "account.rate-limits.updated",
+        eventId: EventId.make("allowance-sparse-after-failure"),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: instanceId,
+        threadId: ThreadId.make("allowance-thread"),
+        createdAt: "2026-08-11T13:00:00.000Z",
+        payload: { rateLimits: {} },
+      } satisfies Extract<ProviderRuntimeEvent, { type: "account.rate-limits.updated" }>;
+      const providerEvents = Stream.fromEffect(Deferred.await(emitUpdate)).pipe(
+        Stream.map(() => event),
+        Stream.ensuring(Deferred.succeed(updateHandled, undefined)),
+      );
+      const providerInstance = instance({
+        allowanceReader: {
+          provider: "codex",
+          read: Effect.fail(
+            new ProviderAllowanceReadError({
+              provider: "codex",
+              instanceId,
+              operation: "read",
+              cause: "unavailable",
+            }),
+          ),
+          update: () => ({
+            ...allowance,
+            windows: [{ scope: "primary", usedPercent: 55 }],
+          }),
+        },
+      });
+      const service = yield* makeService(registryLayerFor(providerInstance), providerEvents);
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          const initial = Option.getOrThrow(yield* Stream.runHead(subscription.changes));
+          expect(initial.allowances[0]?.status).toBe("unavailable");
+
+          yield* Deferred.succeed(emitUpdate, undefined);
+          yield* Deferred.await(updateHandled);
+          const afterUpdate = yield* service.subscribe;
+
+          expect(afterUpdate.latest.allowances[0]?.status).toBe("unavailable");
         }),
       );
     }),

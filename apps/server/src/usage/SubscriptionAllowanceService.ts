@@ -364,9 +364,9 @@ export const make = Effect.gen(function* () {
         const previous = current.snapshot.allowances.find(
           (allowance) => allowance.instanceId === instanceId,
         );
-        if (previous === undefined && update.status === "available") {
-          // A sparse event cannot become the first public record. The next
-          // complete acquisition remains the source of truth for first demand.
+        if (!isUsableAllowance(previous) && update.status === "available") {
+          // A sparse event needs a usable snapshot to fold into. The next
+          // complete acquisition remains the source of truth after failure.
           return;
         }
         const updatedAt = event.createdAt;
@@ -420,18 +420,24 @@ export const make = Effect.gen(function* () {
 
   const acquireDemand = liveMutex.withPermits(1)(
     Effect.gen(function* () {
-      const current = yield* Ref.get(state);
-      if (current.demandCount > 0) {
-        yield* Ref.set(state, { ...current, demandCount: current.demandCount + 1 });
-        return;
-      }
+      const liveScope = yield* stateMutex.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(state);
+          if (current.demandCount > 0) {
+            yield* Ref.set(state, { ...current, demandCount: current.demandCount + 1 });
+            return Option.none<Scope.Closeable>();
+          }
 
-      const liveScope = yield* Scope.make();
-      yield* Ref.set(state, {
-        ...current,
-        demandCount: 1,
-        liveScope: Option.some(liveScope),
-      });
+          const liveScope = yield* Scope.make();
+          yield* Ref.set(state, {
+            ...current,
+            demandCount: 1,
+            liveScope: Option.some(liveScope),
+          });
+          return Option.some(liveScope);
+        }),
+      );
+      if (Option.isNone(liveScope)) return;
 
       yield* providerService.streamEvents.pipe(
         Stream.filter((event) => event.type === "account.rate-limits.updated"),
@@ -439,57 +445,67 @@ export const make = Effect.gen(function* () {
         Effect.catchCause((cause) =>
           Effect.logWarning("Subscription allowance provider update stream stopped", { cause }),
         ),
-        Effect.forkIn(liveScope),
+        Effect.forkIn(liveScope.value),
       );
       const registryChanges = yield* registry.subscribeChanges.pipe(
-        Effect.provideService(Scope.Scope, liveScope),
+        Effect.provideService(Scope.Scope, liveScope.value),
       );
       yield* Stream.runForEach(Stream.fromSubscription(registryChanges), () => syncInstances).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("Subscription allowance registry stream stopped", { cause }),
         ),
-        Effect.forkIn(liveScope),
+        Effect.forkIn(liveScope.value),
       );
       yield* syncInstances;
       yield* Effect.forever(
         Effect.sleep(`${SUBSCRIPTION_ALLOWANCE_REFRESH_INTERVAL_MS} millis`).pipe(
           Effect.andThen(refresh.pipe(Effect.ignore)),
         ),
-      ).pipe(Effect.forkIn(liveScope));
-      yield* refresh.pipe(Effect.ignore, Effect.forkIn(liveScope, { startImmediately: true }));
+      ).pipe(Effect.forkIn(liveScope.value));
+      yield* refresh.pipe(
+        Effect.ignore,
+        Effect.forkIn(liveScope.value, { startImmediately: true }),
+      );
     }),
   );
 
   const releaseDemand = liveMutex.withPermits(1)(
     Effect.gen(function* () {
-      const current = yield* Ref.get(state);
-      if (current.demandCount > 1) {
-        yield* Ref.set(state, { ...current, demandCount: current.demandCount - 1 });
-        return;
-      }
-      yield* Ref.set(state, { ...current, demandCount: 0, liveScope: Option.none() });
-      if (Option.isSome(current.liveScope)) {
-        yield* Scope.close(current.liveScope.value, Exit.void).pipe(Effect.ignore);
+      const scopeToClose = yield* stateMutex.withPermits(1)(
+        Effect.gen(function* () {
+          const current = yield* Ref.get(state);
+          if (current.demandCount > 1) {
+            yield* Ref.set(state, { ...current, demandCount: current.demandCount - 1 });
+            return Option.none<Scope.Closeable>();
+          }
+          yield* Ref.set(state, { ...current, demandCount: 0, liveScope: Option.none() });
+          return current.liveScope;
+        }),
+      );
+      if (Option.isSome(scopeToClose)) {
+        yield* Scope.close(scopeToClose.value, Exit.void).pipe(Effect.ignore);
       }
     }),
   );
 
-  const latestUnlocked = Effect.gen(function* () {
-    const current = yield* Ref.get(state);
-    const nextSnapshot = markSubscriptionAllowanceSnapshotStale(
-      current.snapshot,
-      yield* Clock.currentTimeMillis,
-    );
-    if (nextSnapshot !== current.snapshot) {
-      yield* Ref.set(state, { ...current, snapshot: nextSnapshot });
-    }
-    return nextSnapshot;
-  });
+  const latest = stateMutex.withPermits(1)(
+    Effect.gen(function* () {
+      const current = yield* Ref.get(state);
+      const nextSnapshot = markSubscriptionAllowanceSnapshotStale(
+        current.snapshot,
+        yield* Clock.currentTimeMillis,
+      );
+      if (nextSnapshot !== current.snapshot) {
+        yield* Ref.set(state, { ...current, snapshot: nextSnapshot });
+      }
+      return nextSnapshot;
+    }),
+  );
   const subscribe = subscribeBeforeSnapshotWithoutMutex(
     changes,
     Effect.gen(function* () {
       yield* Effect.acquireRelease(acquireDemand, () => releaseDemand);
-      return markSnapshotDeliveredFromCache(yield* latestUnlocked);
+      return markSnapshotDeliveredFromCache(yield* latest);
     }),
   );
 
