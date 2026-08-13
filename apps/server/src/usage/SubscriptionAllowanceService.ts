@@ -413,10 +413,12 @@ export const make = Effect.gen(function* () {
     );
 
   const syncInstances = Effect.gen(function* () {
-    const instances = yield* registry.listInstances;
-    const nextById = new Map(instances.map((instance) => [instance.instanceId, instance] as const));
     const refreshScope = yield* stateMutex.withPermits(1)(
       Effect.gen(function* () {
+        const instances = yield* registry.listInstances;
+        const nextById = new Map(
+          instances.map((instance) => [instance.instanceId, instance] as const),
+        );
         const current = yield* Ref.get(state);
         const changed = Array.from(nextById).some(
           ([instanceId, instance]) => current.instances.get(instanceId) !== instance,
@@ -428,11 +430,8 @@ export const make = Effect.gen(function* () {
           (allowance) =>
             current.instances.get(allowance.instanceId) === nextById.get(allowance.instanceId),
         );
-        yield* Ref.set(state, {
-          ...current,
-          instances: nextById,
-          snapshot: { ...current.snapshot, allowances },
-        });
+        yield* Ref.set(state, { ...current, instances: nextById });
+        yield* publishUnlocked({ ...current.snapshot, allowances });
         return current.demandCount > 0 ? current.liveScope : Option.none();
       }),
     );

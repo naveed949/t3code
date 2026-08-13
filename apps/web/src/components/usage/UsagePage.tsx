@@ -1,6 +1,5 @@
 import {
   DEFAULT_USAGE_VIEW,
-  formatAllowanceConnectionPhase,
   formatAllowanceDuration,
   formatAllowanceEnvironmentNotice,
   formatAllowanceResetAt,
@@ -19,6 +18,7 @@ import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import { isElectron } from "../../env";
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { cn } from "../../lib/utils";
 import { useSubscriptionAllowance } from "../../state/subscriptionAllowance";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
@@ -35,8 +35,10 @@ import {
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
+import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
 import { SidebarInset } from "../ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
 import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { UsageChartLegend, UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
@@ -571,16 +573,28 @@ function SubscriptionUsagePage({
               Usage limits and reset times from your provider.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={refresh}
-            aria-label="Refresh subscription usage"
-            aria-busy={isRefreshing}
-            disabled={isRefreshing}
-            className="cursor-pointer rounded-md border border-border p-2 text-muted-foreground hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCwIcon className="size-3.5" />
-          </button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={refresh}
+                  aria-label={
+                    isRefreshing ? "Refreshing subscription usage" : "Refresh subscription usage"
+                  }
+                  aria-busy={isRefreshing}
+                  disabled={isRefreshing}
+                />
+              }
+            >
+              <RefreshCwIcon className={cn("size-3.5", isRefreshing && "animate-spin")} />
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {isRefreshing ? "Refreshing subscription usage…" : "Refresh subscription usage"}
+            </TooltipPopup>
+          </Tooltip>
         </div>
 
         {phase === "loading" ? (
@@ -631,7 +645,11 @@ function SubscriptionAllowanceCard({
 }: {
   readonly model: SubscriptionAllowanceCardModel;
 }) {
-  const updatedAt = formatAllowanceUpdatedAt(allowance.updatedAt);
+  const nowMinute = useNowMinute();
+  const updatedAt = formatAllowanceUpdatedAt(
+    allowance.updatedAt,
+    Date.parse(`${nowMinute}:00.000Z`),
+  );
 
   return (
     <article className="flex flex-col gap-5 border border-border p-5">
@@ -644,13 +662,7 @@ function SubscriptionAllowanceCard({
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span className={allowance.freshness === "stale" ? "text-amber-600" : undefined}>
-            {allowance.freshness === "stale"
-              ? updatedAt === null
-                ? "Stale"
-                : `Stale · ${updatedAt}`
-              : (updatedAt ?? "Updated time unavailable")}
-          </span>
+          <span>{updatedAt ?? "Updated time unavailable"}</span>
         </div>
       </div>
 
@@ -732,11 +744,9 @@ function SubscriptionAllowanceCard({
               {source.connectionLabel.toLowerCase()}
               {source.status === "unavailable"
                 ? " · unavailable"
-                : source.freshness === "stale"
-                  ? " · stale"
-                  : source.isCurrent
-                    ? " · current"
-                    : " · not current"}
+                : source.isCurrent
+                  ? " · current"
+                  : " · not current"}
               {source.isEffective ? " · shown" : ""}
             </span>
           ))}

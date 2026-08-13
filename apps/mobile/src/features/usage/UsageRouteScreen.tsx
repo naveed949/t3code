@@ -25,7 +25,7 @@ import {
   formatUsd,
   makeWindow,
 } from "@t3tools/shared/usageFormat";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -54,6 +54,17 @@ const WINDOW_OPTIONS = [
 ] as const;
 
 const CHART_HEIGHT = 180;
+
+function useNowMinuteMs(): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(intervalId);
+  }, []);
+
+  return nowMs;
+}
 
 type HistoricalWindowSelection = {
   readonly days: number;
@@ -250,6 +261,7 @@ function SubscriptionUsageContent(props: {
 }) {
   const { groups, environments, isPending, isPartial, isRefreshing, refresh } =
     useSubscriptionAllowance();
+  const nowMs = useNowMinuteMs();
   const environmentNotices = environments.flatMap((environment) => {
     const message = formatAllowanceEnvironmentNotice(environment);
     return message === null ? [] : [{ environmentId: environment.environmentId, message }];
@@ -273,8 +285,8 @@ function SubscriptionUsageContent(props: {
     >
       <UsageViewTabs value="subscription" onChange={props.onViewChange} />
 
-      <View className="flex-row items-start justify-between gap-4">
-        <View className="min-w-0 flex-1 gap-0.5">
+      <View className="gap-0.5">
+        <View>
           <Text accessibilityRole="header" className="text-lg font-t3-medium text-foreground">
             Subscription allowance
           </Text>
@@ -282,18 +294,6 @@ function SubscriptionUsageContent(props: {
             Usage limits and reset times from your provider.
           </Text>
         </View>
-        <Pressable
-          accessibilityLabel="Refresh subscription usage"
-          accessibilityRole="button"
-          accessibilityState={{ busy: isRefreshing, disabled: isRefreshing }}
-          disabled={isRefreshing}
-          onPress={refresh}
-          className="rounded-full border-continuous bg-card px-3 py-2 disabled:opacity-50"
-        >
-          <Text className="text-sm font-t3-medium text-foreground">
-            {isRefreshing ? "Refreshing…" : "Refresh"}
-          </Text>
-        </Pressable>
       </View>
 
       {phase === "loading" ? (
@@ -340,6 +340,7 @@ function SubscriptionUsageContent(props: {
               <SubscriptionAllowanceCard
                 key={group.key}
                 model={presentSubscriptionAllowanceGroup(group)}
+                nowMs={nowMs}
               />
             ))}
           </View>
@@ -349,9 +350,12 @@ function SubscriptionUsageContent(props: {
   );
 }
 
-function SubscriptionAllowanceCard(props: { readonly model: SubscriptionAllowanceCardModel }) {
+function SubscriptionAllowanceCard(props: {
+  readonly model: SubscriptionAllowanceCardModel;
+  readonly nowMs: number;
+}) {
   const { model } = props;
-  const updatedAt = formatAllowanceUpdatedAt(model.updatedAt);
+  const updatedAt = formatAllowanceUpdatedAt(model.updatedAt, props.nowMs);
   const providerColors = useProviderColors();
 
   return (
@@ -368,20 +372,8 @@ function SubscriptionAllowanceCard(props: { readonly model: SubscriptionAllowanc
           ) : null}
         </View>
         <View className="flex-row items-baseline justify-end gap-2">
-          <Text
-            className={
-              model.freshness === "stale"
-                ? "text-xs font-t3-medium text-amber-600"
-                : "text-xs text-foreground-muted"
-            }
-          >
-            {model.freshness === "stale"
-              ? updatedAt === null
-                ? "Stale"
-                : `Stale · ${updatedAt}`
-              : updatedAt === null
-                ? "Updated time unavailable"
-                : updatedAt}
+          <Text className="text-xs text-foreground-muted">
+            {updatedAt ?? "Updated time unavailable"}
           </Text>
         </View>
       </View>
@@ -488,11 +480,9 @@ function AllowanceSources(props: {
           {source.status}
           {source.status === "unavailable"
             ? ""
-            : source.freshness === "stale"
-              ? " · stale"
-              : source.isCurrent
-                ? " · current"
-                : " · not current"}
+            : source.isCurrent
+              ? " · current"
+              : " · not current"}
           {source.isEffective ? " · shown" : ""}
         </Text>
       ))}

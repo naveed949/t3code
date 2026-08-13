@@ -169,7 +169,12 @@ describe("SubscriptionAllowanceService", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const subscription = yield* service.subscribe;
-          const published = Option.getOrThrow(yield* Stream.runHead(subscription.changes));
+          const published = Option.getOrThrow(
+            yield* subscription.changes.pipe(
+              Stream.filter((snapshot) => snapshot.allowances.length > 0),
+              Stream.runHead,
+            ),
+          );
 
           expect(published.allowances).toHaveLength(1);
           expect(published.allowances[0]?.instanceId).toBe(allowance.instanceId);
@@ -475,6 +480,13 @@ describe("SubscriptionAllowanceService", () => {
             Stream.runHead,
             Effect.forkChild({ startImmediately: true }),
           );
+          const filteredPublished = yield* Deferred.make<void>();
+          yield* subscription.changes.pipe(
+            Stream.filter((snapshot) => snapshot.allowances.length === 0),
+            Stream.runHead,
+            Effect.tap(() => Deferred.succeed(filteredPublished, undefined)),
+            Effect.forkChild({ startImmediately: true }),
+          );
 
           yield* Ref.set(instances, [newInstance]);
           yield* PubSub.publish(changes, undefined);
@@ -483,7 +495,59 @@ describe("SubscriptionAllowanceService", () => {
           const published = Option.getOrThrow(yield* Fiber.join(replacementSnapshot));
 
           expect(Option.isSome(yield* Deferred.poll(newReadStarted))).toBe(true);
+          expect(Option.isSome(yield* Deferred.poll(filteredPublished))).toBe(true);
           expect(published.allowances[0]?.windows[0]?.usedPercent).toBe(90);
+        }),
+      );
+    }),
+  );
+
+  it.effect("serializes registry snapshot reads with their commits", () =>
+    Effect.gen(function* () {
+      const registryChanges = yield* PubSub.unbounded<void>();
+      const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([]);
+      const staleReadStarted = yield* Deferred.make<void>();
+      const releaseStaleRead = yield* Deferred.make<void>();
+      const staleInstance = instance({
+        allowanceReader: reader(Effect.succeed(allowance)),
+      }) as ProviderInstance;
+      yield* Ref.set(instances, [staleInstance]);
+      let coordinateReads = false;
+      let coordinatedReadCount = 0;
+      const registryLayer = Layer.succeed(ProviderInstanceRegistry, {
+        getInstance: () => Effect.succeed(undefined),
+        listInstances: Effect.gen(function* () {
+          const snapshot = yield* Ref.get(instances);
+          if (!coordinateReads) return snapshot;
+          coordinatedReadCount += 1;
+          if (coordinatedReadCount === 1) {
+            yield* Deferred.succeed(staleReadStarted, undefined);
+            yield* Deferred.await(releaseStaleRead);
+            return snapshot;
+          }
+          return snapshot;
+        }),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.fromPubSub(registryChanges),
+        subscribeChanges: PubSub.subscribe(registryChanges),
+      });
+      const service = yield* makeService(registryLayer);
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          coordinateReads = true;
+          const subscription = yield* service.subscribe.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          );
+          yield* Deferred.await(staleReadStarted);
+          yield* Ref.set(instances, []);
+          yield* PubSub.publish(registryChanges, undefined);
+          yield* Effect.yieldNow;
+
+          expect(coordinatedReadCount).toBe(1);
+
+          yield* Deferred.succeed(releaseStaleRead, undefined);
+          yield* Fiber.join(subscription);
         }),
       );
     }),
