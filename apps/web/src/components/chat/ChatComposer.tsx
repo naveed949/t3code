@@ -1841,6 +1841,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       const submission = submitComposerDraft({
         prompt: promptRef.current,
+        submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
         event,
         onSend,
       });
@@ -1852,6 +1853,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     },
     [
       activeThreadId,
+      activePendingProgress,
       blurMobileComposerAfterSend,
       isSendDisabled,
       noProviderAvailable,

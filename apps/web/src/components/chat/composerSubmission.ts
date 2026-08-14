@@ -3,7 +3,7 @@ import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
 type ComposerSubmitEvent = { preventDefault: () => void };
 
 export function getComposerPromptLengthValidationMessage(prompt: string): string | null {
-  const excessCharacters = prompt.length - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
+  const excessCharacters = prompt.trim().length - PROVIDER_SEND_TURN_MAX_INPUT_CHARS;
   if (excessCharacters <= 0) return null;
 
   const characterLabel = excessCharacters === 1 ? "character" : "characters";
@@ -12,10 +12,14 @@ export function getComposerPromptLengthValidationMessage(prompt: string): string
 
 export function submitComposerDraft(options: {
   prompt: string;
+  submissionTarget: "provider-turn" | "pending-user-input";
   event: ComposerSubmitEvent | undefined;
   onSend: (event?: ComposerSubmitEvent) => void;
 }): { validationMessage: string | null; didDispatch: boolean } {
-  const validationMessage = getComposerPromptLengthValidationMessage(options.prompt);
+  const validationMessage =
+    options.submissionTarget === "provider-turn"
+      ? getComposerPromptLengthValidationMessage(options.prompt)
+      : null;
   if (validationMessage) {
     options.event?.preventDefault();
     return { validationMessage, didDispatch: false };

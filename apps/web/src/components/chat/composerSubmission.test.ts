@@ -13,6 +13,7 @@ describe("submitComposerDraft", () => {
     const submit = () => {
       const result = submitComposerDraft({
         prompt: draft,
+        submissionTarget: "provider-turn",
         event: { preventDefault },
         onSend: () => dispatchedDrafts.push(draft),
       });
@@ -42,6 +43,41 @@ describe("submitComposerDraft", () => {
 
     const result = submitComposerDraft({
       prompt: draft,
+      submissionTarget: "provider-turn",
+      event: { preventDefault },
+      onSend,
+    });
+
+    expect(result).toEqual({ validationMessage: null, didDispatch: true });
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("allows surrounding whitespace that the provider turn contract trims", () => {
+    const draft = ` ${"x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS)} `;
+    const onSend = vi.fn();
+    const preventDefault = vi.fn();
+
+    const result = submitComposerDraft({
+      prompt: draft,
+      submissionTarget: "provider-turn",
+      event: { preventDefault },
+      onSend,
+    });
+
+    expect(result).toEqual({ validationMessage: null, didDispatch: true });
+    expect(onSend).toHaveBeenCalledOnce();
+    expect(preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("dispatches pending user input answers on their separate response path", () => {
+    const answer = "x".repeat(PROVIDER_SEND_TURN_MAX_INPUT_CHARS + 1);
+    const onSend = vi.fn();
+    const preventDefault = vi.fn();
+
+    const result = submitComposerDraft({
+      prompt: answer,
+      submissionTarget: "pending-user-input",
       event: { preventDefault },
       onSend,
     });
