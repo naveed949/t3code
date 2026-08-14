@@ -835,6 +835,7 @@ const buildAppUnderTest = (options?: {
         Layer.mock(SubscriptionAllowanceService.SubscriptionAllowanceService)({
           subscribe: Effect.succeed({
             latest: { readAt: "1970-01-01T00:00:00.000Z", allowances: [] },
+            hasCompletedRefresh: true,
             changes: Stream.empty,
           }),
           refresh: Effect.succeed({
@@ -4702,7 +4703,11 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       yield* buildAppUnderTest({
         layers: {
           subscriptionAllowance: {
-            subscribe: Effect.succeed({ latest: snapshot, changes: Stream.empty }),
+            subscribe: Effect.succeed({
+              latest: snapshot,
+              hasCompletedRefresh: true,
+              changes: Stream.empty,
+            }),
           },
         },
       });

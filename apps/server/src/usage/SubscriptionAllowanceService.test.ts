@@ -196,6 +196,33 @@ describe("subscription allowance lifecycle helpers", () => {
 });
 
 describe("SubscriptionAllowanceService", () => {
+  it.effect("replays a completed empty refresh to a later subscriber", () =>
+    Effect.gen(function* () {
+      const registryLayer = Layer.succeed(ProviderInstanceRegistry, {
+        getInstance: () => Effect.succeed(undefined),
+        listInstances: Effect.succeed([]),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.empty,
+        subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
+          PubSub.subscribe(pubsub),
+        ),
+      });
+      const service = yield* makeService(registryLayer);
+      yield* service.refresh;
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const subscription = yield* service.subscribe;
+          const delivered = Option.getOrThrow(
+            yield* streamSubscriptionAllowanceSnapshots(subscription).pipe(Stream.runHead),
+          );
+
+          expect(delivered.allowances).toEqual([]);
+        }),
+      );
+    }),
+  );
+
   it.effect("does not expose the pre-refresh empty snapshot", () =>
     Effect.gen(function* () {
       const changes = yield* PubSub.unbounded<void>();

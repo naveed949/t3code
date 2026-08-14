@@ -45,12 +45,18 @@ type ReadableSubscriptionAllowanceProviderInstance = SubscriptionAllowanceProvid
 
 interface AllowanceServiceState {
   readonly snapshot: SubscriptionAllowanceSnapshot;
+  readonly hasCompletedRefresh: boolean;
   readonly instances: ReadonlyMap<ProviderInstanceId, ProviderInstance>;
   readonly demandCount: number;
   readonly liveScope: Option.Option<Scope.Closeable>;
 }
 
 type RefreshFlight = Deferred.Deferred<Exit.Exit<SubscriptionAllowanceSnapshot, never>>;
+
+interface SubscriptionAllowanceSnapshotDelivery {
+  readonly snapshot: SubscriptionAllowanceSnapshot;
+  readonly hasCompletedRefresh: boolean;
+}
 
 const unavailableAllowance = (input: {
   readonly instanceId: ProviderInstanceId;
@@ -195,6 +201,7 @@ export class SubscriptionAllowanceService extends Context.Service<
       {
         readonly latest: SubscriptionAllowanceSnapshot;
         readonly changes: Stream.Stream<SubscriptionAllowanceSnapshot>;
+        readonly hasCompletedRefresh: boolean;
       },
       never,
       Scope.Scope
@@ -207,10 +214,11 @@ export class SubscriptionAllowanceService extends Context.Service<
 export function streamSubscriptionAllowanceSnapshots(input: {
   readonly latest: SubscriptionAllowanceSnapshot;
   readonly changes: Stream.Stream<SubscriptionAllowanceSnapshot>;
+  readonly hasCompletedRefresh: boolean;
 }): Stream.Stream<SubscriptionAllowanceSnapshot> {
-  return input.latest.allowances.length === 0
-    ? input.changes
-    : Stream.concat(Stream.make(input.latest), input.changes);
+  return input.hasCompletedRefresh || input.latest.allowances.length > 0
+    ? Stream.concat(Stream.make(input.latest), input.changes)
+    : input.changes;
 }
 
 export const make = Effect.gen(function* () {
@@ -218,11 +226,12 @@ export const make = Effect.gen(function* () {
   const providerService = yield* ProviderService;
   const stateMutex = yield* Semaphore.make(1);
   const liveMutex = yield* Semaphore.make(1);
-  const changes = yield* PubSub.sliding<SubscriptionAllowanceSnapshot>(8);
+  const changes = yield* PubSub.sliding<SubscriptionAllowanceSnapshotDelivery>(8);
   const initialReadAt = DateTime.formatIso(yield* DateTime.now);
   const initialInstances = yield* registry.listInstances;
   const state = yield* Ref.make<AllowanceServiceState>({
     snapshot: { readAt: initialReadAt, allowances: [] },
+    hasCompletedRefresh: false,
     instances: new Map(
       initialInstances.map((instance) => [instance.instanceId, instance] as const),
     ),
@@ -231,16 +240,24 @@ export const make = Effect.gen(function* () {
   });
   const refreshFlight = yield* Ref.make<Option.Option<RefreshFlight>>(Option.none());
 
-  const publishUnlocked = (snapshot: SubscriptionAllowanceSnapshot) =>
+  const publishUnlocked = (snapshot: SubscriptionAllowanceSnapshot, completesRefresh = false) =>
     Effect.gen(function* () {
       const current = yield* Ref.get(state);
       const nextSnapshot = markSubscriptionAllowanceSnapshotStale(
         snapshot,
         yield* Clock.currentTimeMillis,
       );
-      yield* Ref.set(state, { ...current, snapshot: nextSnapshot });
+      const hasCompletedRefresh = current.hasCompletedRefresh || completesRefresh;
+      yield* Ref.set(state, {
+        ...current,
+        snapshot: nextSnapshot,
+        hasCompletedRefresh,
+      });
       if (current.demandCount > 0) {
-        yield* PubSub.publish(changes, nextSnapshot);
+        yield* PubSub.publish(changes, {
+          snapshot: nextSnapshot,
+          hasCompletedRefresh,
+        });
       }
       return nextSnapshot;
     });
@@ -339,7 +356,7 @@ export const make = Effect.gen(function* () {
           }
           return [];
         });
-        return yield* publishUnlocked({ readAt, allowances: acceptedAllowances });
+        return yield* publishUnlocked({ readAt, allowances: acceptedAllowances }, true);
       }),
     );
   });
@@ -548,15 +565,33 @@ export const make = Effect.gen(function* () {
       if (nextSnapshot !== current.snapshot) {
         yield* Ref.set(state, { ...current, snapshot: nextSnapshot });
       }
-      return nextSnapshot;
+      return {
+        snapshot: nextSnapshot,
+        hasCompletedRefresh: current.hasCompletedRefresh,
+      };
     }),
   );
   const subscribe = subscribeBeforeSnapshotWithoutMutex(
     changes,
     Effect.gen(function* () {
       yield* Effect.acquireRelease(acquireDemand, () => releaseDemand);
-      return markSnapshotDeliveredFromCache(yield* latest);
+      const delivery = yield* latest;
+      return {
+        ...delivery,
+        snapshot: markSnapshotDeliveredFromCache(delivery.snapshot),
+      };
     }),
+  ).pipe(
+    Effect.map(({ latest, changes }) => ({
+      latest: latest.snapshot,
+      hasCompletedRefresh: latest.hasCompletedRefresh,
+      changes: changes.pipe(
+        Stream.filter(
+          (delivery) => delivery.hasCompletedRefresh || delivery.snapshot.allowances.length > 0,
+        ),
+        Stream.map((delivery) => delivery.snapshot),
+      ),
+    })),
   );
 
   return SubscriptionAllowanceService.of({
@@ -575,7 +610,11 @@ const emptySnapshot: SubscriptionAllowanceSnapshot = {
 export const layerTest = Layer.succeed(
   SubscriptionAllowanceService,
   SubscriptionAllowanceService.of({
-    subscribe: Effect.succeed({ latest: emptySnapshot, changes: Stream.empty }),
+    subscribe: Effect.succeed({
+      latest: emptySnapshot,
+      hasCompletedRefresh: true,
+      changes: Stream.empty,
+    }),
     refresh: Effect.succeed(emptySnapshot),
   }),
 );
