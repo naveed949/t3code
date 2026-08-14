@@ -2294,8 +2294,9 @@ const makeWsRpcLayer = (
           observeRpcStream(
             WS_METHODS.subscribeSubscriptionAllowance,
             Stream.unwrap(
-              Effect.map(subscriptionAllowance.subscribe, ({ latest, changes }) =>
-                Stream.concat(Stream.make(latest), changes),
+              Effect.map(
+                subscriptionAllowance.subscribe,
+                SubscriptionAllowanceService.streamSubscriptionAllowanceSnapshots,
               ),
             ),
             { "rpc.aggregate": "server" },

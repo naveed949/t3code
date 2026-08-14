@@ -204,6 +204,15 @@ export class SubscriptionAllowanceService extends Context.Service<
   }
 >()("t3/usage/SubscriptionAllowanceService") {}
 
+export function streamSubscriptionAllowanceSnapshots(input: {
+  readonly latest: SubscriptionAllowanceSnapshot;
+  readonly changes: Stream.Stream<SubscriptionAllowanceSnapshot>;
+}): Stream.Stream<SubscriptionAllowanceSnapshot> {
+  return input.latest.allowances.length === 0
+    ? input.changes
+    : Stream.concat(Stream.make(input.latest), input.changes);
+}
+
 export const make = Effect.gen(function* () {
   const registry = yield* ProviderInstanceRegistry;
   const providerService = yield* ProviderService;

@@ -1,11 +1,12 @@
 import { Children, type ReactElement, type ReactNode } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import {
   DEFAULT_USAGE_VIEW,
   type UsageView,
 } from "@t3tools/client-runtime/state/subscription-allowance";
 
-import { UsageViewTabs } from "./UsagePage";
+import { UsageSkeleton, UsageViewTabs } from "./UsagePage";
 
 describe("UsagePage defaults", () => {
   it("opens on the Subscription view", () => {
@@ -32,5 +33,15 @@ describe("UsageViewTabs", () => {
 
     buttons[1]!.props.onClick();
     expect(selected).toEqual(["historical"]);
+  });
+});
+
+describe("UsageSkeleton", () => {
+  it("matches the chart resolution while historical usage is loading", () => {
+    const hourlyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="hour" />);
+    const dailyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="day" />);
+
+    expect(hourlyMarkup).toContain("Hourly cost");
+    expect(dailyMarkup).toContain("Daily cost");
   });
 });

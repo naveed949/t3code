@@ -234,7 +234,7 @@ function HistoricalUsagePage({
             {settling ? (
               <>
                 {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
-                <UsageSkeleton />
+                <UsageSkeleton resolution={isPast24Hours ? "hour" : "day"} />
               </>
             ) : (
               <>
@@ -971,7 +971,7 @@ const SKELETON_BAR_HEIGHTS = [34, 58, 41, 72, 22, 12, 49, 63, 80, 38, 55, 26, 44
  * chart and metrics strip. No shimmer; blocks fill in exactly once when the
  * last device answers.
  */
-function UsageSkeleton() {
+export function UsageSkeleton({ resolution }: { readonly resolution: "day" | "hour" }) {
   return (
     <>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,20rem)_minmax(0,1fr)]">
@@ -1000,7 +1000,9 @@ function UsageSkeleton() {
         </div>
 
         <div className="flex flex-col gap-3">
-          <h2 className="py-1 text-sm font-medium text-foreground">Daily cost</h2>
+          <h2 className="py-1 text-sm font-medium text-foreground">
+            {resolution === "hour" ? "Hourly" : "Daily"} cost
+          </h2>
           {/* Mirrors the chart's h-56 body and w-14 axis gutter to avoid a
               relayout when the real chart swaps in. */}
           <div className="flex h-56 items-end gap-1 pl-16">

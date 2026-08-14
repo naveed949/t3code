@@ -31,6 +31,7 @@ import {
   foldSubscriptionAllowance,
   make,
   markSubscriptionAllowanceSnapshotStale,
+  streamSubscriptionAllowanceSnapshots,
   type SubscriptionAllowanceProviderInstance,
 } from "./SubscriptionAllowanceService.ts";
 
@@ -195,7 +196,7 @@ describe("subscription allowance lifecycle helpers", () => {
 });
 
 describe("SubscriptionAllowanceService", () => {
-  it.effect("acquires providers materialized before first demand", () =>
+  it.effect("does not expose the pre-refresh empty snapshot", () =>
     Effect.gen(function* () {
       const changes = yield* PubSub.unbounded<void>();
       const instances = yield* Ref.make<ReadonlyArray<ProviderInstance>>([]);
@@ -215,10 +216,7 @@ describe("SubscriptionAllowanceService", () => {
         Effect.gen(function* () {
           const subscription = yield* service.subscribe;
           const published = Option.getOrThrow(
-            yield* subscription.changes.pipe(
-              Stream.filter((snapshot) => snapshot.allowances.length > 0),
-              Stream.runHead,
-            ),
+            yield* streamSubscriptionAllowanceSnapshots(subscription).pipe(Stream.runHead),
           );
 
           expect(published.allowances).toHaveLength(1);
