@@ -975,6 +975,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null);
   const composerFormRef = useRef<HTMLFormElement>(null);
   const composerSurfaceRef = useRef<HTMLDivElement>(null);
+  const providerInputRejectedRef = useRef(false);
   const composerSelectLockRef = useRef(false);
   const composerMenuOpenRef = useRef(false);
   const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
@@ -1863,7 +1864,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         prompt: promptRef.current,
         submissionTarget: activePendingProgress ? "pending-user-input" : "provider-turn",
         event,
-        onSend,
+        onSend: (sendEvent) => {
+          // ChatView reports its final composed-input preflight through the
+          // composer handle before its first asynchronous send step.
+          providerInputRejectedRef.current = false;
+          onSend(sendEvent);
+          return !providerInputRejectedRef.current;
+        },
       });
       setComposerSubmissionError(submission.validationMessage);
       if (!submission.didDispatch) return;
@@ -2666,6 +2673,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           providerInput,
           submissionTarget: "provider-turn",
         });
+        providerInputRejectedRef.current = validationMessage !== null;
         setProviderInputSubmissionError(validationMessage);
         return validationMessage === null;
       },

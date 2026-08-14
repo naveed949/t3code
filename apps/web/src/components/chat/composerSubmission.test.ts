@@ -15,7 +15,9 @@ describe("submitComposerDraft", () => {
         prompt: draft,
         submissionTarget: "provider-turn",
         event: { preventDefault },
-        onSend: () => dispatchedDrafts.push(draft),
+        onSend: () => {
+          dispatchedDrafts.push(draft);
+        },
       });
       validationMessage = result.validationMessage;
     };
@@ -83,6 +85,20 @@ describe("submitComposerDraft", () => {
 
     expect(correctedResult).toEqual({ validationMessage: null, didDispatch: true });
     expect(onSend).toHaveBeenCalledOnce();
+  });
+
+  it("does not finish submission when the send boundary rejects composed provider input", () => {
+    const preventDefault = vi.fn();
+
+    const result = submitComposerDraft({
+      prompt: "Sendable raw draft",
+      submissionTarget: "provider-turn",
+      event: { preventDefault },
+      onSend: () => false,
+    });
+
+    expect(result).toEqual({ validationMessage: null, didDispatch: false });
+    expect(preventDefault).toHaveBeenCalledOnce();
   });
 
   it("allows fully composed provider input at the shared character limit", () => {

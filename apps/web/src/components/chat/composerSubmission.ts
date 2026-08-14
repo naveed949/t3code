@@ -27,7 +27,7 @@ export function getComposerSubmissionValidationMessage(
 export function submitComposerDraft(
   options: ComposerSubmissionInput & {
     event: ComposerSubmitEvent | undefined;
-    onSend: (event?: ComposerSubmitEvent) => void;
+    onSend: (event?: ComposerSubmitEvent) => boolean | void;
   },
 ): { validationMessage: string | null; didDispatch: boolean } {
   const validationMessage = getComposerSubmissionValidationMessage(options);
@@ -36,6 +36,9 @@ export function submitComposerDraft(
     return { validationMessage, didDispatch: false };
   }
 
-  options.onSend(options.event);
+  if (options.onSend(options.event) === false) {
+    options.event?.preventDefault();
+    return { validationMessage: null, didDispatch: false };
+  }
   return { validationMessage: null, didDispatch: true };
 }
