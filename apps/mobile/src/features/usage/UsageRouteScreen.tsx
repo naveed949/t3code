@@ -464,6 +464,10 @@ function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardMod
   const credits = model.credits;
   const spendingControl = model.spendingControl;
   const extraUsage = model.extraUsage;
+  const spendingControlReset =
+    spendingControl?.resetsAt === undefined || spendingControl.resetsAt === null
+      ? null
+      : formatAllowanceResetAt(spendingControl.resetsAt);
 
   return (
     <>
@@ -494,10 +498,8 @@ function AllowanceMetadata(props: { readonly model: SubscriptionAllowanceCardMod
               {spendingControl.remainingPercent}% remaining
             </Text>
           ) : null}
-          {spendingControl.resetsAt !== undefined && spendingControl.resetsAt !== null ? (
-            <Text className="text-xs text-foreground-muted">
-              Resets {formatAllowanceResetAt(spendingControl.resetsAt)}
-            </Text>
+          {spendingControlReset !== null ? (
+            <Text className="text-xs text-foreground-muted">Resets {spendingControlReset}</Text>
           ) : null}
           {spendingControl.reached === true ? (
             <Text className="text-xs text-foreground-muted">Limit reached</Text>

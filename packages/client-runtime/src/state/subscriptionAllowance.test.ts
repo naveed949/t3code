@@ -2,12 +2,20 @@ import { EnvironmentId, ProviderInstanceId, type SubscriptionAllowance } from "@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  formatAllowanceResetAt,
   isSubscriptionAllowanceSourceCurrent,
   reconcileSubscriptionAllowances,
   type EnvironmentSubscriptionAllowanceStatus,
 } from "./subscriptionAllowance.ts";
 
 const readAt = "2026-08-11T12:00:00.000Z";
+
+describe("formatAllowanceResetAt", () => {
+  it("returns null instead of throwing for an invalid provider timestamp", () => {
+    expect(formatAllowanceResetAt("not-an-iso-date")).toBeNull();
+    expect(formatAllowanceResetAt("2026-08-11T15:50:00.000Z")).not.toBeNull();
+  });
+});
 
 function allowance(
   instanceId: string,

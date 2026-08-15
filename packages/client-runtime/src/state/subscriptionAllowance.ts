@@ -94,9 +94,10 @@ export function shouldShowExtraUsage(
   );
 }
 
-export function formatAllowanceResetAt(resetsAt: string): string {
+export function formatAllowanceResetAt(resetsAt: string): string | null {
   // @effect-diagnostics-next-line globalDate:off
   const date = new Date(resetsAt);
+  if (Number.isNaN(date.getTime())) return null;
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",

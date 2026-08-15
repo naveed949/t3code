@@ -39,7 +39,6 @@ import {
 } from "@t3tools/shared/usageFormat";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
-import { Button } from "../ui/button";
 import { SidebarInset } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../WorkspaceBreadcrumb";
@@ -511,7 +510,7 @@ function UsagePageFrame({ children }: { readonly children: ReactNode }) {
         {!isElectron && (
           <header
             className={cn(
-              "workspace-topbar px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
+              "flex h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)] shrink-0 items-center px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
               COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
@@ -608,8 +607,8 @@ function SubscriptionUsagePage({
               render={
                 <Button
                   type="button"
-                  size="icon-sm"
-                  variant="ghost"
+                  size="icon"
+                  variant="outline"
                   onClick={refresh}
                   aria-label={
                     isRefreshing ? "Refreshing subscription usage" : "Refresh subscription usage"
@@ -682,19 +681,23 @@ function SubscriptionAllowanceCard({
     allowance.updatedAt,
     Date.parse(`${nowMinute}:00.000Z`),
   );
+  const spendingControlReset =
+    allowance.spendingControl?.resetsAt === undefined || allowance.spendingControl.resetsAt === null
+      ? null
+      : formatAllowanceResetAt(allowance.spendingControl.resetsAt);
 
   return (
     <article className="flex flex-col gap-5 border border-border p-5">
       <div className="flex items-center justify-between gap-3">
         <h2 className="flex items-center gap-2 text-sm font-medium text-foreground">
           <ProviderMark provider={allowance.provider} className="size-4" />
-          {PROVIDER_LABEL[allowance.provider]}
+          {PROVIDER_PRESENTATION[allowance.provider].label}
           {allowance.accountLabel !== null ? (
             <span className="font-normal text-muted-foreground">{allowance.accountLabel}</span>
           ) : null}
         </h2>
         <div className="flex flex-col items-end gap-1 text-xs text-muted-foreground">
-          <span className={allowance.isStale ? "text-amber-600" : undefined}>
+          <span className={allowance.isStale ? "text-warning-foreground" : undefined}>
             {allowance.isStale
               ? updatedAt === null
                 ? "Stale"
@@ -734,7 +737,7 @@ function SubscriptionAllowanceCard({
                         className="h-full"
                         style={{
                           width: `${progressWidthForAllowance(window.usedPercent)}%`,
-                          backgroundColor: PROVIDER_COLOR[allowance.provider],
+                          backgroundColor: PROVIDER_PRESENTATION[allowance.provider].color,
                         }}
                       />
                     </div>
@@ -783,10 +786,7 @@ function SubscriptionAllowanceCard({
               allowance.spendingControl.remainingPercent !== null ? (
                 <span>{allowance.spendingControl.remainingPercent}% remaining</span>
               ) : null}
-              {allowance.spendingControl.resetsAt !== undefined &&
-              allowance.spendingControl.resetsAt !== null ? (
-                <span>Resets {formatAllowanceResetAt(allowance.spendingControl.resetsAt)}</span>
-              ) : null}
+              {spendingControlReset !== null ? <span>Resets {spendingControlReset}</span> : null}
               {allowance.spendingControl.reached === true ? <span>Limit reached</span> : null}
             </div>
           ) : null}
