@@ -7,6 +7,7 @@ import {
 } from "@t3tools/client-runtime/state/subscription-allowance";
 
 import { UsageSkeleton, UsageViewTabs } from "./UsagePage";
+import { Toggle, ToggleGroup } from "../ui/toggle-group";
 
 describe("UsagePage defaults", () => {
   it("opens on the Subscription view", () => {
@@ -22,23 +23,23 @@ describe("UsageViewTabs", () => {
       onChange: (view) => selected.push(view),
     }) as ReactElement<{
       readonly children: ReactNode;
-      readonly className: string;
-      readonly role: string;
+      readonly onValueChange: (value: readonly string[]) => void;
+      readonly value: readonly string[];
+      readonly variant: string;
     }>;
-    const buttons = Children.toArray(output.props.children) as ReactElement<{
+    const toggles = Children.toArray(output.props.children) as ReactElement<{
       readonly children: string;
-      readonly className: string;
-      readonly "aria-pressed": boolean;
-      readonly onClick: () => void;
+      readonly value: string;
     }>[];
 
-    expect(output.props.role).toBe("group");
-    expect(output.props.className).not.toContain("overflow-hidden");
-    expect(buttons.map((button) => button.props.children)).toEqual(["Subscription", "Historical"]);
-    expect(buttons.map((button) => button.props["aria-pressed"])).toEqual([true, false]);
-    expect(buttons[0]!.props.className).toContain("focus-visible:ring-2");
+    expect(output.type).toBe(ToggleGroup);
+    expect(output.props.variant).toBe("segmented");
+    expect(output.props.value).toEqual(["subscription"]);
+    expect(toggles.map((toggle) => toggle.type)).toEqual([Toggle, Toggle]);
+    expect(toggles.map((toggle) => toggle.props.children)).toEqual(["Subscription", "Historical"]);
+    expect(toggles.map((toggle) => toggle.props.value)).toEqual(["subscription", "historical"]);
 
-    buttons[1]!.props.onClick();
+    output.props.onValueChange(["historical"]);
     expect(selected).toEqual(["historical"]);
   });
 });

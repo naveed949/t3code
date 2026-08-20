@@ -435,6 +435,50 @@ describe("SubscriptionAllowanceService", () => {
     }),
   );
 
+  it.effect("caps reset watcher sleeps at the maximum timer delay", () =>
+    Effect.gen(function* () {
+      const cappedSleepStarted = yield* Deferred.make<void>();
+      const now = Date.parse(readAt);
+      const controlledClock: Clock.Clock = {
+        currentTimeMillisUnsafe: () => now,
+        currentTimeMillis: Effect.succeed(now),
+        currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        currentTimeNanos: Effect.succeed(BigInt(now) * 1_000_000n),
+        monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        monotonicTimeNanos: Effect.succeed(BigInt(now) * 1_000_000n),
+        sleep: (duration) =>
+          Duration.toMillis(duration) === 2_147_483_647
+            ? Deferred.succeed(cappedSleepStarted, undefined).pipe(Effect.andThen(Effect.never))
+            : Effect.never,
+      };
+      const resettingAllowance = {
+        ...allowance,
+        windows: [
+          {
+            scope: "primary" as const,
+            usedPercent: 42,
+            resetsAt: "2026-09-10T12:00:00.000Z",
+          },
+        ],
+      };
+
+      yield* Effect.gen(function* () {
+        const providerInstance = instance({
+          allowanceReader: reader(Effect.succeed(resettingAllowance)),
+        });
+        const service = yield* makeService(registryLayerFor(providerInstance));
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const subscription = yield* service.subscribe;
+            yield* Stream.runHead(subscription.changes);
+            yield* Deferred.await(cappedSleepStarted);
+          }),
+        );
+      }).pipe(Effect.provideService(Clock.Clock, controlledClock));
+    }),
+  );
+
   it.effect("does not let a slow refresh overwrite a newer live observation", () =>
     Effect.gen(function* () {
       const slowReadStarted = yield* Deferred.make<void>();

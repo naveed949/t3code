@@ -33,6 +33,7 @@ import type { ProviderInstance } from "../provider/ProviderDriver.ts";
 import { subscribeBeforeSnapshotWithoutMutex } from "../utils/subscribeBeforeSnapshot.ts";
 
 export const SUBSCRIPTION_ALLOWANCE_REFRESH_INTERVAL_MS = 5 * 60_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 export interface SubscriptionAllowanceProviderInstance {
   readonly instanceId: ProviderInstanceId;
@@ -593,9 +594,9 @@ export const make = Effect.gen(function* () {
 
           const signal = yield* Effect.raceFirst(
             PubSub.take(resetChanges).pipe(Effect.as("changed" as const)),
-            Effect.sleep(`${Math.max(0, resetAt - nowMs)} millis`).pipe(
-              Effect.as("reset" as const),
-            ),
+            Effect.sleep(
+              `${Math.min(Math.max(0, resetAt - nowMs), MAX_TIMER_DELAY_MS)} millis`,
+            ).pipe(Effect.as("reset" as const)),
           );
           if (signal === "changed") return;
 

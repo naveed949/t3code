@@ -525,28 +525,21 @@ export function UsageViewTabs({
   readonly onChange: (view: UsageView) => void;
 }) {
   return (
-    <div
-      role="group"
+    <ToggleGroup
       aria-label="Usage view"
-      className="flex w-fit rounded-md border border-border"
+      variant="segmented"
+      value={[value]}
+      onValueChange={(next) => {
+        const selected = next[0];
+        if (selected === "subscription" || selected === "historical") onChange(selected);
+      }}
     >
       {USAGE_VIEW_OPTIONS.map((option) => (
-        <button
-          key={option.value}
-          type="button"
-          aria-pressed={option.value === value}
-          onClick={() => onChange(option.value)}
-          className={cn(
-            "relative cursor-pointer px-3 py-1.5 text-xs outline-none first:rounded-s-md last:rounded-e-md focus-visible:z-10 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
-            option.value === value
-              ? "bg-muted text-foreground"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
+        <Toggle key={option.value} value={option.value}>
           {option.label}
-        </button>
+        </Toggle>
       ))}
-    </div>
+    </ToggleGroup>
   );
 }
 
