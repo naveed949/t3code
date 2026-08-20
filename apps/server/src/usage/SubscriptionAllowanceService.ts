@@ -5,6 +5,7 @@ import {
   type SubscriptionAllowanceSnapshot,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -51,7 +52,14 @@ interface AllowanceServiceState {
   readonly liveScope: Option.Option<Scope.Closeable>;
 }
 
-type RefreshFlight = Deferred.Deferred<Exit.Exit<SubscriptionAllowanceSnapshot, never>>;
+type RefreshFlightOutcome =
+  | {
+      readonly _tag: "completed";
+      readonly exit: Exit.Exit<SubscriptionAllowanceSnapshot, never>;
+    }
+  | { readonly _tag: "ownerInterrupted" };
+
+type RefreshFlight = Deferred.Deferred<RefreshFlightOutcome>;
 
 interface SubscriptionAllowanceSnapshotDelivery {
   readonly snapshot: SubscriptionAllowanceSnapshot;
@@ -145,6 +153,29 @@ export function markSubscriptionAllowanceSnapshotStale(
     ? snapshot
     : { ...snapshot, allowances };
 }
+
+const nextPendingResetAt = (
+  snapshot: SubscriptionAllowanceSnapshot,
+  nowMs: number,
+): number | undefined => {
+  let nextResetAt: number | undefined;
+  for (const allowance of snapshot.allowances) {
+    if (allowance.status !== "available" || allowance.freshness === "stale") continue;
+    const observedMs = Date.parse(allowance.updatedAt ?? snapshot.readAt);
+    for (const window of allowance.windows) {
+      const resetMs = Date.parse(window.resetsAt ?? "");
+      if (
+        Number.isFinite(resetMs) &&
+        resetMs > nowMs &&
+        (!Number.isFinite(observedMs) || observedMs <= resetMs) &&
+        (nextResetAt === undefined || resetMs < nextResetAt)
+      ) {
+        nextResetAt = resetMs;
+      }
+    }
+  }
+  return nextResetAt;
+};
 
 /**
  * Fold one provider-native sparse observation into the last complete record.
@@ -361,10 +392,10 @@ export const make = Effect.gen(function* () {
     );
   });
 
-  const refresh: Effect.Effect<SubscriptionAllowanceSnapshot> = Effect.uninterruptibleMask(
-    (restore) =>
+  const refresh: Effect.Effect<SubscriptionAllowanceSnapshot> = Effect.suspend(() =>
+    Effect.uninterruptibleMask((restore) =>
       Effect.gen(function* () {
-        const flight = yield* Deferred.make<Exit.Exit<SubscriptionAllowanceSnapshot, never>>();
+        const flight = yield* Deferred.make<RefreshFlightOutcome>();
         const existing = yield* Ref.modify(refreshFlight, (current) =>
           Option.match(current, {
             onNone: () => [Option.none<RefreshFlight>(), Option.some(flight)] as const,
@@ -375,24 +406,35 @@ export const make = Effect.gen(function* () {
           return yield* restore(
             existing.value.pipe(
               Deferred.await,
-              Effect.flatMap((exit) =>
-                Exit.match(exit, {
-                  onFailure: (cause) => Effect.failCause(cause),
-                  onSuccess: Effect.succeed,
-                }),
+              Effect.flatMap((outcome) =>
+                outcome._tag === "ownerInterrupted"
+                  ? refresh
+                  : Exit.match(outcome.exit, {
+                      onFailure: (cause) => Effect.failCause(cause),
+                      onSuccess: Effect.succeed,
+                    }),
               ),
             ),
           );
         }
 
         const result = yield* Effect.exit(restore(refreshUnshared));
-        yield* Deferred.succeed(flight, result);
-        yield* Ref.set(refreshFlight, Option.none());
+        if (Exit.isFailure(result) && Cause.hasInterruptsOnly(result.cause)) {
+          // The caller that installed the shared flight still owns its own
+          // interruption. Waiters retry the acquisition instead of inheriting
+          // an unrelated fiber's interrupt cause.
+          yield* Ref.set(refreshFlight, Option.none());
+          yield* Deferred.succeed(flight, { _tag: "ownerInterrupted" });
+        } else {
+          yield* Deferred.succeed(flight, { _tag: "completed", exit: result });
+          yield* Ref.set(refreshFlight, Option.none());
+        }
         return yield* Exit.match(result, {
           onFailure: (cause) => Effect.failCause(cause),
           onSuccess: Effect.succeed,
         });
       }),
+    ),
   );
 
   const refreshAfterRegistryChange = Effect.gen(function* () {
@@ -506,6 +548,9 @@ export const make = Effect.gen(function* () {
       );
       if (Option.isNone(liveScope)) return;
 
+      const resetChanges = yield* PubSub.subscribe(changes).pipe(
+        Effect.provideService(Scope.Scope, liveScope.value),
+      );
       yield* providerService.streamEvents.pipe(
         Stream.filter((event) => event.type === "account.rate-limits.updated"),
         Stream.runForEach(handleProviderUpdate),
@@ -533,6 +578,35 @@ export const make = Effect.gen(function* () {
         Effect.ignore,
         Effect.forkIn(liveScope.value, { startImmediately: true }),
       );
+      yield* Effect.forever(
+        Effect.gen(function* () {
+          const nowMs = yield* Clock.currentTimeMillis;
+          const resetAt = yield* stateMutex.withPermits(1)(
+            Ref.get(state).pipe(
+              Effect.map((current) => nextPendingResetAt(current.snapshot, nowMs)),
+            ),
+          );
+          if (resetAt === undefined) {
+            yield* PubSub.take(resetChanges);
+            return;
+          }
+
+          const signal = yield* Effect.raceFirst(
+            PubSub.take(resetChanges).pipe(Effect.as("changed" as const)),
+            Effect.sleep(`${Math.max(0, resetAt - nowMs)} millis`).pipe(
+              Effect.as("reset" as const),
+            ),
+          );
+          if (signal === "changed") return;
+
+          yield* stateMutex.withPermits(1)(
+            Effect.gen(function* () {
+              const current = yield* Ref.get(state);
+              yield* publishUnlocked(current.snapshot);
+            }),
+          );
+        }),
+      ).pipe(Effect.forkIn(liveScope.value, { startImmediately: true }));
     }),
   );
 

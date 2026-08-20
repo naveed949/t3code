@@ -1,8 +1,10 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -332,6 +334,104 @@ describe("SubscriptionAllowanceService", () => {
           expect(snapshot.allowances[0]?.freshness).toBe("fresh");
         }),
       );
+    }),
+  );
+
+  it.effect("keeps shared refresh waiters alive when the flight owner is interrupted", () =>
+    Effect.gen(function* () {
+      const firstReadStarted = yield* Deferred.make<void>();
+      const secondReadStarted = yield* Deferred.make<void>();
+      const releaseSecondRead = yield* Deferred.make<void>();
+      let readCount = 0;
+      const providerInstance = instance({
+        allowanceReader: reader(
+          Effect.suspend(() => {
+            readCount += 1;
+            return readCount === 1
+              ? Deferred.succeed(firstReadStarted, undefined).pipe(Effect.andThen(Effect.never))
+              : Deferred.succeed(secondReadStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseSecondRead)),
+                  Effect.as(allowance),
+                );
+          }),
+        ),
+      });
+      const service = yield* makeService(registryLayerFor(providerInstance));
+      const owner = yield* service.refresh.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(firstReadStarted);
+      const waiter = yield* service.refresh.pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Effect.yieldNow;
+
+      yield* Fiber.interrupt(owner);
+      const ownerExit = yield* Fiber.await(owner);
+      yield* Deferred.await(secondReadStarted);
+      yield* Deferred.succeed(releaseSecondRead, undefined);
+      const snapshot = yield* Fiber.join(waiter);
+
+      expect(Exit.isFailure(ownerExit) && Cause.hasInterruptsOnly(ownerExit.cause)).toBe(true);
+      expect(readCount).toBe(2);
+      expect(snapshot.allowances[0]).toMatchObject(allowance);
+    }),
+  );
+
+  it.effect("publishes stale allowance as soon as an observed reset passes", () =>
+    Effect.gen(function* () {
+      const resetSleepStarted = yield* Deferred.make<void>();
+      const releaseResetSleep = yield* Deferred.make<void>();
+      let now = Date.parse(readAt);
+      const controlledClock: Clock.Clock = {
+        currentTimeMillisUnsafe: () => now,
+        currentTimeMillis: Effect.sync(() => now),
+        currentTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        currentTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+        monotonicTimeNanosUnsafe: () => BigInt(now) * 1_000_000n,
+        monotonicTimeNanos: Effect.sync(() => BigInt(now) * 1_000_000n),
+        sleep: (duration) =>
+          Duration.toMillis(duration) === Duration.toMillis(Duration.minutes(1))
+            ? Deferred.succeed(resetSleepStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseResetSleep)),
+              )
+            : Effect.never,
+      };
+      const resettingAllowance = {
+        ...allowance,
+        windows: [
+          {
+            scope: "primary" as const,
+            usedPercent: 42,
+            resetsAt: "2026-08-11T12:01:00.000Z",
+          },
+        ],
+      };
+      yield* Effect.gen(function* () {
+        const providerInstance = instance({
+          allowanceReader: reader(Effect.succeed(resettingAllowance)),
+        });
+        const service = yield* makeService(registryLayerFor(providerInstance));
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const subscription = yield* service.subscribe;
+            const fresh = Option.getOrThrow(yield* Stream.runHead(subscription.changes));
+            expect(fresh.allowances[0]?.freshness).toBe("fresh");
+
+            const staleDelivery = yield* subscription.changes.pipe(
+              Stream.filter((snapshot) => snapshot.allowances[0]?.freshness === "stale"),
+              Stream.runHead,
+              Effect.forkChild({ startImmediately: true }),
+            );
+            yield* Deferred.await(resetSleepStarted);
+            now += Duration.toMillis(Duration.minutes(1));
+            yield* Deferred.succeed(releaseResetSleep, undefined);
+            const stale = Option.getOrThrow(yield* Fiber.join(staleDelivery));
+
+            expect(stale.allowances[0]).toMatchObject({
+              freshness: "stale",
+              windows: [{ scope: "primary", usedPercent: 42 }],
+            });
+          }),
+        );
+      }).pipe(Effect.provideService(Clock.Clock, controlledClock));
     }),
   );
 

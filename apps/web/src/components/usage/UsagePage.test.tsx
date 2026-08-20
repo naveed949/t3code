@@ -20,16 +20,23 @@ describe("UsageViewTabs", () => {
     const output = UsageViewTabs({
       value: "subscription",
       onChange: (view) => selected.push(view),
-    }) as ReactElement<{ readonly children: ReactNode; readonly role: string }>;
+    }) as ReactElement<{
+      readonly children: ReactNode;
+      readonly className: string;
+      readonly role: string;
+    }>;
     const buttons = Children.toArray(output.props.children) as ReactElement<{
       readonly children: string;
+      readonly className: string;
       readonly "aria-pressed": boolean;
       readonly onClick: () => void;
     }>[];
 
     expect(output.props.role).toBe("group");
+    expect(output.props.className).not.toContain("overflow-hidden");
     expect(buttons.map((button) => button.props.children)).toEqual(["Subscription", "Historical"]);
     expect(buttons.map((button) => button.props["aria-pressed"])).toEqual([true, false]);
+    expect(buttons[0]!.props.className).toContain("focus-visible:ring-2");
 
     buttons[1]!.props.onClick();
     expect(selected).toEqual(["historical"]);
