@@ -40,7 +40,9 @@ vi.mock("react", async (importOriginal) => {
 });
 
 vi.mock("../../env", () => ({ isElectron: false }));
-vi.mock("../../hooks/useNowMinute", () => ({ useNowMinute: () => "2026-08-11T12:37" }));
+vi.mock("../../hooks/useNowMinute", () => ({
+  useNowMinute: () => "2026-08-11T12:37",
+}));
 vi.mock("../../state/subscriptionAllowance", () => ({
   useSubscriptionAllowance: () => ({
     groups: [],
@@ -148,8 +150,14 @@ describe("UsageViewTabs", () => {
     expect(output.props.variant).toBe("segmented");
     expect(output.props.value).toEqual(["subscription"]);
     expect(toggles.map((toggle) => toggle.type)).toEqual([Toggle, Toggle]);
-    expect(toggles.map((toggle) => toggle.props.children)).toEqual(["Subscription", "Historical"]);
-    expect(toggles.map((toggle) => toggle.props.value)).toEqual(["subscription", "historical"]);
+    expect(toggles.map((toggle) => toggle.props.children)).toEqual([
+      "Subscription",
+      "Historical",
+    ]);
+    expect(toggles.map((toggle) => toggle.props.value)).toEqual([
+      "subscription",
+      "historical",
+    ]);
 
     output.props.onValueChange(["historical"]);
     expect(selected).toEqual(["historical"]);
