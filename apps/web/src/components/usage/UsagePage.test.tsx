@@ -150,14 +150,8 @@ describe("UsageViewTabs", () => {
     expect(output.props.variant).toBe("segmented");
     expect(output.props.value).toEqual(["subscription"]);
     expect(toggles.map((toggle) => toggle.type)).toEqual([Toggle, Toggle]);
-    expect(toggles.map((toggle) => toggle.props.children)).toEqual([
-      "Subscription",
-      "Historical",
-    ]);
-    expect(toggles.map((toggle) => toggle.props.value)).toEqual([
-      "subscription",
-      "historical",
-    ]);
+    expect(toggles.map((toggle) => toggle.props.children)).toEqual(["Subscription", "Historical"]);
+    expect(toggles.map((toggle) => toggle.props.value)).toEqual(["subscription", "historical"]);
 
     output.props.onValueChange(["historical"]);
     expect(selected).toEqual(["historical"]);
@@ -166,12 +160,8 @@ describe("UsageViewTabs", () => {
 
 describe("UsageSkeleton", () => {
   it("matches the chart resolution and metric while historical usage is loading", () => {
-    const hourlyMarkup = renderToStaticMarkup(
-      <UsageSkeleton resolution="hour" metric="cost" />,
-    );
-    const dailyMarkup = renderToStaticMarkup(
-      <UsageSkeleton resolution="day" metric="tokens" />,
-    );
+    const hourlyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="hour" metric="cost" />);
+    const dailyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="day" metric="tokens" />);
 
     expect(hourlyMarkup).toContain("Hourly cost");
     expect(dailyMarkup).toContain("Daily processed tokens");
