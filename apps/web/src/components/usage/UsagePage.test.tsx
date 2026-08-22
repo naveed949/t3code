@@ -45,11 +45,15 @@ describe("UsageViewTabs", () => {
 });
 
 describe("UsageSkeleton", () => {
-  it("matches the chart resolution while historical usage is loading", () => {
-    const hourlyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="hour" />);
-    const dailyMarkup = renderToStaticMarkup(<UsageSkeleton resolution="day" />);
+  it("matches the chart resolution and metric while historical usage is loading", () => {
+    const hourlyMarkup = renderToStaticMarkup(
+      <UsageSkeleton resolution="hour" metric="cost" />,
+    );
+    const dailyMarkup = renderToStaticMarkup(
+      <UsageSkeleton resolution="day" metric="tokens" />,
+    );
 
     expect(hourlyMarkup).toContain("Hourly cost");
-    expect(dailyMarkup).toContain("Daily cost");
+    expect(dailyMarkup).toContain("Daily processed tokens");
   });
 });

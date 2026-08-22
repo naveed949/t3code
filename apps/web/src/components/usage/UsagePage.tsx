@@ -262,7 +262,7 @@ function HistoricalUsagePage({
         {settling ? (
           <>
             {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
-            <UsageSkeleton resolution={isPast24Hours ? "hour" : "day"} />
+            <UsageSkeleton resolution={isPast24Hours ? "hour" : "day"} metric={metric} />
           </>
         ) : (
           <>
@@ -585,7 +585,6 @@ function SubscriptionUsagePage({
                     isRefreshing ? "Refreshing subscription usage" : "Refresh subscription usage"
                   }
                   aria-busy={isRefreshing}
-                  disabled={isRefreshing}
                 />
               }
             >
@@ -941,7 +940,13 @@ function UsageDeviceStrip({
  * Static stand-in with the loaded page's shape. No shimmer; blocks fill in
  * exactly once when the last device answers.
  */
-export function UsageSkeleton({ resolution }: { readonly resolution: "day" | "hour" }) {
+export function UsageSkeleton({
+  resolution,
+  metric,
+}: {
+  readonly resolution: "day" | "hour";
+  readonly metric: UsageChartMetric;
+}) {
   return (
     <>
       <section className="grid gap-6 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)]">
@@ -971,7 +976,8 @@ export function UsageSkeleton({ resolution }: { readonly resolution: "day" | "ho
 
         <div className="flex flex-col gap-3">
           <h2 className="text-sm font-medium text-foreground">
-            {resolution === "hour" ? "Hourly" : "Daily"} cost
+            {resolution === "hour" ? "Hourly" : "Daily"}{" "}
+            {metric === "tokens" ? "processed tokens" : "cost"}
           </h2>
           <div className="flex flex-col gap-1">
             <div className="ml-16 h-56 rounded-sm bg-muted/35" />
