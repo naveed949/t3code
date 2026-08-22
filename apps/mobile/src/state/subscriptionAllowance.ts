@@ -7,6 +7,7 @@
  */
 import { useAtomValue } from "@effect/atom-react";
 import {
+  createSubscriptionAllowanceRefreshTracker,
   isSubscriptionAllowanceCompatibilityCause,
   reconcileSubscriptionAllowances,
   type EnvironmentSubscriptionAllowanceStatus,
@@ -64,18 +65,18 @@ export function useSubscriptionAllowance(): SubscriptionAllowanceView {
     reportFailure: false,
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [trackRefresh] = useState(() => createSubscriptionAllowanceRefreshTracker(setIsRefreshing));
 
   const refresh = useCallback(() => {
-    setIsRefreshing(true);
-    void Promise.all(
+    void trackRefresh(
       projection.refreshEnvironmentIds.map((environmentId) =>
         refreshAllowance({
           environmentId,
           input: {},
         }),
       ),
-    ).finally(() => setIsRefreshing(false));
-  }, [projection.refreshEnvironmentIds, refreshAllowance]);
+    );
+  }, [projection.refreshEnvironmentIds, refreshAllowance, trackRefresh]);
 
   return {
     ...projection,

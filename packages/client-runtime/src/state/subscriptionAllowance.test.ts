@@ -2,6 +2,7 @@ import { EnvironmentId, ProviderInstanceId, type SubscriptionAllowance } from "@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  createSubscriptionAllowanceRefreshTracker,
   formatAllowanceResetAt,
   isSubscriptionAllowanceSourceCurrent,
   reconcileSubscriptionAllowances,
@@ -9,6 +10,30 @@ import {
 } from "./subscriptionAllowance.ts";
 
 const readAt = "2026-08-11T12:00:00.000Z";
+
+describe("createSubscriptionAllowanceRefreshTracker", () => {
+  it("stays refreshing until every overlapping refresh settles", async () => {
+    const refreshingChanges: boolean[] = [];
+    const trackRefresh = createSubscriptionAllowanceRefreshTracker((isRefreshing) => {
+      refreshingChanges.push(isRefreshing);
+    });
+    const first = Promise.withResolvers<void>();
+    const second = Promise.withResolvers<void>();
+
+    const firstTracked = trackRefresh([first.promise]);
+    const secondTracked = trackRefresh([second.promise]);
+
+    expect(refreshingChanges).toEqual([true]);
+
+    second.resolve();
+    await secondTracked;
+    expect(refreshingChanges).toEqual([true]);
+
+    first.resolve();
+    await firstTracked;
+    expect(refreshingChanges).toEqual([true, false]);
+  });
+});
 
 describe("formatAllowanceResetAt", () => {
   it("returns null instead of throwing for an invalid provider timestamp", () => {

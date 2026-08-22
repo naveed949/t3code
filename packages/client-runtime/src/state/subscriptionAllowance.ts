@@ -22,6 +22,24 @@ export const USAGE_VIEW_OPTIONS = [
 
 export type SubscriptionViewPhase = "loading" | "partial" | "ready";
 
+export function createSubscriptionAllowanceRefreshTracker(
+  onRefreshingChange: (isRefreshing: boolean) => void,
+): (refreshes: readonly Promise<unknown>[]) => Promise<void> {
+  let pendingRefreshes = 0;
+
+  return async (refreshes) => {
+    pendingRefreshes += 1;
+    if (pendingRefreshes === 1) onRefreshingChange(true);
+
+    try {
+      await Promise.all(refreshes);
+    } finally {
+      pendingRefreshes -= 1;
+      if (pendingRefreshes === 0) onRefreshingChange(false);
+    }
+  };
+}
+
 export function subscriptionViewPhase(input: {
   readonly isPending: boolean;
   readonly isPartial: boolean;
