@@ -11,6 +11,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
 import {
   getDesktopUpdateProgressView,
+  refreshRenderedSidebarUpdateProgressView,
   resolveDisplayedSidebarUpdateProgressView,
   selectSidebarUpdateProgressView,
   type SidebarUpdateProgressView,
@@ -103,6 +104,11 @@ export function SidebarUpdateProgressPill() {
       if (view) {
         setRenderedView(view);
       }
+      return;
+    }
+    const refreshedView = refreshRenderedSidebarUpdateProgressView(renderedView, view);
+    if (refreshedView !== renderedView) {
+      setRenderedView(refreshedView);
       return;
     }
     if (!view) {

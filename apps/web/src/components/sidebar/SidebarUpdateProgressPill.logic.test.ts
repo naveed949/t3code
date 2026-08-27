@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   getDesktopUpdateProgressView,
+  refreshRenderedSidebarUpdateProgressView,
   resolveDisplayedSidebarUpdateProgressView,
   selectSidebarUpdateProgressView,
   type SidebarUpdateProgressView,
@@ -91,7 +92,7 @@ describe("desktop update sidebar progress", () => {
     expect(selectSidebarUpdateProgressView({ desktopView: null, providerView })).toBe(providerView);
   });
 
-  it("refreshes progress in place without replacing a view during an exit transition", () => {
+  it("retains the latest progress while the pill exits", () => {
     const renderedView: SidebarUpdateProgressView = {
       key: "desktop:downloading:1.1.0",
       tone: "loading",
@@ -101,8 +102,10 @@ describe("desktop update sidebar progress", () => {
       progress: 10,
     };
     const currentView = { ...renderedView, progress: 45 };
+    const refreshedView = refreshRenderedSidebarUpdateProgressView(renderedView, currentView);
 
-    expect(resolveDisplayedSidebarUpdateProgressView(renderedView, currentView)).toBe(currentView);
+    expect(refreshedView).toBe(currentView);
+    expect(resolveDisplayedSidebarUpdateProgressView(refreshedView, null)).toBe(currentView);
     expect(
       resolveDisplayedSidebarUpdateProgressView(renderedView, {
         ...currentView,

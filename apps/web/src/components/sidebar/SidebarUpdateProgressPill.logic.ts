@@ -51,6 +51,21 @@ export function selectSidebarUpdateProgressView({
   return desktopView ?? providerView;
 }
 
+export function refreshRenderedSidebarUpdateProgressView(
+  renderedView: SidebarUpdateProgressView | null,
+  currentView: SidebarUpdateProgressView | null,
+): SidebarUpdateProgressView | null {
+  if (
+    renderedView !== null &&
+    currentView !== null &&
+    renderedView.key === currentView.key &&
+    renderedView.progress !== currentView.progress
+  ) {
+    return currentView;
+  }
+  return renderedView;
+}
+
 export function resolveDisplayedSidebarUpdateProgressView(
   renderedView: SidebarUpdateProgressView | null,
   currentView: SidebarUpdateProgressView | null,
