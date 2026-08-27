@@ -2398,7 +2398,7 @@ code {
   }
 }
 
-@keyframes provider-update-pill-countdown {
+@keyframes update-progress-pill-countdown {
   from {
     transform: scaleX(1);
   }

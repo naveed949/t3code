@@ -20,6 +20,14 @@ connection will disappear briefly and work that is still running may be interrup
 
 The update does not remove saved threads, settings, or project files.
 
+## Desktop App Downloads
+
+When a desktop app update is available, select the download icon in the sidebar footer. While it
+downloads, the shared update status above the footer actions shows the percentage complete. The
+same status area reports provider updates, so background update progress stays in one place.
+
+After the download finishes, the footer icon changes to the restart and install action.
+
 ## Choose the Action You See
 
 | Action                     | What to do                                                                                                                                                                  |

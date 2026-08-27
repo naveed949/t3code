@@ -5,25 +5,29 @@ import { CircleCheckIcon, DownloadIcon, LoaderIcon, TriangleAlertIcon, XIcon } f
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 
 import { primaryServerProvidersAtom } from "../../state/server";
-import {
-  getProviderUpdateSidebarPillView,
-  type ProviderUpdateSidebarPillView,
-} from "../ProviderUpdateLaunchNotification.logic";
+import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { getProviderUpdateSidebarPillView } from "../ProviderUpdateLaunchNotification.logic";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { Button } from "../ui/button";
+import {
+  getDesktopUpdateProgressView,
+  resolveDisplayedSidebarUpdateProgressView,
+  selectSidebarUpdateProgressView,
+  type SidebarUpdateProgressView,
+} from "./SidebarUpdateProgressPill.logic";
 
-const PROVIDER_UPDATE_PILL_STYLES = {
+const UPDATE_PROGRESS_PILL_STYLES = {
   loading:
-    "bg-update-surface text-update-foreground group-has-[button.provider-update-main:hover]/provider-update:bg-update/22",
+    "bg-update-surface text-update-foreground group-has-[button.update-progress-main:hover]/update-progress:bg-update/22",
   success:
-    "bg-success/12 text-success group-has-[button.provider-update-main:hover]/provider-update:bg-success/18",
+    "bg-success/12 text-success group-has-[button.update-progress-main:hover]/update-progress:bg-success/18",
   warning:
-    "bg-warning/12 text-warning group-has-[button.provider-update-main:hover]/provider-update:bg-warning/18",
+    "bg-warning/12 text-warning group-has-[button.update-progress-main:hover]/update-progress:bg-warning/18",
   error:
-    "bg-destructive/12 text-destructive group-has-[button.provider-update-main:hover]/provider-update:bg-destructive/18",
+    "bg-destructive/12 text-destructive group-has-[button.update-progress-main:hover]/update-progress:bg-destructive/18",
 } as const;
 
-const PROVIDER_UPDATE_PILL_PROGRESS_STYLES = {
+const UPDATE_PROGRESS_PILL_COUNTDOWN_STYLES = {
   success: "bg-success/18",
   warning: "bg-warning/14",
   error: "bg-destructive/14",
@@ -39,21 +43,26 @@ function latestProviderCheckedAt(
   );
 }
 
-export function SidebarProviderUpdatePill() {
+export function SidebarUpdateProgressPill() {
   const navigate = useNavigate();
   const providers = useAtomValue(primaryServerProvidersAtom);
+  const desktopUpdateState = useDesktopUpdateState();
   const [dismissedKeys, setDismissedKeys] = useState<ReadonlySet<string>>(() => new Set());
-  const [renderedView, setRenderedView] = useState<ProviderUpdateSidebarPillView | null>(null);
-  const [pendingView, setPendingView] = useState<ProviderUpdateSidebarPillView | null>(null);
+  const [renderedView, setRenderedView] = useState<SidebarUpdateProgressView | null>(null);
+  const [pendingView, setPendingView] = useState<SidebarUpdateProgressView | null>(null);
   const [exitingKey, setExitingKey] = useState<string | null>(null);
   const [dismissAfterExitKey, setDismissAfterExitKey] = useState<string | null>(null);
   const [visibleAfterIso, setVisibleAfterIso] = useState<string | undefined>();
   const effectiveVisibleAfterIso = visibleAfterIso ?? latestProviderCheckedAt(providers);
-  const view = getProviderUpdateSidebarPillView(providers, {
+  const providerView = getProviderUpdateSidebarPillView(providers, {
     ...(effectiveVisibleAfterIso !== undefined
       ? { visibleAfterIso: effectiveVisibleAfterIso }
       : {}),
     dismissedKeys,
+  });
+  const view = selectSidebarUpdateProgressView({
+    desktopView: getDesktopUpdateProgressView(desktopUpdateState),
+    providerView: providerView ? { ...providerView, destination: "/settings/providers" } : null,
   });
 
   useEffect(() => {
@@ -62,19 +71,20 @@ export function SidebarProviderUpdatePill() {
     }
   }, [effectiveVisibleAfterIso, visibleAfterIso]);
 
-  const openProviderSettings = useCallback(() => {
-    void navigate({ to: "/settings/providers" });
-  }, [navigate]);
-  const displayedView = renderedView ?? view;
+  const displayedView = resolveDisplayedSidebarUpdateProgressView(renderedView, view);
   const dismissAfterVisibleMs = displayedView?.dismissAfterVisibleMs;
   const viewKey = displayedView?.key ?? null;
   const showDismissProgress =
     dismissAfterVisibleMs !== undefined &&
     displayedView?.tone !== "loading" &&
     exitingKey !== viewKey;
+  const openUpdateSettings = useCallback(() => {
+    if (!displayedView) return;
+    void navigate({ to: displayedView.destination });
+  }, [displayedView, navigate]);
 
   const startExit = useCallback(
-    (key: string, nextView: ProviderUpdateSidebarPillView | null, dismissKey?: string) => {
+    (key: string, nextView: SidebarUpdateProgressView | null, dismissKey?: string) => {
       if (exitingKey === key) {
         return;
       }
@@ -125,8 +135,8 @@ export function SidebarProviderUpdatePill() {
 
   return (
     <div
-      className={`group/provider-update relative flex h-7 w-full items-center overflow-hidden rounded-lg text-xs font-medium transform-gpu transition-all duration-180 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
-        PROVIDER_UPDATE_PILL_STYLES[displayedView.tone]
+      className={`group/update-progress relative flex h-7 w-full items-center overflow-hidden rounded-lg text-xs font-medium transform-gpu transition-all duration-180 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-transform ${
+        UPDATE_PROGRESS_PILL_STYLES[displayedView.tone]
       } ${
         exitingKey === displayedView.key
           ? "pointer-events-none translate-y-1.5 opacity-0"
@@ -148,16 +158,23 @@ export function SidebarProviderUpdatePill() {
         setDismissAfterExitKey(null);
       }}
     >
+      {displayedView.progress !== undefined ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 bg-update/18 transition-[width] duration-300 ease-out motion-reduce:transition-none"
+          style={{ width: `${displayedView.progress}%` }}
+        />
+      ) : null}
       {showDismissProgress ? (
         <div
           key={displayedView.key}
           aria-hidden="true"
-          className={`pointer-events-none absolute inset-y-0 left-0 w-full origin-left animate-[provider-update-pill-countdown_var(--provider-update-pill-dismiss-ms)_linear_forwards] border-r border-current/15 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] ${
-            PROVIDER_UPDATE_PILL_PROGRESS_STYLES[displayedView.tone]
+          className={`pointer-events-none absolute inset-y-0 left-0 w-full origin-left animate-[update-progress-pill-countdown_var(--update-progress-pill-dismiss-ms)_linear_forwards] border-r border-current/15 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.08)] ${
+            UPDATE_PROGRESS_PILL_COUNTDOWN_STYLES[displayedView.tone]
           }`}
           style={
             {
-              "--provider-update-pill-dismiss-ms": `${dismissAfterVisibleMs}ms`,
+              "--update-progress-pill-dismiss-ms": `${dismissAfterVisibleMs}ms`,
             } as CSSProperties
           }
         />
@@ -169,8 +186,8 @@ export function SidebarProviderUpdatePill() {
             <button
               type="button"
               aria-label={displayedView.description}
-              className="provider-update-main relative z-[1] flex h-full flex-1 items-center gap-2 px-2 text-left"
-              onClick={openProviderSettings}
+              className="update-progress-main relative z-[1] flex h-full flex-1 items-center gap-2 px-2 text-left"
+              onClick={openUpdateSettings}
             >
               {displayedView.tone === "loading" ? (
                 <LoaderIcon className="size-3.5 animate-spin" />
@@ -181,7 +198,10 @@ export function SidebarProviderUpdatePill() {
               ) : (
                 <DownloadIcon className="size-3.5" />
               )}
-              <span>{displayedView.title}</span>
+              <span className="min-w-0 flex-1 truncate">{displayedView.title}</span>
+              {displayedView.progress !== undefined ? (
+                <span className="tabular-nums">{Math.floor(displayedView.progress)}%</span>
+              ) : null}
             </button>
           }
         />
@@ -194,7 +214,7 @@ export function SidebarProviderUpdatePill() {
               <Button
                 size="icon-micro"
                 variant="ghost"
-                aria-label="Dismiss provider update notice"
+                aria-label="Dismiss update notice"
                 className="relative z-[1] mr-1 [--control-icon-color:currentColor] rounded-md text-inherit opacity-70 hover:bg-transparent hover:opacity-100"
                 onClick={() => startExit(displayedView.key, null, displayedView.key)}
               >
@@ -202,7 +222,7 @@ export function SidebarProviderUpdatePill() {
               </Button>
             }
           />
-          <TooltipPopup side="top">Dismiss until provider status changes</TooltipPopup>
+          <TooltipPopup side="top">Dismiss until update status changes</TooltipPopup>
         </Tooltip>
       )}
     </div>

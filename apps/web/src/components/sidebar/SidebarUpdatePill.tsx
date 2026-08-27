@@ -333,7 +333,6 @@ function SidebarUpdateControl() {
             >
               <DesktopUpdateStatusIcon
                 key={showCheckIcon ? checkAnimationKey : iconStatus}
-                downloadPercent={state?.downloadPercent ?? null}
                 isCheckAnimating={showCheckIcon && !prefersReducedMotion}
                 onCheckAnimationIteration={handleCheckAnimationIteration}
                 status={iconStatus}
