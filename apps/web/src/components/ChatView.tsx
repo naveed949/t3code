@@ -8,6 +8,7 @@ import {
   type ModelSelection,
   type ProjectScript,
   type ProjectId,
+  type ProjectIconOverride,
   type ProviderApprovalDecision,
   type PreviewAnnotationPayload,
   ProviderInstanceId,
@@ -522,6 +523,11 @@ const PreviewPanel = lazy(() =>
 );
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const ProjectIconPickerDialog = lazy(() =>
+  import("./settings/ProjectIconPickerDialog").then((module) => ({
+    default: module.ProjectIconPickerDialog,
+  })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1975,6 +1981,45 @@ function ChatViewContent(props: ChatViewProps) {
   // drive the environment picker in BranchToolbar.
   const allProjects = useProjects();
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
+  const activeProjectGroupMembers = useMemo(() => {
+    if (!activeProject) return [];
+    const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
+    return allProjects.filter(
+      (project) =>
+        deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings) === logicalKey,
+    );
+  }, [activeProject, allProjects, projectGroupingSettings]);
+  const [projectIconPickerOpen, setProjectIconPickerOpen] = useState(false);
+  const savingProjectFaviconRef = useRef(false);
+  const setActiveProjectIcon = useCallback(
+    async (projectIcon: ProjectIconOverride) => {
+      if (savingProjectFaviconRef.current) return;
+      savingProjectFaviconRef.current = true;
+      try {
+        for (const project of activeProjectGroupMembers) {
+          const result = await updateProject({
+            environmentId: project.environmentId,
+            input: { projectId: project.id, faviconPath: null, projectIcon },
+          });
+          if (result._tag !== "Failure") continue;
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Failed to update project icon",
+                description: error instanceof Error ? error.message : "An error occurred.",
+              }),
+            );
+          }
+          break;
+        }
+      } finally {
+        savingProjectFaviconRef.current = false;
+      }
+    },
+    [activeProjectGroupMembers, updateProject],
+  );
   useEffect(() => {
     if (!activeThreadRef || !activeProjectRef) return;
     registerFaviconProjectForThread(activeThreadRef, activeProjectRef);
@@ -2057,13 +2102,9 @@ function ChatViewContent(props: ChatViewProps) {
   );
   const logicalProjectEnvironments = useMemo(() => {
     if (!activeProject) return [];
-    const logicalKey = deriveLogicalProjectKeyFromSettings(activeProject, projectGroupingSettings);
-    const memberProjects = allProjects.filter(
-      (p) => deriveLogicalProjectKeyFromSettings(p, projectGroupingSettings) === logicalKey,
-    );
     const seen = new Set<string>();
     const envs: EnvironmentOption[] = [];
-    for (const p of memberProjects) {
+    for (const p of activeProjectGroupMembers) {
       if (seen.has(p.environmentId)) continue;
       seen.add(p.environmentId);
       const isPrimary = p.environmentId === primaryEnvironmentId;
@@ -2082,7 +2123,7 @@ function ChatViewContent(props: ChatViewProps) {
       return a.label.localeCompare(b.label);
     });
     return envs;
-  }, [activeProject, allProjects, projectGroupingSettings, primaryEnvironmentId, environmentById]);
+  }, [activeProject, activeProjectGroupMembers, primaryEnvironmentId, environmentById]);
   const hasMultipleEnvironments = logicalProjectEnvironments.length > 1;
   const activeEnvironmentOption =
     logicalProjectEnvironments.find(
@@ -7600,12 +7641,23 @@ function ChatViewContent(props: ChatViewProps) {
             rightPanelOpen={rightPanelOpen}
             gitCwd={gitCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
+            onChangeProjectIcon={() => setProjectIconPickerOpen(true)}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}
           />
         </WorkspacePageHeader>
+        {activeProject && projectIconPickerOpen ? (
+          <Suspense fallback={null}>
+            <ProjectIconPickerDialog
+              current={activeProject.projectIcon ?? null}
+              open
+              onOpenChange={setProjectIconPickerOpen}
+              onSelect={(icon) => void setActiveProjectIcon(icon)}
+            />
+          </Suspense>
+        ) : null}
 
         <ThreadErrorBanner
           error={visibleThreadError}

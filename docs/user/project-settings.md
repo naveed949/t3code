@@ -6,10 +6,10 @@ emoji from the project name.
 
 To choose a different icon or emoji:
 
-1. Open **Settings** and select **Projects**.
-2. Select the project.
-3. Next to **Project icon**, select **Choose icon**.
-4. Search the full Lucide icon set and choose a color, or switch to **Emoji** and choose or paste
+1. Click the project icon in the thread header, or open **Settings** and select **Projects**.
+2. If you opened Settings, select the project and then select **Choose icon** next to
+   **Project icon**.
+3. Search the full Lucide icon set and choose a color, or switch to **Emoji** and choose or paste
    an emoji.
 
 To use an image from the project instead, select **Choose file**, search for an image, and select

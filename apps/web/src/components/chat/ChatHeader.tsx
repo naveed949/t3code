@@ -65,6 +65,7 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
+  onChangeProjectIcon: () => void;
   onNewThreadInProject: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
@@ -136,6 +137,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   onOpenPullRequest,
+  onChangeProjectIcon,
   onNewThreadInProject,
   onRunProjectScript,
   onAddProjectScript,
@@ -313,29 +315,45 @@ export const ChatHeader = memo(function ChatHeader({
         {activeProjectName ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={`New thread in ${activeProjectName}`}
-                      onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+              <div className="inline-flex min-w-0 items-center gap-1.5">
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`Change icon for ${activeProjectName}`}
+                        onClick={onChangeProjectIcon}
+                        className="inline-flex shrink-0 cursor-pointer items-center rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    }
+                  >
+                    <ProjectFavicon
+                      environmentId={activeThreadEnvironmentId}
+                      cwd={activeProjectCwd ?? ""}
+                      projectName={activeProjectName}
+                      faviconPath={activeProjectFaviconPath}
+                      projectIcon={activeProjectIcon}
+                      className="size-3.5"
                     />
-                  }
-                >
-                  <ProjectFavicon
-                    environmentId={activeThreadEnvironmentId}
-                    cwd={activeProjectCwd ?? ""}
-                    projectName={activeProjectName}
-                    faviconPath={activeProjectFaviconPath}
-                    projectIcon={activeProjectIcon}
-                    className="size-3.5"
-                  />
-                  <span className="max-w-40 truncate">{activeProjectName}</span>
-                </TooltipTrigger>
-                <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
-              </Tooltip>
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">Change project icon</TooltipPopup>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={`New thread in ${activeProjectName}`}
+                        onClick={onNewThreadInProject}
+                        className="min-w-0 max-w-full cursor-pointer rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    }
+                  >
+                    <span className="block max-w-40 truncate">{activeProjectName}</span>
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">New thread in {activeProjectName}</TooltipPopup>
+                </Tooltip>
+              </div>
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator />
           </>
