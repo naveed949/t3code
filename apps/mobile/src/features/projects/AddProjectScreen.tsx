@@ -674,6 +674,7 @@ export function AddProjectRepositoryScreen(props: {
   const [repositorySuggestionResult, setRepositorySuggestionResult] = useState<{
     readonly key: string;
     readonly repositories: ReadonlyArray<SourceControlRepositoryInfo>;
+    readonly isTruncated: boolean;
   } | null>(null);
   const suggestionInput =
     source === "github" ? parseGitHubRepositorySuggestionInput(repositoryInput) : null;
@@ -686,6 +687,8 @@ export function AddProjectRepositoryScreen(props: {
     repositorySuggestionResult?.key === suggestionKey
       ? repositorySuggestionResult.repositories
       : [];
+  const areRepositorySuggestionsTruncated =
+    repositorySuggestionResult?.key === suggestionKey && repositorySuggestionResult.isTruncated;
 
   useEffect(() => {
     let cancelled = false;
@@ -698,7 +701,8 @@ export function AddProjectRepositoryScreen(props: {
       if (cancelled) return;
       setRepositorySuggestionResult({
         key: suggestionKey,
-        repositories: AsyncResult.isSuccess(result) ? result.value : [],
+        repositories: AsyncResult.isSuccess(result) ? result.value.repositories : [],
+        isTruncated: AsyncResult.isSuccess(result) && result.value.isTruncated,
       });
     });
     return () => {
@@ -797,6 +801,12 @@ export function AddProjectRepositoryScreen(props: {
                 />
               ))}
             </ListSection>
+          ) : null}
+          {areRepositorySuggestionsTruncated ? (
+            <Text className="px-1 text-xs leading-normal text-foreground-muted">
+              Showing the first 100 repositories. Enter the full owner/repository name to look up
+              another.
+            </Text>
           ) : null}
           <PrimaryActionButton
             label={source === "url" ? "Continue" : "Lookup repository"}

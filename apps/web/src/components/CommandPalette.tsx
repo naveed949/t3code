@@ -731,6 +731,7 @@ function OpenCommandPaletteDialog(props: {
   const [repositorySuggestionResult, setRepositorySuggestionResult] = useState<{
     readonly key: string;
     readonly repositories: ReadonlyArray<SourceControlRepositoryInfo>;
+    readonly isTruncated: boolean;
   } | null>(null);
   const githubSuggestionInput =
     addProjectCloneFlow?.step === "repository" && addProjectCloneFlow.source === "github"
@@ -747,6 +748,9 @@ function OpenCommandPaletteDialog(props: {
     repositorySuggestionResult?.key === githubSuggestionKey
       ? repositorySuggestionResult.repositories
       : [];
+  const areRepositorySuggestionsTruncated =
+    repositorySuggestionResult?.key === githubSuggestionKey &&
+    repositorySuggestionResult.isTruncated;
   const isRepositorySuggestionsLoading =
     githubSuggestionKey !== null && repositorySuggestionResult?.key !== githubSuggestionKey;
 
@@ -766,7 +770,8 @@ function OpenCommandPaletteDialog(props: {
       if (cancelled) return;
       setRepositorySuggestionResult({
         key: githubSuggestionKey,
-        repositories: result._tag === "Success" ? result.value : [],
+        repositories: result._tag === "Success" ? result.value.repositories : [],
+        isTruncated: result._tag === "Success" && result.value.isTruncated,
       });
     });
 
@@ -2265,7 +2270,7 @@ function OpenCommandPaletteDialog(props: {
 
   const matchingRepositorySuggestions = filterGitHubRepositorySuggestions(
     repositorySuggestions,
-    deferredQuery,
+    query,
   );
   const repositorySuggestionGroups: CommandPaletteView["groups"] =
     matchingRepositorySuggestions.length === 0
@@ -2273,7 +2278,7 @@ function OpenCommandPaletteDialog(props: {
       : [
           {
             value: "github-repository-suggestions",
-            label: `Repositories owned by ${githubSuggestionOwner}`,
+            label: `Repositories owned by ${githubSuggestionOwner}${areRepositorySuggestionsTruncated ? " (first 100)" : ""}`,
             items: matchingRepositorySuggestions.map((repository) => ({
               kind: "action" as const,
               value: `repository-suggestion:${repository.nameWithOwner}`,
@@ -2743,7 +2748,9 @@ function OpenCommandPaletteDialog(props: {
                   : isRepositorySuggestionsLoading
                     ? "Loading repositories…"
                     : githubSuggestionInput && repositorySuggestions.length > 0
-                      ? "No matching repositories."
+                      ? areRepositorySuggestionsTruncated
+                        ? "No match in the first 100 repositories. Enter the full owner/repository name and press Enter."
+                        : "No matching repositories."
                       : githubSuggestionInput
                         ? "No repositories found for this owner."
                         : "Enter a repository path and press Enter to look it up.",

@@ -136,11 +136,16 @@ export const make = Effect.gen(function* () {
         detail: "This source control provider cannot list repositories.",
       });
     }
-    const repositories = yield* provider.listRepositories({
+    const result = yield* provider.listRepositories({
       cwd: input.cwd ?? config.cwd,
       owner: input.owner.trim(),
     });
-    return repositories.map((repository) => toRepositoryInfo(providerKind, repository));
+    return {
+      repositories: result.repositories.map((repository) =>
+        toRepositoryInfo(providerKind, repository),
+      ),
+      isTruncated: result.isTruncated,
+    };
   });
 
   const normalizeDestinationPath = Effect.fn("SourceControlRepositoryService.normalizeDestination")(

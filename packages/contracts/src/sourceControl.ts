@@ -73,7 +73,10 @@ export const SourceControlRepositoryListInput = Schema.Struct({
 });
 export type SourceControlRepositoryListInput = typeof SourceControlRepositoryListInput.Type;
 
-export const SourceControlRepositoryListResult = Schema.Array(SourceControlRepositoryInfo);
+export const SourceControlRepositoryListResult = Schema.Struct({
+  repositories: Schema.Array(SourceControlRepositoryInfo),
+  isTruncated: Schema.Boolean,
+});
 export type SourceControlRepositoryListResult = typeof SourceControlRepositoryListResult.Type;
 
 export const SourceControlCloneRepositoryInput = Schema.Struct({

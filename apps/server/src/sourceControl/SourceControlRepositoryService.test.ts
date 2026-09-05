@@ -124,7 +124,7 @@ it.effect("lists repositories through providers that support owner discovery", (
     listRepositories: (input) =>
       Effect.sync(() => {
         calls.push(input);
-        return [CLONE_URLS];
+        return { repositories: [CLONE_URLS], isTruncated: true };
       }),
   });
 
@@ -136,7 +136,10 @@ it.effect("lists repositories through providers that support owner discovery", (
       cwd: "/workspace",
     });
 
-    assert.deepStrictEqual(result, [{ provider: "github", ...CLONE_URLS }]);
+    assert.deepStrictEqual(result, {
+      repositories: [{ provider: "github", ...CLONE_URLS }],
+      isTruncated: true,
+    });
     assert.deepStrictEqual(calls, [{ cwd: "/workspace", owner: "octocat" }]);
   }).pipe(Effect.provide(makeLayer({ provider })));
 });

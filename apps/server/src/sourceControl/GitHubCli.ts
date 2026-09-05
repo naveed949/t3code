@@ -271,7 +271,13 @@ export class GitHubCli extends Context.Service<
     readonly listRepositories: (input: {
       readonly cwd: string;
       readonly owner: string;
-    }) => Effect.Effect<ReadonlyArray<GitHubRepositoryCloneUrls>, GitHubCliError>;
+    }) => Effect.Effect<
+      {
+        readonly repositories: ReadonlyArray<GitHubRepositoryCloneUrls>;
+        readonly isTruncated: boolean;
+      },
+      GitHubCliError
+    >;
 
     readonly createRepository: (input: {
       readonly cwd: string;
@@ -311,6 +317,7 @@ const decodeRawGitHubRepositoryCloneUrls = Schema.decodeEffect(
 const decodeRawGitHubRepositoryList = Schema.decodeEffect(
   Schema.fromJsonString(RawGitHubRepositoryListSchema),
 );
+const REPOSITORY_SUGGESTION_LIMIT = 100;
 
 function normalizeRepositoryCloneUrls(
   raw: Schema.Schema.Type<typeof RawGitHubRepositoryCloneUrlsSchema>,
@@ -467,7 +474,15 @@ export const make = Effect.gen(function* () {
     listRepositories: (input) =>
       execute({
         cwd: input.cwd,
-        args: ["repo", "list", input.owner, "--limit", "100", "--json", "nameWithOwner,url,sshUrl"],
+        args: [
+          "repo",
+          "list",
+          input.owner,
+          "--limit",
+          String(REPOSITORY_SUGGESTION_LIMIT + 1),
+          "--json",
+          "nameWithOwner,url,sshUrl",
+        ],
       }).pipe(
         Effect.map((result) => result.stdout.trim()),
         Effect.flatMap((raw) =>
@@ -482,7 +497,12 @@ export const make = Effect.gen(function* () {
             ),
           ),
         ),
-        Effect.map((repositories) => repositories.map(normalizeRepositoryCloneUrls)),
+        Effect.map((repositories) => ({
+          repositories: repositories
+            .slice(0, REPOSITORY_SUGGESTION_LIMIT)
+            .map(normalizeRepositoryCloneUrls),
+          isTruncated: repositories.length > REPOSITORY_SUGGESTION_LIMIT,
+        })),
       ),
     createRepository: (input) =>
       execute({

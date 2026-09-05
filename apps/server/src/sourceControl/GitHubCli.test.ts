@@ -316,20 +316,48 @@ describe("GitHubCli.layer", () => {
       const gh = yield* GitHubCli.GitHubCli;
       const result = yield* gh.listRepositories({ cwd: "/repo", owner: "octocat" });
 
-      assert.deepStrictEqual(result, [
-        {
-          nameWithOwner: "octocat/hello-world",
-          url: "https://github.com/octocat/hello-world",
-          sshUrl: "git@github.com:octocat/hello-world.git",
-        },
-      ]);
+      assert.deepStrictEqual(result, {
+        repositories: [
+          {
+            nameWithOwner: "octocat/hello-world",
+            url: "https://github.com/octocat/hello-world",
+            sshUrl: "git@github.com:octocat/hello-world.git",
+          },
+        ],
+        isTruncated: false,
+      });
       expect(mockRun).toHaveBeenCalledWith({
         operation: "GitHubCli.execute",
         command: "gh",
-        args: ["repo", "list", "octocat", "--limit", "100", "--json", "nameWithOwner,url,sshUrl"],
+        args: ["repo", "list", "octocat", "--limit", "101", "--json", "nameWithOwner,url,sshUrl"],
         cwd: "/repo",
         timeoutMs: 30_000,
       });
+    }).pipe(Effect.provide(layer)),
+  );
+
+  it.effect("reports when repository suggestions are truncated", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify(
+              Array.from({ length: 101 }, (_, index) => ({
+                nameWithOwner: `octocat/repository-${index}`,
+                url: `https://github.com/octocat/repository-${index}`,
+                sshUrl: `git@github.com:octocat/repository-${index}.git`,
+              })),
+            ),
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.listRepositories({ cwd: "/repo", owner: "octocat" });
+
+      expect(result.repositories).toHaveLength(100);
+      expect(result.isTruncated).toBe(true);
     }).pipe(Effect.provide(layer)),
   );
 
