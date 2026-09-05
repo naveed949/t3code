@@ -151,6 +151,19 @@ export class GitHubRepositoryDecodeError extends Schema.TaggedErrorClass<GitHubR
   }
 }
 
+export class GitHubRepositoryListDecodeError extends Schema.TaggedErrorClass<GitHubRepositoryListDecodeError>()(
+  "GitHubRepositoryListDecodeError",
+  gitHubCliDecodeFields,
+) {
+  get detail(): string {
+    return "GitHub CLI returned invalid repository list JSON.";
+  }
+
+  override get message(): string {
+    return `GitHub CLI failed in listRepositories: ${this.detail}`;
+  }
+}
+
 export const GitHubCliError = Schema.Union([
   GitHubCliUnavailableError,
   GitHubCliAuthenticationError,
@@ -161,6 +174,7 @@ export const GitHubCliError = Schema.Union([
   GitHubChangeRequestListDecodeError,
   GitHubPullRequestDecodeError,
   GitHubRepositoryDecodeError,
+  GitHubRepositoryListDecodeError,
 ]);
 export type GitHubCliError = typeof GitHubCliError.Type;
 
@@ -254,6 +268,11 @@ export class GitHubCli extends Context.Service<
       readonly repository: string;
     }) => Effect.Effect<GitHubRepositoryCloneUrls, GitHubCliError>;
 
+    readonly listRepositories: (input: {
+      readonly cwd: string;
+      readonly owner: string;
+    }) => Effect.Effect<ReadonlyArray<GitHubRepositoryCloneUrls>, GitHubCliError>;
+
     readonly createRepository: (input: {
       readonly cwd: string;
       readonly repository: string;
@@ -285,8 +304,12 @@ const RawGitHubRepositoryCloneUrlsSchema = Schema.Struct({
   url: TrimmedNonEmptyString,
   sshUrl: TrimmedNonEmptyString,
 });
+const RawGitHubRepositoryListSchema = Schema.Array(RawGitHubRepositoryCloneUrlsSchema);
 const decodeRawGitHubRepositoryCloneUrls = Schema.decodeEffect(
   Schema.fromJsonString(RawGitHubRepositoryCloneUrlsSchema),
+);
+const decodeRawGitHubRepositoryList = Schema.decodeEffect(
+  Schema.fromJsonString(RawGitHubRepositoryListSchema),
 );
 
 function normalizeRepositoryCloneUrls(
@@ -440,6 +463,26 @@ export const make = Effect.gen(function* () {
           ),
         ),
         Effect.map(normalizeRepositoryCloneUrls),
+      ),
+    listRepositories: (input) =>
+      execute({
+        cwd: input.cwd,
+        args: ["repo", "list", input.owner, "--limit", "100", "--json", "nameWithOwner,url,sshUrl"],
+      }).pipe(
+        Effect.map((result) => result.stdout.trim()),
+        Effect.flatMap((raw) =>
+          decodeRawGitHubRepositoryList(raw).pipe(
+            Effect.mapError(
+              (cause) =>
+                new GitHubRepositoryListDecodeError({
+                  command: "gh",
+                  cwd: input.cwd,
+                  cause,
+                }),
+            ),
+          ),
+        ),
+        Effect.map((repositories) => repositories.map(normalizeRepositoryCloneUrls)),
       ),
     createRepository: (input) =>
       execute({

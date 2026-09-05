@@ -118,6 +118,29 @@ it.effect("looks up repositories through the requested provider without search",
   }).pipe(Effect.provide(makeLayer({ provider })));
 });
 
+it.effect("lists repositories through providers that support owner discovery", () => {
+  const calls: Array<{ cwd: string; owner: string }> = [];
+  const provider = makeProvider({
+    listRepositories: (input) =>
+      Effect.sync(() => {
+        calls.push(input);
+        return [CLONE_URLS];
+      }),
+  });
+
+  return Effect.gen(function* () {
+    const service = yield* SourceControlRepositoryService.SourceControlRepositoryService;
+    const result = yield* service.listRepositories({
+      provider: "github",
+      owner: " octocat ",
+      cwd: "/workspace",
+    });
+
+    assert.deepStrictEqual(result, [{ provider: "github", ...CLONE_URLS }]);
+    assert.deepStrictEqual(calls, [{ cwd: "/workspace", owner: "octocat" }]);
+  }).pipe(Effect.provide(makeLayer({ provider })));
+});
+
 it.effect("preserves provider failures without deriving the repository message from them", () => {
   const providerCause = new SourceControlProviderError({
     provider: "github",

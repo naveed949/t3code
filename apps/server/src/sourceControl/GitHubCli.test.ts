@@ -296,6 +296,43 @@ describe("GitHubCli.layer", () => {
     }).pipe(Effect.provide(layer)),
   );
 
+  it.effect("lists repositories owned by a GitHub account", () =>
+    Effect.gen(function* () {
+      mockRun.mockReturnValueOnce(
+        Effect.succeed(
+          processOutput(
+            // @effect-diagnostics-next-line preferSchemaOverJson:off
+            JSON.stringify([
+              {
+                nameWithOwner: "octocat/hello-world",
+                url: "https://github.com/octocat/hello-world",
+                sshUrl: "git@github.com:octocat/hello-world.git",
+              },
+            ]),
+          ),
+        ),
+      );
+
+      const gh = yield* GitHubCli.GitHubCli;
+      const result = yield* gh.listRepositories({ cwd: "/repo", owner: "octocat" });
+
+      assert.deepStrictEqual(result, [
+        {
+          nameWithOwner: "octocat/hello-world",
+          url: "https://github.com/octocat/hello-world",
+          sshUrl: "git@github.com:octocat/hello-world.git",
+        },
+      ]);
+      expect(mockRun).toHaveBeenCalledWith({
+        operation: "GitHubCli.execute",
+        command: "gh",
+        args: ["repo", "list", "octocat", "--limit", "100", "--json", "nameWithOwner,url,sshUrl"],
+        cwd: "/repo",
+        timeoutMs: 30_000,
+      });
+    }).pipe(Effect.provide(layer)),
+  );
+
   it.effect("creates repositories and parses clone URLs from create output", () =>
     Effect.gen(function* () {
       mockRun.mockReturnValueOnce(
