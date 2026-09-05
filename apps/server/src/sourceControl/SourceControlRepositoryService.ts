@@ -130,7 +130,11 @@ export const make = Effect.gen(function* () {
     });
     const provider = yield* providers.get(providerKind);
     if (!provider.listRepositories) {
-      return [];
+      return yield* new SourceControlRepositoryError({
+        operation: "listRepositories",
+        provider: providerKind,
+        detail: "This source control provider cannot list repositories.",
+      });
     }
     const repositories = yield* provider.listRepositories({
       cwd: input.cwd ?? config.cwd,
