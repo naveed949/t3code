@@ -20,6 +20,7 @@ import {
   getDefaultCloneUrl,
   getNewProjectPublishTarget,
   getNewProjectPublishTargets,
+  githubIncompleteOwnerRepositoryMessage,
   normalizePastedCloneUrl,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
@@ -27,6 +28,32 @@ import {
 import type { EnvironmentProject } from "../state/models.ts";
 
 describe("add project shared logic", () => {
+  it("asks for a repository name when GitHub input is only an owner path", () => {
+    const github = SourceControlProviderKind.make("github");
+    expect(githubIncompleteOwnerRepositoryMessage(github, "pingdotgg/")).toBe(
+      "Enter the full owner/repository name.",
+    );
+    expect(githubIncompleteOwnerRepositoryMessage(github, "  pingdotgg//  ")).toBe(
+      "Enter the full owner/repository name.",
+    );
+
+    for (const input of [
+      "pingdotgg/t3code",
+      "pingdotgg",
+      "https://github.com/pingdotgg/t3code.git",
+      "git@github.com:pingdotgg/t3code.git",
+    ]) {
+      expect(githubIncompleteOwnerRepositoryMessage(github, input)).toBeNull();
+    }
+    expect(
+      githubIncompleteOwnerRepositoryMessage(SourceControlProviderKind.make("gitlab"), "group/"),
+    ).toBeNull();
+    expect(githubIncompleteOwnerRepositoryMessage("url", "owner/")).toBeNull();
+    expect(
+      githubIncompleteOwnerRepositoryMessage(SourceControlProviderKind.make("forgejo"), "owner/"),
+    ).toBeNull();
+  });
+
   it("only allows project creation in connected environments", () => {
     expect(canCreateProjectInEnvironment("connected")).toBe(true);
     expect(canCreateProjectInEnvironment("available")).toBe(false);
